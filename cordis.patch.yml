@@ -1,0 +1,17 @@
+# dsh-recursive-mode bundle patch — client-discovery shell (R4, decision 02-to-be-plan.addendum-r4-r2-mount-resolution.md).
+#
+# A single ENABLED bare-name row exists so the host's ClientModuleRegistry can
+# discover this package's client half (dsh.client.inject -> /plugins/<id>/client.js).
+# Client discovery requires an ENABLED bare-name entry (entry.fiber !== undefined &&
+# !entry.disabled); preset-mounted subtrees are absent from ctx.loader.entries().
+#
+# The row's apply() is a NO-OP under config.shellOnly=true (see src/index.ts):
+# it contributes the client bundle and registers NOTHING on the server root —
+# no tools, no /recursive command, no recursive:policy, no projection. The full
+# server surface is mounted ONLY by the `recursive` agent preset's isolated
+# recursive-realm (preset/recursive/agent.cordis.yml).
+- insert:
+    - id: recursive
+      name: '@try-works/dsh-recursive-mode'
+      config:
+        shellOnly: true

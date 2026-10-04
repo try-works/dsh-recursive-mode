@@ -1,0 +1,642 @@
+/**
+ * Plugin-driven delegation + report/reference validation + durable action
+ * records (Phase B R4/R6/R7, PROPOSAL 10.5/10.9). The ENFORCED path (distinct
+ * from the agent-driven subagent tool): the plugin calls ctx.subagents.start()
+ * with the full SubagentStartRequest (outputSchema/toolFilter/maxDepth) and
+ * validates the child's references before writing an action record.
+ *
+ * Workspace-scoped (run 03 R1) + fail-loud + optionality-preserving.
+ */
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join, resolve, sep } from 'node:path'
+import { contentSha256 } from './review.ts'
+
+/**
+ * Opaque handle to the live direct-parent Agent. The live continuable service
+ * authorizes by EXACT live object identity — `ctx.agents.get(parent.id) ===
+ * parent` (authorizeLineage), `ancestry.has(parent)` (interrupt/drain), and a
+ * `WeakSet` of live ancestry — so this must be the real live `Agent`, never a
+ * structural `{ id }` copy. The seam only ever reads `id`/`session.header.cwd`
+ * for attribution, and never serializes or inspects the live object.
+ */
+export interface SubagentParentHandle {
+  readonly id?: string
+  readonly session?: { readonly header?: { readonly cwd?: string } }
+}
+
+/** Durable identity of one continuable child session (string-branded in the host). */
+export type ContinuableChildId = string
+
+/** Durable identity of one accepted inbox message (string-branded in the host). */
+export type ContinuableMessageId = string
+
+/**
+ * Attribution for a model coordinator's follow-up to one of its children (the
+ * live `CoordinatorMessageSource` subset — see subagent/src/continuation.ts).
+ */
+export interface CoordinatorSourceLike {
+  readonly kind: 'coordinator'
+  readonly form: 'relay'
+  readonly senderSessionId: string
+}
+
+/** Uniform outcome for the interrupt/drain kill-switch helpers. */
+export interface ContinuableOpResult {
+  ok: boolean
+  reason?: string
+}
+
+/** Minimal host-realm contract for ctx.subagents (the seam we call). */
+export interface SubagentsRuntimeLike {
+  start(name: string, request: SubagentStartRequestLike): Promise<SubagentResultLike>
+  getProvider?(name: string): unknown
+  list?(): unknown
+  /** T4: continuable child lifecycle (startContinuable / followup / interrupt / drain). */
+  startContinuable?(spec: ContinuableStartSpecLike): Promise<ContinuableStartLike>
+  /** The parent MUST be the exact live Agent (object-identity authority), never a `{ id }` copy. */
+  followup?(parent: SubagentParentHandle, childId: ContinuableChildId, content: readonly { type: 'text'; text: string }[], options: SubagentFollowupOptionsLike): Promise<ContinuableMessageId>
+  interrupt?(targetSessionId: ContinuableChildId, authority: SubagentInterruptAuthorityLike): void
+  drainContinuableChildren?(parent: SubagentParentHandle, childIds: readonly ContinuableChildId[]): Promise<void>
+  drainContinuableDescendants?(parents: readonly SubagentParentHandle[]): Promise<void>
+}
+
+export interface SubagentStartRequestLike {
+  prompt: unknown[] // ContentBlock[]
+  label?: string
+  outputSchema?: Record<string, unknown>
+  toolFilter?: unknown
+  maxDepth?: number
+  persona?: string
+  parent?: unknown
+  signal?: unknown
+}
+
+export interface SubagentResultLike {
+  output?: string
+  structured?: unknown
+  stopReason?: string
+  success?: boolean
+}
+
+export interface DelegationError extends Error {
+  code?: string
+}
+
+export function delegationError(message: string, code: string): DelegationError {
+  const err = new Error(message) as DelegationError
+  err.code = code
+  return err
+}
+
+/** Object-rooted output schema for a delegated review. */
+export function reviewOutputSchema(): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties: {
+      verdict: { type: 'string', enum: ['APPROVE', 'REJECT', 'REVISE'] },
+      findings: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            severity: { type: 'string', enum: ['INFO', 'LOW', 'MEDIUM', 'HIGH'] },
+            title: { type: 'string' },
+            detail: { type: 'string' },
+          },
+          required: ['severity', 'title', 'detail'],
+          additionalProperties: false,
+        },
+      },
+      references: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            path: { type: 'string' },
+            lineRange: { type: 'string' },
+          },
+          required: ['path'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['verdict', 'findings', 'references'],
+    additionalProperties: false,
+  }
+}
+
+/** Default toolFilter for a delegated reviewer (run-relevant, workspace-scoped). */
+export function defaultReviewToolFilter(): unknown {
+  return { allow: ['fs_read', 'grep', 'glob'] }
+}
+
+/**
+ * Call ctx.subagents.start() with the full request. Fail loud on capability
+ * mismatch, missing provider, or unsupported schema (never silent).
+ */
+export async function delegate(input: {
+  subagents: SubagentsRuntimeLike
+  provider: string
+  request: SubagentStartRequestLike
+}): Promise<SubagentResultLike> {
+  const { subagents, provider, request } = input
+  if (!subagents || typeof subagents.start !== 'function') {
+    throw delegationError('ctx.subagents.start is not available (no subagent seam)', 'NO_PROVIDER')
+  }
+  if (!provider) {
+    throw delegationError('No provider named for delegation', 'NO_PROVIDER')
+  }
+  try {
+    return await subagents.start(provider, request)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const code = (err as { code?: string })?.code
+    if (code === 'UNSUPPORTED_CAPABILITY' || message.includes('UNSUPPORTED_CAPABILITY') || message.includes('does not support')) {
+      throw delegationError(message, 'UNSUPPORTED_CAPABILITY')
+    }
+    throw delegationError(message, 'DELEGATION_FAILED')
+  }
+}
+
+/**
+ * T4: continuable-child delegation — ONE durable child receives the initial
+ * prompt (startContinuable), each REVISE is delivered as a followup to the SAME
+ * child (FIFO, working set retained), and the parent observes each round's
+ * settlement through the injected `awaitRoundResult` seam (in live usage the
+ * child's settlement lands in the parent's inbox — `reportFrom` is the
+ * CHILD-side API, so the parent-side loop collects via settlement, not by
+ * calling it). A hung reviewer is cancelled with `interruptContinuable`
+ * (keepInbox: the child's pending inbox survives). Falls back to one-shot
+ * `delegate` when the seam has no continuable methods.
+ */
+
+/** What the caller asks for when starting a continuable background child (structural subset). */
+export interface ContinuableStartSpecLike {
+  /** The `ctx.subagents` provider whose continuable-creation capability establishes the child. */
+  readonly provider: string
+  /** The initial delegation's short `description`, persisted as the child's creation label. */
+  readonly label: string
+  /** Optional caller-reserved child identity. */
+  childId?: ContinuableChildId
+  /** The delegation request (prompt + parent + toolFilter + maxDepth; no label/signal/outputSchema). */
+  readonly request: Omit<SubagentStartRequestLike, 'label' | 'signal' | 'outputSchema'>
+  /** Caller cancellation, owning the operation only until inbox acceptance. */
+  readonly signal?: AbortSignalLike
+}
+
+/** Minimal cancellation shape (a live AbortSignal satisfies it). */
+export interface AbortSignalLike {
+  readonly throwIfAborted: () => void
+}
+
+/** Identities returned once a continuable child accepted its initial prompt. */
+export interface ContinuableStartLike {
+  /** The durable child session id, stable across activations. */
+  readonly childId: ContinuableChildId
+  /** The accepted initial prompt's inbox message id. */
+  readonly messageId: ContinuableMessageId
+}
+
+/** Options for following up with one continuable child (structural subset). */
+export interface SubagentFollowupOptionsLike {
+  /** Durable attribution retained on the delivered message. */
+  readonly source: CoordinatorSourceLike
+  /** Caller cancellation, owning the operation only until inbox acceptance. */
+  readonly signal?: AbortSignalLike
+}
+
+/** Authority under which one interrupt request is admitted. */
+export type SubagentInterruptAuthorityLike =
+  | { readonly kind: 'user'; readonly parentSessionId: string }
+  | { readonly kind: 'ancestor'; readonly agent: SubagentParentHandle }
+
+/** One round of a continuable child: the delivered text plus the observed outcome. */
+export interface ContinuableRoundLike {
+  /** The message text delivered as this round's user prompt. */
+  text: string
+  /** The child's observed outcome for this round. */
+  result?: SubagentResultLike
+  /** True when this round's verdict was REVISE (a repair followup followed). */
+  revise?: boolean
+  /** The repair instruction delivered in the followup (only when revise). */
+  repair?: string
+}
+
+/** The full T4 delegation outcome. */
+export interface ContinuableDelegationLike {
+  ok: boolean
+  reason?: string
+  /** The durable child session id (stable across rounds). */
+  childId?: ContinuableChildId
+  /** Inbox message ids: [initial acceptance, ...followups]. */
+  messageIds?: ContinuableMessageId[]
+  rounds: ContinuableRoundLike[]
+  /** Final outcome accepted (last verdict APPROVE + result accepted). */
+  accepted: boolean
+  /** True when the fallback one-shot `delegate()` was used (no continuable seam). */
+  fellBackToOneShot?: boolean
+}
+
+/** Verdict vocabulary shared by T3/T4 (matches the delegated review schema). */
+export type DelegationVerdict = 'APPROVE' | 'REVISE' | 'REJECT'
+
+/** Read the verdict from a review-schema structured result (pure). */
+export function readVerdictFromStructured(result: SubagentResultLike): DelegationVerdict {
+  // SAFETY: reviewOutputSchema() defines verdict as a string enum; the cast reads
+  // one leaf field only, never mutates, and falls back on a non-matching value.
+  const verdict = (result.structured as { verdict?: unknown } | undefined)?.verdict
+  if (verdict === 'APPROVE' || verdict === 'REVISE' || verdict === 'REJECT') return verdict
+  // No structured verdict: a completed run with text output is a provisional APPROVE
+  // candidate, but delegation acceptance stays strict (caller evaluates).
+  return 'APPROVE'
+}
+
+/** Read the repair instruction from a review-schema structured result (pure). */
+export function readRepairFromStructured(result: SubagentResultLike): string {
+  // SAFETY: reviewOutputSchema() defines findings as an array of {severity,title,
+  // detail}; the cast reads leaf fields only (no live data, no mutation). The
+  // repair instruction is ALWAYS synthesized from the findings — a child cannot
+  // inject arbitrary instruction text (prompt-injection hygiene).
+  const findings = (result.structured as { findings?: Array<{ title?: string }> } | undefined)?.findings
+  const titles = Array.isArray(findings) ? findings.map(f => f.title ?? '').filter(Boolean) : []
+  if (titles.length > 0) return 'Address the findings: ' + titles.join('; ')
+  return 'REVISE: address the review findings and re-submit.'
+}
+
+/**
+ * Run a multi-round delegated task on ONE durable continuable child:
+ * 1. `startContinuable` (initial prompt) — `start()` is never called.
+ * 2. `awaitRoundResult` observes the child's settlement for that round.
+ * 3. On REVISE: `followup` delivers the repair instruction to the SAME child.
+ * 4. On APPROVE/REJECT: finish (accepted only when the verdict is APPROVE and
+ *    the result evaluates as accepted).
+ *
+ * `awaitRoundResult(childId, messageId)` is the ONLY parent-side observation
+ * seam: in live usage it waits for the child's settlement notice (the child's
+ * `reportFrom` lands in the parent's inbox); in tests it is a fake queue.
+ */
+export async function delegateContinuable(input: {
+  subagents: SubagentsRuntimeLike
+  provider: string
+  label: string
+  prompt: string
+  parent?: SubagentParentHandle
+  toolFilter?: unknown
+  maxDepth?: number
+  childId?: ContinuableChildId
+  maxRounds?: number
+  readVerdict?: (result: SubagentResultLike) => DelegationVerdict
+  readRepair?: (result: SubagentResultLike) => string | undefined
+  awaitRoundResult?: (childId: ContinuableChildId, messageId: ContinuableMessageId) => Promise<SubagentResultLike | null>
+}): Promise<ContinuableDelegationLike> {
+  const { subagents, provider, label, prompt, parent, toolFilter, maxDepth } = input
+  const maxRounds = input.maxRounds ?? 3
+  const readVerdict = input.readVerdict ?? readVerdictFromStructured
+  const readRepair = input.readRepair ?? readRepairFromStructured
+
+  const startContinuable = subagents?.startContinuable
+  const followup = subagents?.followup
+  // A continuable loop MUST observe the child's real settlement AND hold the
+  // exact live parent Agent (the live service authorizes followup by object
+  // identity). When either is missing, fall back to one-shot (which returns the
+  // actual result) rather than fabricating authority and silently APPROVE-ing.
+  const hasContinuableSeam = startContinuable !== undefined && followup !== undefined && input.awaitRoundResult !== undefined
+  if (!hasContinuableSeam || subagents === undefined || parent === undefined) {
+    // Fall back to one-shot delegation (self-audit-safe): never silently drop.
+    try {
+      const oneShot = await delegate({
+        subagents,
+        provider,
+        request: {
+          prompt: [{ type: 'text', text: prompt }],
+          label,
+          toolFilter,
+          maxDepth,
+          parent,
+        },
+      })
+      const verdict = readVerdict(oneShot)
+      return {
+        ok: true,
+        rounds: [{ text: prompt, result: oneShot }],
+        accepted: verdict === 'APPROVE' && evaluateDelegationResult(oneShot).accepted,
+        fellBackToOneShot: true,
+      }
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : String(err), rounds: [], accepted: false, fellBackToOneShot: true }
+    }
+  }
+
+  const messageIds: ContinuableMessageId[] = []
+  const rounds: ContinuableRoundLike[] = []
+  let childId: ContinuableChildId | undefined
+
+  const request: ContinuableStartSpecLike['request'] = {
+    prompt: [{ type: 'text', text: prompt }],
+    parent,
+  }
+  if (toolFilter !== undefined) request.toolFilter = toolFilter
+  if (maxDepth !== undefined) request.maxDepth = maxDepth
+
+  const spec: ContinuableStartSpecLike = {
+    provider,
+    label,
+    request,
+  }
+  if (input.childId !== undefined) spec.childId = input.childId
+  try {
+    const started = await startContinuable(spec)
+    childId = started.childId
+    messageIds.push(started.messageId)
+    rounds.push({ text: prompt })
+
+    for (let round = 0; round < maxRounds; round += 1) {
+      const current = rounds[round]
+      const observed = await input.awaitRoundResult!(childId, messageIds[messageIds.length - 1])
+      if (observed === null) {
+        return { ok: false, reason: 'continuable child produced no settlement for round ' + (round + 1), childId, messageIds, rounds, accepted: false }
+      }
+      current.result = observed
+      const verdict = readVerdict(observed)
+      if (verdict !== 'REVISE') {
+        const accepted = verdict === 'APPROVE' && evaluateDelegationResult(observed).accepted
+        return {
+          ok: accepted,
+          reason: accepted ? 'delegation completed' : 'delegation stopped with verdict ' + verdict,
+          childId,
+          messageIds,
+          rounds,
+          accepted,
+        }
+      }
+      // REVISE: send the repair instruction to the SAME child (FIFO, context retained).
+      const repair = readRepair(observed)
+      if (!repair) {
+        return { ok: false, reason: 'REVISE verdict without a repair instruction', childId, messageIds, rounds, accepted: false }
+      }
+      const followupId = await followup(
+        parent,
+        childId,
+        [{ type: 'text', text: repair }],
+        { source: { kind: 'coordinator', form: 'relay', senderSessionId: parent.id ?? '' } },
+      )
+      messageIds.push(followupId)
+      current.revise = true
+      current.repair = repair
+      rounds.push({ text: repair })
+    }
+    return { ok: false, reason: 'max rounds reached without an APPROVE', childId, messageIds, rounds, accepted: false }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    // Failure preserves the child (a later followup may still resume it); the
+    // kill switch is explicit (interruptContinuable), never implicit.
+    return { ok: false, reason: message, childId, messageIds, rounds, accepted: false }
+  }
+}
+
+/**
+ * T4 kill switch: interrupt one live continuable child's current turn. Admission
+ * is synchronous, the effect asynchronous, and the child's pending inbox is
+ * preserved (keepInbox semantics) — a followup later resumes the parked queue.
+ */
+export function interruptContinuable(
+  subagents: SubagentsRuntimeLike,
+  childId: ContinuableChildId,
+  parentSessionId: string,
+): ContinuableOpResult {
+  const interrupt = subagents?.interrupt
+  if (interrupt === undefined) {
+    return { ok: false, reason: 'no continuable interrupt seam' }
+  }
+  try {
+    interrupt(childId, { kind: 'user', parentSessionId })
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * T4 closeout: release one continuable child (host drains its Activation and
+ * disposes its handle). No-op when the seam lacks the method (one-shot hosts).
+ */
+export async function drainContinuableChildren(
+  subagents: SubagentsRuntimeLike,
+  parent: SubagentParentHandle,
+  childIds: readonly ContinuableChildId[],
+): Promise<ContinuableOpResult> {
+  if (subagents?.drainContinuableChildren === undefined || childIds.length === 0) return { ok: true }
+  try {
+    await subagents.drainContinuableChildren(parent, childIds)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * T4 closeout (host teardown path): release every continuable descendant below
+ * the given live parents (mirrors the live `drainContinuableDescendants`).
+ * No-op when the seam lacks the method; the host owns this at session teardown.
+ */
+export async function drainContinuableDescendants(
+  subagents: SubagentsRuntimeLike | null,
+  parents: readonly SubagentParentHandle[],
+): Promise<ContinuableOpResult> {
+  const drain = subagents?.drainContinuableDescendants
+  if (drain === undefined || parents.length === 0) return { ok: true }
+  try {
+    await drain(parents)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+export interface Reference {
+  path: string
+  lineRange?: string
+}
+export interface ReferenceCheck {
+  ok: boolean
+  failures: string[]
+  checked: { path: string; ok: boolean; reason?: string }[]
+}
+
+function norm(repoRelative: string): string {
+  return repoRelative.replace(/\\/g, '/').replace(/^\/+/, '')
+}
+
+function resolveUnderRoot(root: string, repoRelative: string): string {
+  const normalized = norm(repoRelative)
+  const rootAbs = resolve(root)
+  const abs = resolve(rootAbs, normalized)
+  const rootPrefix = rootAbs.endsWith(sep) ? rootAbs : rootAbs + sep
+  if (abs !== rootAbs && !abs.startsWith(rootPrefix)) {
+    throw new Error('Path escapes the workspace root: ' + repoRelative)
+  }
+  return abs
+}
+
+/**
+ * Validate every claimed reference: the path exists under root, and a line
+ * range (e.g. '10-20' or '10') is within the file's line count.
+ */
+export function validateReferences(root: string, references: Reference[]): ReferenceCheck {
+  const checked: ReferenceCheck['checked'] = []
+  const failures: string[] = []
+  for (const ref of references) {
+    const rel = norm(ref.path)
+    if (!rel) {
+      checked.push({ path: ref.path, ok: false, reason: 'empty path' })
+      failures.push('empty reference path')
+      continue
+    }
+    let abs: string
+    try {
+      abs = resolveUnderRoot(root, rel)
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      checked.push({ path: ref.path, ok: false, reason })
+      failures.push(rel + ': ' + reason)
+      continue
+    }
+    if (!existsSync(abs)) {
+      checked.push({ path: ref.path, ok: false, reason: 'path does not exist' })
+      failures.push(rel + ': path does not exist')
+      continue
+    }
+    if (ref.lineRange) {
+      const total = readFileSync(abs, 'utf8').replace(/\r\n/g, '\n').split('\n').length
+      const range = ref.lineRange.trim()
+      const single = /^\d+$/.test(range)
+      const pair = /^(\d+)-(\d+)$/.exec(range)
+      let start = 0
+      let end = 0
+      if (single) {
+        start = Number(range)
+        end = Number(range)
+      } else if (pair) {
+        start = Number(pair[1])
+        end = Number(pair[2])
+      } else {
+        checked.push({ path: ref.path, ok: false, reason: 'invalid lineRange ' + range })
+        failures.push(rel + ': invalid lineRange ' + range)
+        continue
+      }
+      if (start < 1 || end < start || end > total) {
+        const reason = 'lineRange ' + range + ' out of bounds (file has ' + total + ' lines)'
+        checked.push({ path: ref.path, ok: false, reason })
+        failures.push(rel + ': ' + reason)
+        continue
+      }
+    }
+    checked.push({ path: ref.path, ok: true })
+  }
+  return { ok: failures.length === 0, failures, checked }
+}
+
+export interface ActionRecordInput {
+  root: string
+  runId: string
+  subagentId: string
+  phase: string
+  purpose: string
+  executionMode: string
+  artifactPath?: string
+  upstreamArtifacts?: string[]
+  reviewBundle?: string
+  diffBasis?: string
+  codeRefs?: string[]
+  auditQuestions?: string[]
+  actionsTaken?: string[]
+  createdFiles?: string[]
+  modifiedFiles?: string[]
+  reviewedFiles?: string[]
+  findings?: string[]
+  success: boolean
+  stopReason?: string
+}
+
+function slugify(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'action'
+}
+
+/**
+ * Write a durable action record under subagents/ with the canonical sections
+ * (matches recursive-subagent-action.py). A success:false attempt is written
+ * with a failed status and is NOT accepted.
+ */
+export function writeActionRecord(input: ActionRecordInput): string {
+  const { root, runId } = input
+  const dir = resolveUnderRoot(root, '.recursive/run/' + runId + '/subagents')
+  mkdirSync(dir, { recursive: true })
+  const fileName = Date.now() + '-' + slugify(input.subagentId) + '-action.md'
+  const path = join(dir, fileName)
+
+  const list = (title: string, values: string[]) => {
+    const out: string[] = [title]
+    if (!values?.length) {
+      out.push('- none')
+      return out
+    }
+    for (const v of values) out.push('- ' + String.fromCharCode(96) + norm(v) + String.fromCharCode(96))
+    return out
+  }
+
+  const lines: string[] = [
+    '# Subagent action record: ' + input.subagentId,
+    '',
+    '## Metadata',
+    '- Subagent ID: ' + input.subagentId,
+    '- Phase: ' + input.phase,
+    '- Purpose: ' + input.purpose,
+    '- Execution Mode: ' + input.executionMode,
+    '- Status: ' + (input.success ? 'accepted' : 'failed'),
+    '- Stop Reason: ' + (input.stopReason ?? 'n/a'),
+    ...(input.artifactPath ? ['- Current Artifact: ' + String.fromCharCode(96) + norm(input.artifactPath) + String.fromCharCode(96)] : []),
+    ...(input.reviewBundle ? ['- Review Bundle: ' + String.fromCharCode(96) + norm(input.reviewBundle) + String.fromCharCode(96)] : []),
+    '',
+    '## Inputs Provided',
+    ...list('', input.upstreamArtifacts ?? []).slice(1),
+    '',
+    '## Routing',
+    ...(input.diffBasis ? ['- Diff Basis: ' + input.diffBasis] : ['- Diff Basis: n/a']),
+    '',
+    '## Claimed Actions Taken',
+    ...list('', input.actionsTaken ?? []).slice(1),
+    '',
+    '## Claimed File Impact',
+    ...(input.createdFiles?.length ? ['### Created', ...list('', input.createdFiles).slice(1)] : ['### Created', '- none']),
+    ...(input.modifiedFiles?.length ? ['### Modified', ...list('', input.modifiedFiles).slice(1)] : ['### Modified', '- none']),
+    ...(input.reviewedFiles?.length ? ['### Reviewed', ...list('', input.reviewedFiles).slice(1)] : ['### Reviewed', '- none']),
+    '',
+    '## Claimed Artifact Impact',
+    ...list('### Read', input.upstreamArtifacts ?? []).slice(1),
+    '',
+    '## Claimed Findings',
+    ...(input.findings?.length ? input.findings.map((f) => '- ' + f) : ['- none']),
+    '',
+    '## Verification Handoff',
+    '- Inspect first: ' + (input.artifactPath ? String.fromCharCode(96) + norm(input.artifactPath) + String.fromCharCode(96) : 'n/a'),
+    '- Notes: main agent must verify every claimed reference against actual files, actual recursive artifacts, and the actual diff before acceptance.',
+    '',
+  ]
+
+  writeFileSync(path, lines.join('\n'), 'utf8')
+  return path
+}
+
+/**
+ * Accept/reject a delegation result: a success:false or non-completed
+ * stopReason is a failed attempt (diagnostics preserved, NOT accepted).
+ */
+export function evaluateDelegationResult(result: SubagentResultLike): { accepted: boolean; reason: string } {
+  if (result.success === false) {
+    return { accepted: false, reason: 'delegation reported success:false' }
+  }
+  if (result.stopReason && result.stopReason !== 'completed') {
+    return { accepted: false, reason: 'delegation stopped with reason ' + result.stopReason }
+  }
+  return { accepted: true, reason: 'delegation completed' }
+}

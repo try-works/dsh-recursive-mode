@@ -1,0 +1,52 @@
+Recursive Run: fixture-run
+==========================
+
+Workflow Profile: memory-phase8
+
+Phase Status:
+  Phase 0 (Requirements)     [LOCKED]
+  Phase 0 (Worktree)         [LOCKED]
+  Phase 1 (AS-IS)            [DRAFT]
+    blockers: Unchecked TODO items: 1; Coverage gate is MISSING; ...
+  Phase 1.5 (Root Cause)     [SKIPPED] (not needed)
+  Phase 2 (TO-BE Plan)       [DRAFT]
+    blockers: Unchecked TODO items: 1; Coverage gate is MISSING; ...
+  Phase 3 (Implementation)   [PENDING]
+    blockers: File missing
+  Phase 3.5 (Code Review)    [SKIPPED] (not needed)
+  Phase 4 (Test Summary)     [PENDING]
+    blockers: File missing
+  Phase 5 (Manual QA)        [LOCKED*] (invalid)
+  Phase 6 (Decisions)        [PENDING]
+    blockers: File missing
+  Phase 7 (State)            [PENDING]
+    blockers: File missing
+  Phase 8 (Memory)           [PENDING]
+    blockers: File missing
+
+Lock Chain:
+  [OK]  .recursive/run/fixture-run/00-requirements.md
+        LockHash: 044f9ba58fa4a66b3739441f95871a0407a67b3cbd8e98c5b7fdc9db291fe6c8
+  [OK]  .recursive/run/fixture-run/00-worktree.md
+        LockHash: 20f4e3bf3d0ada45c24efad4b70afda2dbb4032674a4a657aca005de95aae2ab
+  [DRAFT]   .recursive/run/fixture-run/01-as-is.md
+Next Legal Phase: 01-as-is.md
+
+Current Phase: 1 (AS-IS)
+Status: DRAFT
+Audit Blockers:
+  - Unchecked TODO items: 1
+  - Coverage gate is MISSING
+  - Approval gate is MISSING
+
+Evidence:
+  Path:   .recursive/run/fixture-run/evidence/
+  Exists: No
+  Files:  0
+
+Next Steps:
+  1. Complete .recursive/run/fixture-run/01-as-is.md.
+  2. Pass the required gates and lock the artifact before advancing.
+
+Quick Command:
+  Implement requirement 'fixture-run'

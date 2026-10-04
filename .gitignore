@@ -1,0 +1,25 @@
+# Node.js dependency tree (installed via pnpm)
+node_modules/
+
+# TypeScript build artifacts
+*.tsbuildinfo
+
+# Compiled output (unused while noEmit is active)
+lib/
+
+# Local test caches
+.coverage/
+
+# Recursive-mode disposable scratchpad (R5): never committed, never an Input
+.recursive/run/*/scratch/
+.recursive/run/*/scratch.*
+/.recursive/config/recursive-router-discovered.json
+
+# Reusable-repo hygiene: run residue is NEVER committed.
+# Rule source: references/agents-block.md (§ reusable-repo hygiene).
+# The source checkout committed 256 files under .recursive/run/ against this rule;
+# this repo is where the checker (check-reusable-repo-hygiene) is meant to be wired in.
+.recursive/run/
+
+# T15 decision log (rolling, git-ignored per plan §4 T15 step 4)
+.recursive/config/guard-decisions.log

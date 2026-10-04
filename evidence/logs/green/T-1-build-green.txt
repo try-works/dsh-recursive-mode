@@ -1,0 +1,23 @@
+$ node -e "require('node:fs').rmSync('lib',{recursive:true,force:true})" && tsc -p tsconfig.build.json && tsdown
+ℹ  tsdown v0.22.14 powered by rolldown v1.2.12
+ℹ  config file: D:\DEV\dsh-recursive-mode\tsdown.config.ts 
+ℹ  entry: src/index.ts
+ℹ  target: es2022
+ℹ  tsconfig: tsconfig.json
+
+ WARN  `external` is deprecated. Use `deps.neverBundle` instead.
+
+ℹ  entry: src/client/index.ts
+ℹ  target: es2022
+ℹ  tsconfig: tsconfig.json
+
+ WARN  `external` is deprecated. Use `deps.neverBundle` instead.
+
+ℹ  Build start
+ℹ  [CJS] lib\client.js  68.73 kB │ gzip: 17.42 kB
+ℹ  [CJS] 1 files, total: 68.73 kB
+✔  Build complete in 84ms
+ℹ  [ESM] lib\index.js  316.30 kB │ gzip: 75.93 kB
+ℹ  [ESM] 1 files, total: 316.30 kB
+✔  Build complete in 112ms
+

@@ -1,0 +1,116 @@
+{
+  "name": "@try-works/dsh-recursive-mode",
+  "description": "recursive-mode workflow as a DeepSeek Harness bundle: RecursiveRuntime service + recursive_status tool",
+  "version": "0.3.1",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./src/*": "./src/*",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "src",
+    "preset",
+    "scripts",
+    "references",
+    "skills"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-modules",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session-projection": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:D:/deepseek-harness/vendor/cordis",
+    "@deepseek-ai/cosmokit": "link:D:/deepseek-harness/vendor/cosmokit",
+    "@deepseek-ai/dsh-agent": "link:D:/deepseek-harness/packages/core/agent",
+    "@deepseek-ai/dsh-attachment": "link:D:/deepseek-harness/packages/attachment/attachment",
+    "@deepseek-ai/dsh-brand": "link:D:/deepseek-harness/packages/util/brand",
+    "@deepseek-ai/dsh-llm": "link:D:/deepseek-harness/packages/llm/llm",
+    "@deepseek-ai/dsh-scope": "link:D:/deepseek-harness/packages/core/scope",
+    "@deepseek-ai/dsh-session": "link:D:/deepseek-harness/packages/core/session",
+    "@deepseek-ai/dsh-session-projection": "link:D:/deepseek-harness/packages/session/session-projection",
+    "@deepseek-ai/dsh-system-prompt": "link:D:/deepseek-harness/packages/core/system-prompt",
+    "@deepseek-ai/dsh-timeout": "link:D:/deepseek-harness/packages/util/timeout",
+    "@deepseek-ai/dsh-tools": "link:D:/deepseek-harness/packages/core/tools",
+    "@deepseek-ai/dsh-user-approval": "link:D:/deepseek-harness/packages/interaction/user-approval",
+    "@deepseek-ai/dsh-util-values": "link:D:/deepseek-harness/packages/util/values",
+    "@deepseek-ai/schemastery": "link:D:/deepseek-harness/vendor/schemastery",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/react-test-renderer": "18.3.0",
+    "react": "^18.2.0",
+    "react-test-renderer": "18.3.1",
+    "tsdown": "^0.22.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "zod": "^4.4.3"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && tsdown",
+    "bundle": "tsdown",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepare": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && tsdown"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-session-projection": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-session": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-slots": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-conversation": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-sidebar": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-settings": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-api-remotes": {
+      "optional": true
+    }
+  }
+}

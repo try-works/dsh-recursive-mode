@@ -1,0 +1,3 @@
+# pnpm typecheck — after T-1 (12 type imports) + T31a (rc.2 message-source kind)\nexit: 0
+$ tsc --noEmit
+

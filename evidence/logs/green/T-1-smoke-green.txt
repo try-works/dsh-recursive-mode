@@ -1,0 +1,55 @@
+npm warn Unknown env config "manage-package-manager-versions". This will stop working in the next major version of npm.
+dsh-recursive-mode smoke (R7)
+  [PASS] R6 bootstrap creates scaffold — .recursive/,.codex/,.agent/,.github/,.recursive/memory/,.recursive/memory/training/,.recursive/memory/skills/,.recursive/run/,.recursive/config/,.recursive\memory\domains/,.recursive\memory\patterns/,.recursive\memory\incidents/,.recursive\memory\episodes/,.recursive\memory\archive/,.recursive\memory\skills\availability/,.recursive\memory\skills\usage/,.recursive\memory\skills\issues/,.recursive\memory\skills\patterns/,.recursive/memory/domains/.gitkeep,.recursive/memory/patterns/.gitkeep,.recursive/memory/incidents/.gitkeep,.recursive/memory/episodes/.gitkeep,.recursive/memory/archive/.gitkeep,.recursive/memory/training/.gitkeep,.recursive/memory/skills/availability/.gitkeep,.recursive/memory/skills/usage/.gitkeep,.recursive/memory/skills/issues/.gitkeep,.recursive/memory/skills/patterns/.gitkeep,.recursive/run/.gitkeep,.recursive/scripts/,.recursive/RECURSIVE.md,.recursive/AGENTS.md,.recursive/STATE.md,.recursive/DECISIONS.md,.recursive/memory/MEMORY.md,.recursive/memory/skills/SKILLS.md,.recursive/memory/skills/usage/skill-discovery-and-evaluation.md,.recursive/memory/skills/patterns/delegated-verification-and-refresh.md,.recursive/memory/skills/patterns/phase8-skill-memory-promotion.md,.codex/AGENTS.md,.agent/PLANS.md,.cursorrules,CLAUDE.md,.github/copilot-instructions.md
+  [PASS] R6 bootstrap idempotent (no-op) — created=0
+  [PASS] R6 scaffold files exist
+  [PASS] R6 Stage B new bootstraps — runs=10-smoke
+  [PASS] R6 Stage B resume never re-bootstraps — bootstrapped=false
+  [PASS] R6 enumerate runs dir-names only
+  [PASS] R1 resolve A
+  [PASS] R1 resolve B
+  [PASS] R1 scoped list (A has run, B does not)
+  [PASS] R1 B sees no A runs — No runs in this workspace (/.recursive/run missing)
+  [PASS] R1 unregistered cwd -> null (defer)
+  [PASS] R2 closeout scaffolds 06 — 06-decisions-update.md
+  [PASS] R2 closeout header
+  [PASS] R4 parse closeout
+  [PASS] R4 closeout command success
+  [PASS] R4 unknown verb error
+  [PASS] R5 scratch write+read
+  [PASS] R5 scratch path
+  [PASS] R1 bundle built
+  [PASS] R1 bundle hash
+  [PASS] R2 handoff+brief
+  [PASS] R2 prompt pointers
+  [PASS] R3 router -> self-audit
+  [PASS] R4 outputSchema
+  [PASS] R5 child scratch written
+  [PASS] R5 parent scratch intact
+  [PASS] R6 references valid
+  [PASS] R6 action record
+  [PASS] R1 transition gate reads the lock chain — TDD Mode must be declared strict|pragmatic;audited phase must end with Audit: PASS;audited phase requires a Requirement Completion Status section;audited phase requires Delegation Decision Basis / Subagent Capability Probe;phase doc must re-read effective inputs (## Effective Inputs Re-read)
+  [PASS] R4 tool guard allows in-order lock
+  [PASS] R4 tool guard denies out-of-order lock
+  [PASS] T6 advisory guard asks
+  [PASS] T6 ask->deny under strict
+  [PASS] T6 ask->allow+warn under advisory (never silent)
+  [PASS] R7 config default advisory
+  [PASS] R7 unknown config key fails
+  [PASS] R5 policy renders contract
+  [PASS] R8 tamper clean
+  [PASS] R6 goal coupling no-op
+  [PASS] T1 run goal armed
+  [PASS] T1 gate-block blocks the run goal
+  [PASS] R2 snapshot groups by worktreeRoot
+  [PASS] R2/R9 snapshot card facts
+  [PASS] R9 snapshot is workspace-scoped
+  [PASS] R5 columnForRun maps to the furthest present phase
+  [PASS] R5 cardFacts progress + tampered + gateBlocked
+  [PASS] R7 nodeKeyOf includes worktreeRoot
+  [PASS] R6 expandPhaseRows always shows 3.5
+  [PASS] R2 route prefix
+  [PASS] R2 route count (state, events, doc)
+  [PASS] R2 mountOnce-global (second mount no-ops)
+SMOKE PASS
+

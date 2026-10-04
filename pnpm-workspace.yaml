@@ -1,0 +1,18 @@
+packages:
+  - .
+
+linkWorkspacePackages: true
+
+overrides:
+  # Absolute link targets: the relative form ('../../../deepseek-harness/...') only
+  # resolved by luck of Win32 root-clamping from this repo's depth. devDependencies
+  # already use absolute file: paths, so this keeps one convention.
+  '@deepseek-ai/cosmokit': 'link:D:/deepseek-harness/vendor/cosmokit'
+  '@deepseek-ai/schemastery': 'link:D:/deepseek-harness/vendor/schemastery'
+
+peerDependencyRules:
+  allowedVersions:
+    typescript: '>=5 <7'
+
+allowBuilds:
+  esbuild: true

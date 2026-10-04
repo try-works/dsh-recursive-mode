@@ -1,0 +1,12 @@
+# Read-only repo baseline captured before any build work in this workspace.
+  [D:\DEV\recursive-mode] porcelain-count:  73# If either count changes, a file outside this repo was touched.
+  [D:\DEV\recursive-mode] porcelain-count:  73# date: 2026-10-05T07:45:08.4819385+08:00
+  [D:\DEV\recursive-mode] porcelain-count:  73
+  [D:\DEV\recursive-mode] porcelain-count:  73[D:\deepseek-harness]
+  [D:\DEV\recursive-mode] porcelain-count:  73describe: 
+  [D:\DEV\recursive-mode] porcelain-count:  73dsh-v0.2.0-rc.2
+  [D:\DEV\recursive-mode] porcelain-count:  73HEAD: 
+  [D:\DEV\recursive-mode] porcelain-count:  73639ed015397290b3745d163aafe02ffee4aa3f84
+  [D:\DEV\recursive-mode] porcelain-count:  73porcelain-count: 
+  [D:\DEV\recursive-mode] porcelain-count:  731
+  [D:\DEV\recursive-mode] porcelain-count:  73?? .cursor/

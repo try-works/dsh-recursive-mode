@@ -1,0 +1,4 @@
+$ tsc --noEmit
+src/index.ts(261,110): error TS2322: Type '"plugin"' is not assignable to type '"model" | "user" | "tool" | "system-prompt" | "model-selection" | "user-approval" | "ptc-mode" | "tool-registry"'.
+[ELIFECYCLE] Command failed with exit code 2.
+

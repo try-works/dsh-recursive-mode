@@ -411,7 +411,12 @@ describe('T39 — a delegation round shows as a job', () => {
     return { registry, specs, progress }
   }
 
-  async function review(root: string, jobs: JobsRegistryLike | undefined, round: () => Promise<unknown>) {
+  async function review(
+    root: string,
+    jobs: JobsRegistryLike | undefined,
+    round: () => Promise<unknown>,
+    interrupt?: (childId: string, reason: string) => void,
+  ) {
     const ctx = new Context()
     const runtime = new RecursiveRuntime(ctx, { repoRoot: root, ...(jobs === undefined ? {} : { jobs }) })
     const out = await runtime.delegateReview({
@@ -430,8 +435,9 @@ describe('T39 — a delegation round shows as a job', () => {
       parent: {},
       providers: { spawn: { name: 'spawn', capabilities: { outputSchema: true } } },
       awaitRoundResult: round,
+      ...(interrupt === undefined ? {} : { interrupt }),
     } as never)
-    return out as { evaluation?: { accepted?: boolean }; error?: unknown; delegationMode?: string }
+    return out as { evaluation?: { accepted?: boolean; reason?: string }; error?: unknown; delegationMode?: string }
   }
 
   it('starts a job kinded delegation for the round, with a progress line', async () => {
@@ -472,6 +478,61 @@ describe('T39 — a delegation round shows as a job', () => {
     try {
       const out = await review(root, undefined, async () => null)
       expect(out.delegationMode).toBe('continuable')
+      expect(out.evaluation?.accepted).toBe(false)
+      expect(out.error ?? null).toBeNull()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('a job KILL reaches the LIVE CHILD — the pre-emptive kill, which T10 could not have', async () => {
+    // The child is modelled as COOPERATIVE, which is what the interrupt seam assumes: it
+    // finishes when interrupted. That is the difference from the synchronous call sites —
+    // there, a kill could only stop us WAITING; here it stops the WORK.
+    const root = makeRoot()
+    const interrupts: Array<[string, string]> = []
+    let releaseRound: (value: unknown) => void = () => {}
+    const round = () => new Promise<unknown>((resolve) => { releaseRound = resolve })
+    const registry: JobsRegistryLike = {
+      start(spec) {
+        const hooks = spec.run({ id: 'delegation-2', append: () => {}, updateProgress: () => {} })
+        // A kill from the board, exactly as a hung delegation would be stopped.
+        hooks.cancel('the operator stopped it')
+        return 'delegation-2'
+      },
+    }
+    try {
+      const out = await review(root, registry, round, (childId, reason) => {
+        interrupts.push([childId, reason])
+        releaseRound({ success: false, stopReason: 'interrupted' })
+      })
+      // The child was REACHED, with the caller's own reason — pre-emptive, not a stopped wait.
+      expect(interrupts).toEqual([['c1', 'the operator stopped it']])
+      // And nothing was fabricated from it: an interrupted child is not an approval. The
+      // reason names the VERDICT (the interrupted child returned none), not the stop reason —
+      // which is what the delegation checks first, and worth pinning so a later reader does
+      // not `fix` the assertion that used to be here by changing the code.
+      expect(out.evaluation?.accepted).toBe(false)
+      expect(out.evaluation?.reason).toBeTruthy()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('with NO interrupt seam the kill still parks and never throws — the honest no-seam case', async () => {
+    const root = makeRoot()
+    const registry: JobsRegistryLike = {
+      start(spec) {
+        const hooks = spec.run({ id: 'delegation-3', append: () => {}, updateProgress: () => {} })
+        hooks.cancel('stopped with nobody listening')
+        return 'delegation-3'
+      },
+    }
+    try {
+      // The round resolves normally here (nobody was interrupted to release it), which is
+      // exactly the situation the no-seam case produces: the kill cannot reach the child, and
+      // the wrapper says so by parking rather than by inventing a failure.
+      const out = await review(root, registry, async () => null)
       expect(out.evaluation?.accepted).toBe(false)
       expect(out.error ?? null).toBeNull()
     } finally {

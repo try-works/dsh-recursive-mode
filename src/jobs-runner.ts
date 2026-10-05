@@ -201,8 +201,9 @@ async function withDeadline(hooks: JobHooksLike, timeoutMs: number): Promise<Job
   }
 }
 
-/** The abort reason as a string, whatever the caller passed. */
-function abortReason(signal: AbortSignal): string {
+/** The abort reason as a string, whatever the caller passed. Exported for a caller that
+ * turns an abort into its own action (T39 interrupts the child on a delegation kill). */
+export function abortReason(signal: AbortSignal): string {
   const reason = (signal as unknown as { reason?: unknown }).reason
   if (typeof reason === 'string' && reason !== '') return reason
   return 'cancelled'

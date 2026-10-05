@@ -18,7 +18,7 @@ import {
 import type { PendingWorkItem, RecursiveStatusResult } from './types.ts'
 import { findOperation, countOperations, operationId, recordOperation } from './identity.ts'
 import { createHookRegistry, type HookRegistry } from './hooks.ts'
-import { runTracked, type JobsRegistryLike } from './jobs-runner.ts'
+import { runTracked, abortReason, type JobsRegistryLike } from './jobs-runner.ts'
 import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
 import { resolveControlPlaneRoot, type WorkspaceRegistryLike } from './workspace.ts'
@@ -341,6 +341,13 @@ export class RecursiveRuntime extends Service {
      */
     mode?: 'one-shot' | 'continuable'
     awaitRoundResult?: (childId: ContinuableChildId, messageId: ContinuableMessageId) => Promise<SubagentResultLike | null>
+    /**
+     * T39: interrupt the LIVE child when this delegation's job is killed — the one thing T10's
+     * synchronous call sites cannot do, and the reason a delegation's kill can be genuinely
+     * pre-emptive. Optional: without it a kill still parks the round and cannot reach the
+     * child, which is stated rather than implied.
+     */
+    interrupt?: (childId: string, reason: string) => void
     maxRounds?: number
     /** T4: the exact live direct-parent Agent (object-identity authority). */
     parent?: SubagentParentHandle
@@ -517,8 +524,33 @@ export class RecursiveRuntime extends Service {
               label: 'delegation round ' + input.runId + ' ' + input.phase,
               run: async ({ report, signal }) => {
                 report('awaiting the review round')
-                if (signal.aborted) throw new Error('the round was cancelled before it was awaited')
-                return await input.awaitRoundResult!(childId, messageId)
+
+                // T39 (part 2) — THE PRE-EMPTIVE KILL. A job kill aborts the signal, and this
+                // listener turns that abort into an INTERRUPT of the LIVE CHILD, so the kill
+                // stops the WORK rather than merely stopping our wait for it. That is the
+                // difference between this call site and T10's synchronous ones, where no such
+                // thing is possible.
+                //
+                // The seam is OPTIONAL and the no-seam case stays honest: without a provider
+                // the kill still parks the round and never throws — it simply cannot reach the
+                // child, and nothing here pretends otherwise.
+                const onAbort = () => {
+                  try {
+                    input.interrupt?.(input.childId, abortReason(signal))
+                  } catch {
+                    // Best-effort by design: an interrupt that throws must not replace the
+                    // kill's own outcome with an unrelated error.
+                  }
+                }
+                if (signal.aborted) onAbort()
+                else signal.addEventListener('abort', onAbort, { once: true })
+
+                try {
+                  if (signal.aborted) throw new Error('the round was cancelled before it was awaited')
+                  return await input.awaitRoundResult!(childId, messageId)
+                } finally {
+                  signal.removeEventListener('abort', onAbort)
+                }
               },
             })
             if (awaited.status !== 'completed') return null

@@ -579,6 +579,13 @@ export class RecursiveRuntime extends Service {
               },
             })
             if (awaited.status !== 'completed') return null
+            // T39: record the round where the run id is known — same pattern as the lint, and
+            // for the same reason (an event would carry the job, not the run).
+            recordJobRun(input.root, input.runId, {
+              kind: 'delegation',
+              label: 'delegation round ' + input.runId + ' ' + input.phase,
+              result: awaited,
+            })
             return awaited.value ?? null
           },
           parent: input.parent,
@@ -852,6 +859,11 @@ export class RecursiveRuntime extends Service {
       worktree = created.value
       if (!worktree.ok) throw new Error(worktree.error ?? 'worktree create failed')
       scaffoldRoot = worktree.worktreeDir
+      // T39: recorded into the SCAFFOLD root, because a worktree run's layer lives INSIDE the
+      // worktree — recording it against the main checkout would file it where no run exists.
+      // A create that FAILED records nothing here: there is no run layer to record into, and
+      // the failure already reaches the caller as the thrown error above.
+      recordJobRun(scaffoldRoot, runId, { kind: 'worktree', label: 'worktree ' + runId, result: created })
     }
     const runDir = join(scaffoldRoot, '.recursive', 'run', runId)
     mkdirSync(runDir, { recursive: true })

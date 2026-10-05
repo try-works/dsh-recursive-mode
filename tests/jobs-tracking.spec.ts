@@ -472,6 +472,28 @@ describe('T39 — a delegation round shows as a job', () => {
       expect(jobs.specs[0].kind).toBe('delegation')
       expect(jobs.specs[0].label).toContain('run-1')
       expect(jobs.progress).toContain('awaiting the review round')
+      // T39's recording: the board finds the round in the RUN LAYER, keyed by the run it
+      // belongs to rather than by a job id nobody can map back.
+      const records = readJobRuns(root, 'run-1')
+      expect(records.length).toBe(1)
+      expect(records[0].kind).toBe('delegation')
+      expect(records[0].tracked).toBe(true)
+      expect(records[0].jobId).toBe('delegation-1')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('records a PARKED round too — an unobserved round is still a run the board should see', async () => {
+    const root = makeRoot()
+    const jobs = jobRecorder()
+    try {
+      await review(root, jobs.registry, async () => null)
+      const records = readJobRuns(root, 'run-1')
+      expect(records.length).toBe(1)
+      // The JOB completed (the seam returned normally); what parked is the ROUND. Recording
+      // the job's own outcome is what keeps those two facts from being conflated.
+      expect(records[0].status).toBe('completed')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

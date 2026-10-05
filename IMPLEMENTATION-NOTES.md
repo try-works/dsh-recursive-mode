@@ -4,22 +4,36 @@ Verified against the DSH checkout at `D:\deepseek-harness` (dsh `0.1.0-rc.5`) an
 
 ## 0. Local setup — read this before cloning
 
-**Peer deps are `link:`ed into a DSH checkout, and that makes the checkout's location load-bearing.**
+**Peer deps are `link:`ed into a DSH checkout, and that used to make the checkout's location load-bearing. It no longer does — the commands repair it (T34).**
 
 ```powershell
-# 1. The DSH checkout must exist, and MUST BE ON THE SAME DRIVE as this repo.
-#    Every @deepseek-ai/* devDependency is a `link:` into it (see package.json).
-#    pnpm records local link targets RELATIVE in pnpm-lock.yaml
-#    (`version: link:../../deepseek-harness/vendor/cordis`), so the repo only
-#    resolves when that relative path reaches the checkout. Verified: cloning to a
-#    different drive makes every @deepseek-ai/* module unresolvable (TS2307 across
-#    src/**). Tracked as plan item T34.
-#    The verified layout is:
-#        D:\deepseek-harness            (the checkout, pinned dsh-v0.2.0-rc.2)
-#        D:\DEV\dsh-recursive-mode      (this repo)
+# 1. Clone anywhere, on any drive, at any depth. That used to break every
+#    @deepseek-ai/* import: package.json declares the deps as ABSOLUTE `link:`
+#    specs, but pnpm records the target RELATIVE in pnpm-lock.yaml
+#    (`version: link:../../deepseek-harness/vendor/cordis`), so the links only
+#    resolved at the exact depth the lockfile assumed.
+#
+#    Now `pnpm typecheck`, `pnpm test` and `pnpm build` run a repair first (see
+#    scripts/link-dsh.mjs), which rebuilds every link from the absolute specs in
+#    package.json. So the plain workflow works unattended:
+#
+#        git clone <this repo> <anywhere>
+#        pnpm install --ignore-scripts
+#        pnpm test                  # repairs the links, then runs
+#
+#    Verified: a clone at E:\t34-drive2\deep\repo (different drive, deeper path)
+#    reported `[link-dsh] linked 15, unresolved 0` and 61 files / 479 tests green.
+#
+#    If the checkout lives somewhere unexpected, point at it explicitly:
+#        DSH_HARNESS_ROOT=/path/to/deepseek-harness pnpm run link:dsh
+#    With no checkout at all, the repair says so and exits 0: the repo stays
+#    readable and the failure you eventually see is "this module is not linked"
+#    rather than a crash. There is deliberately NO postinstall hook — it cannot
+#    see the checkout during pnpm's install phase and reported the targets as
+#    missing, so the repair lives in the commands that need it instead.
 
 pnpm install --ignore-scripts   # --ignore-scripts skips the `prepare` build
-pnpm typecheck                  # tsc --noEmit
+pnpm typecheck                  # repairs links, then tsc --noEmit
 pnpm test                       # vitest run
 pnpm build                      # declarations + tsdown bundles into lib/
 npx tsx scripts/test-recursive-mode-smoke.ts

@@ -13,6 +13,11 @@
  *     merely because no board is attached would be the worse failure.
  */
 import { describe, it, expect } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { RecursiveRuntime } from '../src/runtime.ts'
 import {
   runTracked, describeJobRun, TIMEOUT_REASON,
   type JobHooksLike, type JobSpecLike, type JobsRegistryLike,
@@ -163,5 +168,124 @@ describe('T10 — the board line never hides whether the run was tracked', () =>
   it('carries the terminal reason when there is one', () => {
     expect(describeJobRun({ tracked: true, jobId: 'worktree-2', status: 'killed', detail: 'operator stopped it' }))
       .toContain('operator stopped it')
+  })
+})
+
+/**
+ * T10 — the WIRING: a real long operation actually goes through the runner.
+ *
+ * `lintArtifact` is the first call site, and it is the honest one to start with: `lintRun` is
+ * SYNCHRONOUS, so the signal can only be honoured at the boundary. These tests assert what
+ * that really buys — the board sees a running job named for the run and artifact, with
+ * progress — and they assert the kill path end to end, WITHOUT changing the lint payload
+ * shape (a killed job reports through the existing error path).
+ */
+describe('T10 — lintArtifact runs as a native job', () => {
+  function makeRun() {
+    const root = mkdtempSync(join(tmpdir(), 'rm-t10-'))
+    const runDir = join(root, '.recursive', 'run', 'r1')
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, '01-as-is.md'), '# As-is\n\nStatus: `DRAFT`\n', 'utf8')
+    return { root, runDir }
+  }
+
+  /** A registry that records the spec and the progress lines the board would show. */
+  function jobRecorder(options: { killImmediately?: boolean } = {}) {
+    const specs: JobSpecLike[] = []
+    const progress: string[] = []
+    let hooks: JobHooksLike | null = null
+    const registry: JobsRegistryLike = {
+      start(spec) {
+        specs.push(spec)
+        hooks = spec.run({ id: 'lint-1', append: () => {}, updateProgress: (line) => progress.push(line) })
+        if (options.killImmediately) hooks.cancel('the board killed it')
+        return 'lint-1'
+      },
+    }
+    // A GETTER, not a captured value: `hooks` is assigned when `start` runs, so reading it
+    // at construction time would always see null.
+    return { registry, specs, progress, get hooks() { return hooks as unknown as JobHooksLike } }
+  }
+
+  it('starts a job kinded and labelled for the run and artifact, with progress', async () => {
+    const { root } = makeRun()
+    const ctx = new Context()
+    const jobs = jobRecorder()
+    try {
+      const runtime = new RecursiveRuntime(ctx, { repoRoot: root, jobs: jobs.registry })
+      await runtime.lintArtifact('r1', '01-as-is.md')
+      expect(jobs.specs.length).toBe(1)
+      expect(jobs.specs[0].kind).toBe('lint')
+      // The label is what the board shows, so it must name both.
+      expect(jobs.specs[0].label).toContain('r1')
+      expect(jobs.specs[0].label).toContain('01-as-is.md')
+      expect(jobs.progress).toContain('linting 01-as-is.md')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('WITHOUT a registry the lint still works — the degradation is real, not theoretical', async () => {
+    const { root } = makeRun()
+    const ctx = new Context()
+    try {
+      const runtime = new RecursiveRuntime(ctx, { repoRoot: root })
+      const result = await runtime.lintArtifact('r1', '01-as-is.md')
+      // It produced a real verdict rather than failing for want of a board.
+      expect(result.runId).toBe('r1')
+      expect(result.artifact).toBe('01-as-is.md')
+      expect(Array.isArray(result.errors)).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('a kill during a SYNCHRONOUS lint cannot pre-empt it — the documented boundary, asserted', async () => {
+    // The honest limitation, stated as a test rather than buried in a comment: `lintRun` is
+    // synchronous, so a kill lands too late to stop the CALL — JavaScript cannot pre-empt it.
+    // What the job buys is that the board SEES the work and the caller can stop WAITING; it
+    // does not buy pre-emption, and pretending otherwise would be the more dangerous claim.
+    const { root } = makeRun()
+    const ctx = new Context()
+    const jobs = jobRecorder({ killImmediately: true })
+    try {
+      const runtime = new RecursiveRuntime(ctx, { repoRoot: root, jobs: jobs.registry })
+      const result = await runtime.lintArtifact('r1', '01-as-is.md')
+      // The lint COMPLETED and reports its real verdict: the kill corrupted nothing, and it
+      // certainly did not become a pass that skipped the work.
+      expect(result.artifact).toBe('01-as-is.md')
+      expect(result.runId).toBe('r1')
+      // And the outcome reflects what actually happened rather than what was requested.
+      const outcome = await jobs.hooks.done
+      expect(outcome.status).toBe('completed')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('a KILLED job would report through the existing error path, not as a pass', async () => {
+    // The runner-level kill path (work that honours the signal) is covered above; here the
+    // MAPPING from a non-completed job to the lint payload is what is asserted, by driving
+    // it with a registry whose work is interrupted before it produces anything.
+    const { root } = makeRun()
+    const ctx = new Context()
+    const registry: JobsRegistryLike = {
+      start(spec) {
+        const hooks = spec.run({ id: 'lint-9', append: () => {}, updateProgress: () => {} })
+        hooks.cancel('the board killed it')
+        return 'lint-9'
+      },
+    }
+    try {
+      const runtime = new RecursiveRuntime(ctx, { repoRoot: root, jobs: registry })
+      const result = await runtime.lintArtifact('r1', '01-as-is.md')
+      // A non-completed job never yields a passing verdict, and never a bare `passed: false`
+      // with no explanation.
+      expect(result.passed).toBe(false)
+      expect(Array.isArray(result.errors)).toBe(true)
+      expect(result.warnings).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

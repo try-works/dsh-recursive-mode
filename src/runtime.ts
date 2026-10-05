@@ -18,6 +18,7 @@ import {
 import type { PendingWorkItem, RecursiveStatusResult } from './types.ts'
 import { findOperation, countOperations, operationId, recordOperation } from './identity.ts'
 import { createHookRegistry, type HookRegistry } from './hooks.ts'
+import { runTracked, type JobsRegistryLike } from './jobs-runner.ts'
 import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
 import { resolveControlPlaneRoot, type WorkspaceRegistryLike } from './workspace.ts'
@@ -118,12 +119,18 @@ const ARTIFACT_STUB = {
 export class RecursiveRuntime extends Service {
   /** Recursive-mode runtime service. Owns run-state reads + lock/init/lint operations. */
 
-  constructor(ctx: Context, config: { repoRoot?: string; workspaceRegistry?: WorkspaceRegistryLike; goals?: GoalServiceLike | null } = {}) {
+  constructor(ctx: Context, config: { repoRoot?: string; workspaceRegistry?: WorkspaceRegistryLike; goals?: GoalServiceLike | null; jobs?: JobsRegistryLike | null } = {}) {
     super(ctx, 'recursive')
     this.repoRoot = config.repoRoot ?? process.cwd()
     this.workspaceRegistry = config.workspaceRegistry ?? null
     this.goalsService = config.goals ?? null
+    // T10: the native jobs registry is OPTIONAL. Absent, long operations run inline and say
+    // so; see `runTracked` for why that is better than refusing to work without a board.
+    this.jobs = config.jobs ?? null
   }
+
+  /** T10: the native jobs registry, when the composition mounts one. */
+  private readonly jobs: JobsRegistryLike | null
 
   private readonly repoRoot: string
   private readonly workspaceRegistry: WorkspaceRegistryLike | null
@@ -970,8 +977,36 @@ export class RecursiveRuntime extends Service {
     if (!existsSync(artifactPath)) {
       return { artifact: target, runId, errors: ['Artifact not found'], warnings: [], passed: false }
     }
-    const result = lintRun(root, runId)
-    const stdout = [...result.errors, ...result.warnings].join('\n')
+    const linted = await runTracked(this.jobs, {
+      kind: 'lint',
+      // The label is what the board shows, so it names the run AND the artifact.
+      label: 'lint ' + runId + ' ' + target,
+      // NO TIMEOUT HERE, deliberately: a deadline would silently convert a slow-but-working
+      // lint into a failure, which is a policy change rather than visibility. The job gives
+      // the board a running entry and a kill switch, which is what the item asks for;
+      // `runTracked`'s `timeoutMs` stays available to a caller who wants a deadline.
+      run: async ({ report, signal }) => {
+        report('linting ' + target)
+        // A synchronous in-process linter cannot be interrupted mid-call, so the signal is
+        // honoured at the BOUNDARY. Stated plainly rather than implied: a kill settles the
+        // JOB — the board and the caller stop waiting — but a hung `lintRun` call itself
+        // runs to completion in this process, because JavaScript cannot pre-empt it.
+        if (signal.aborted) throw new Error('lint cancelled before it started')
+        return lintRun(root, runId)
+      },
+    })
+    if (linted.status !== 'completed' || linted.value === undefined) {
+      // A killed or failed job is reported through the EXISTING error path, so the tool's
+      // payload shape does not change and every existing assertion still holds.
+      return {
+        artifact: target,
+        runId,
+        errors: [linted.detail ?? linted.error ?? 'lint did not complete'],
+        warnings: [],
+        passed: false,
+      }
+    }
+    const stdout = [...linted.value.errors, ...linted.value.warnings].join('\n')
     return parseLintOutput(stdout, target, runId)
   }
 

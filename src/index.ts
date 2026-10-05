@@ -4,6 +4,7 @@ import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { RecursiveRuntime } from './runtime.ts'
+import type { JobsRegistryLike } from './jobs-runner.ts'
 import type { RecursiveModeConfig } from './config.ts'
 import { createRecursiveStatusTool } from './recursive_status.tool.ts'
 import { createRecursiveInitTool } from './recursive_init.tool.ts'
@@ -201,7 +202,11 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     // SAFETY: the goals service is an optional host service (could be absent); the
     // run projection treats null as "no goal backing" and never throws.
     const goals = ctx.get('goals') as GoalServiceLike | null
-    const recursive = new RecursiveRuntime(ctx, { repoRoot: config?.repoRoot ?? process.cwd(), workspaceRegistry, goals })
+    // T10: the native jobs registry, when the composition mounts one. OPTIONAL on purpose —
+    // a long operation must still run, and say it was untracked, rather than fail because no
+    // board is attached.
+    const jobs = ctx.get('jobs') as JobsRegistryLike | undefined
+    const recursive = new RecursiveRuntime(ctx, { repoRoot: config?.repoRoot ?? process.cwd(), workspaceRegistry, goals, jobs })
 
     // T7 — THE SETTINGS NAMESPACE, APPLIED ON EVERY APPLY. The settings service edits the
     // Loader entry's config and the Loader RE-APPLIES this plugin, so a toggle in the UI

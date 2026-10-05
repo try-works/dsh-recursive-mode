@@ -2,6 +2,44 @@
 
 Verified against the DSH checkout at `D:\deepseek-harness` (dsh `0.1.0-rc.5`) and the vendored `cordis-plugin-loader` `1.0.2`. All claims cite file:line evidence.
 
+## 0. Local setup — read this before cloning
+
+**Peer deps are `link:`ed into a DSH checkout, and that makes the checkout's location load-bearing.**
+
+```powershell
+# 1. The DSH checkout must exist, and MUST BE ON THE SAME DRIVE as this repo.
+#    Every @deepseek-ai/* devDependency is a `link:` into it (see package.json).
+#    pnpm records local link targets RELATIVE in pnpm-lock.yaml
+#    (`version: link:../../deepseek-harness/vendor/cordis`), so the repo only
+#    resolves when that relative path reaches the checkout. Verified: cloning to a
+#    different drive makes every @deepseek-ai/* module unresolvable (TS2307 across
+#    src/**). Tracked as plan item T34.
+#    The verified layout is:
+#        D:\deepseek-harness            (the checkout, pinned dsh-v0.2.0-rc.2)
+#        D:\DEV\dsh-recursive-mode      (this repo)
+
+pnpm install --ignore-scripts   # --ignore-scripts skips the `prepare` build
+pnpm typecheck                  # tsc --noEmit
+pnpm test                       # vitest run
+pnpm build                      # declarations + tsdown bundles into lib/
+npx tsx scripts/test-recursive-mode-smoke.ts
+```
+
+**Two fixture preconditions are deliberate — do not "clean them up".** A fresh clone of this repo was red until both were fixed, so they are load-bearing:
+
+- `tests/fixtures/lint-golden/.recursive/memory/.gitkeep` — a zero-byte placeholder.
+  Git cannot store an empty directory, so without it a clone loses the directory and the
+  golden lint verdict changes from `MEMORY.md: Memory router file is missing` to
+  `memory: Memory plane directory is missing`, failing `lint-parity`.
+- `tests/global-setup.ts` — stamps the two run directories under
+  `tests/fixtures/repo/.recursive/run/` to fixed distinct mtimes. `getLatestRunDirectory`
+  (`src/run.ts`) picks the active run **by mtime**, and that fixture deliberately holds two
+  runs whose order is the point (`fixture-run` newer than `older-run`). Git does not store
+  mtimes, so a clone ties them and the winner follows unspecified directory order, failing
+  `status.parity` and `smoke` with `expected 'older-run' to be 'fixture-run'`.
+
+`.gitattributes` pins `eol=lf` for the same reason: the byte-exact markdown goldens cannot survive a `core.autocrlf=true` checkout.
+
 ## 1. Bundle manifest (package.json)
 
 **Claim:** a bundle is an npm package whose manifest declares `"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`. The profile launcher resolves the bundle by name, reads its manifest, and applies the declared patch file as one layer.

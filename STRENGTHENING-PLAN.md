@@ -557,6 +557,16 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 - **Blast radius to check:** 63 call sites of the two helpers inside `ts-lint.ts` — many apply to documents whose last section is exactly the one being read (e.g. `## Diff Basis For Later Audits`, `## Plan Drift Check`), so expect previously-empty reads to become populated. Run the full suite and the parity goldens before believing the change is contained.
 - **Evidence:** this session — execution probes of `/\Z/`, of `getHeadingBody`/`getSubheadingBody` on synthetic documents with and without a trailing section, and of `lintSubagentActionRecordFile` over a `writeActionRecord` output carrying only `reviewedFiles`.
 
+### T34 — Make the repo installable from any location (drop the checkout-relative `link:` trap) · **backlog — portability**
+
+- **Why.** Every `@deepseek-ai/*` devDependency is a `link:` into the DSH checkout, and pnpm records local link targets **relative** in the lockfile (`version: link:../../deepseek-harness/vendor/cordis`). The consequence, measured: the repo installs and tests correctly at `D:\DEV\dsh-recursive-mode` (with the checkout at `D:\deepseek-harness`) but a clone to another drive makes **every** `@deepseek-ai/*` module unresolvable — `tsc` reports `TS2307: Cannot find module '@deepseek-ai/dsh-tools'` for all of `src/`, and six spec files fail to load. A public repo that cannot be cloned anywhere is a real defect, not a documentation gap; it is currently mitigated only by a setup note in `IMPLEMENTATION-NOTES.md` §0.
+- **What (options, to be chosen with measurements):** either (a) a `postinstall`/`prepare` step that (re)creates the `node_modules/@deepseek-ai/*` links from an absolute, configurable root (`DSH_HARNESS_ROOT`, defaulting to the current pin), tolerating an absent checkout by degrading to "not linked" with a clear message; or (b) publish/consume the DSH packages as real tarball deps for CI while keeping `link:` for local development; or (c) pin an npm alias/registry source if the target revision is published. Any option must keep `pnpm install --ignore-scripts` working for the current layout, because that is what the rebuild and the clone-verification use.
+- **TDD Mode:** `pragmatic` — the assertion is a second-clone run, not a unit test. Compensating evidence: a repeated clone→install→`typecheck`→`test` on a **different drive** reaching 48 files / 308 tests green.
+- **RED:** a clone on a different drive reproduces `TS2307` for `src/**` and ≥6 spec files failing to load.
+- **GREEN:** that same clone installs, typechecks and tests green with no manual path editing.
+- **Acceptance:** a fresh clone at an arbitrary path on any drive runs `pnpm install && pnpm test` green, and the failure mode when the checkout is genuinely missing is a single clear message rather than 200 `TS2307` errors.
+- **Evidence:** this session — the `E:\tmp` clone (`TS2307` on every `@deepseek-ai/*` import) versus the same commit at `D:\DEV\<repo>\.verify-clone` (typecheck 0), and the lockfile line above.
+
 ---
 
 ## 5. To-do checklist (ordered)
@@ -588,6 +598,7 @@ Sprint 2 — make the workflow legible
 [ ] T17 phase dependency as a DAG
 
 Sprint 3 — make it bounded and extensible
+[ ] T34 make the repo installable from any location (the checkout-relative `link:` trap)
 [ ] T32 verify the receipt hash chain on read (written but never read — closes review finding E)
 [ ] T19 deterministic operation identity from canonical inputs
 [ ] T20 bound recovery on no-progress, with explicit resume

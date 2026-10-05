@@ -92,7 +92,14 @@ async function runWorkflow(options: {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
-  if (options.subagents !== undefined) ctx.provide('subagents', options.subagents as never)
+  if (options.subagents !== undefined) {
+    // ⚠ BOTH, because `provide` alone did not reach the composition in this harness: `provide` declares a
+    // service, `set` puts the value on the context, and `ctx.get('subagents')` — what `index.ts` calls —
+    // is satisfied by the second here. Measuring beat guessing: the drain reported "no subagents runtime
+    // is mounted" until the value was also set.
+    ctx.provide('subagents', options.subagents as never)
+    ;(ctx as unknown as { set: (key: string, value: unknown) => void }).set('subagents', options.subagents)
+  }
   await ctx.plugin(plugin as never, { repoRoot: root } as never)
 
   const calls: Call[] = []
@@ -364,9 +371,17 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
    * A skip with the reason is worth more than an assertion that passes for the wrong reason — and worth
    * far more than deleting the test, which would hide that a follow-up is still open.
    */
-  it.skip('FU-3: closeout drains the run’s children (NOT VERIFIED — see the comment above)', () => {
-    expect(true).toBe(true)
-  })
+  it('FU-3: closeout drains the run’s children, read from the delegation layout', async () => {
+    const result = await fu3Driver()
+    expect(result, 'the driver did not produce a run').not.toBeNull()
+    // The drain ran, with EXACTLY the child the layout records — and it ran even though the stub write
+    // itself was refused (08 is already LOCKED), which is the ordering this item turned on.
+    expect(result?.drained.length, 'the drain never ran; closeout said: ' + (result?.payload ?? '').slice(0, 300))
+      .toBeGreaterThan(0)
+    expect(result?.drained[result.drained.length - 1].children).toEqual(['child-42'])
+    // And the refusal still carries the drain result, so a refused closeout does not hide a leak.
+    expect(result?.payload).toContain('drained')
+  }, 120_000)
 
   /**
    * FU-3 (the driver it needs, kept so the fix has somewhere to land).
@@ -399,7 +414,6 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
     if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
     return { drained, payload: JSON.stringify(closeout) }
   }
-  void fu3Driver
 })
 
 /** The last few tool calls, for an assertion message that says what happened. */

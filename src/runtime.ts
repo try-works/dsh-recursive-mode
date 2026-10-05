@@ -338,6 +338,18 @@ export class RecursiveRuntime extends Service {
       // to `memory/MEMORY.md` under the same root.
       const isPhase8 = phase.startsWith('08') || phase === '08-memory-impact.md'
       const rerun = isPhase8 && existsSync(join(runDir, 'locks', '08-memory-impact.receipt.json'))
+      // ⚠ FU-3 — THE DRAIN IS COMPUTED **BEFORE** THE STUB WRITE, and the first version had it after:
+      // `closeoutPhase` now THROWS when the artifact is already LOCKED (the FU-8 guard), so a drain placed
+      // after that call never ran on exactly the runs that reach closeout twice — the ones that HAVE
+      // children to release. Draining is a run-close action and does not depend on scaffolding a stub.
+      const children = isPhase8 ? runChildIds(runDir) : []
+      drain = isPhase8
+        ? this.subagentsSeam === null
+          ? { children: children.length, drained: false, reason: 'no subagents runtime is mounted, so the children could not be drained' }
+          : await drainContinuableChildren(this.subagentsSeam, agent as never, children)
+            .then(() => ({ children: children.length, drained: true }))
+            .catch((err: unknown) => ({ children: children.length, drained: false, reason: err instanceof Error ? err.message : String(err) }))
+        : null
       const result = closeoutPhase(runDir, phase)
       const training = isPhase8
         ? runPhase8Trigger(root, runId, {
@@ -369,7 +381,6 @@ export class RecursiveRuntime extends Service {
       //
       // ⚠ IT REPORTS WHAT IT DRAINED, and a run with no children reports ZERO rather than omitting the
       // field: "this run had no children" and "the drain never ran" must not look the same in the result.
-      const children = isPhase8 ? runChildIds(runDir) : []
       drain = isPhase8
         ? this.subagentsSeam === null
           // ⚠ NO SEAM IS REPORTED, NOT SKIPPED SILENTLY: a host without the service cannot drain, and a

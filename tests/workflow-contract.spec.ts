@@ -13,7 +13,8 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
-  buildAuditFanOutPlan, orchestrateAudit, describeAuditFanOut,
+  buildAuditFanOutPlan, orchestrateAudit, describeAuditFanOut, auditWorkflowRequest,
+  AUDIT_FANOUT_SCRIPT,
   type WorkflowHooksLike, type AuditPlanInput,
 } from '../src/workflow-audit.ts'
 
@@ -151,3 +152,47 @@ function result0() {
     { label: 'b', role: 'tester', ok: true, value: 2 },
   ]
 }
+
+/**
+ * T2 part 2 — the ENGINE REQUEST.
+ *
+ * ⚠ Measured, and it settles where the hooks live: `WorkflowEngine.start(request)` *"Parse and
+ * execute a workflow script"*, with the request carrying the script, its `args`, the parent agent
+ * and an optional cancel signal — and `phase()`/`agent()`/`parallel()` are hooks the SCRIPT gets,
+ * not functions the plugin calls. So the plugin submits a script plus the plan, and reads the
+ * frames afterwards.
+ */
+describe('T2 — the request the engine is asked to start', () => {
+  const PLAN = buildAuditFanOutPlan(INPUT)
+
+  it('sends a CONSTANT script plus the plan as args', () => {
+    const request = auditWorkflowRequest(PLAN, { parent: { id: 'parent' } })
+    expect(request.script).toBe(AUDIT_FANOUT_SCRIPT)
+    expect(request.args.plan).toEqual(PLAN)
+    // The engine authenticates children by object identity, so the parent passes through untouched.
+    expect(request.parent).toEqual({ id: 'parent' })
+  })
+
+  it('does NOT splice the plan into the script text', () => {
+    // A generated script would put reviewer prompts into a program's source, where a stray quote
+    // becomes a syntax error IN THE ORCHESTRATION LAYER — the worst place for one.
+    const request = auditWorkflowRequest(PLAN, { parent: {} })
+    expect(request.script).not.toContain('03-implementation-summary.md')
+    expect(request.script).not.toContain('run-1')
+    // One script, reviewed once: the same text whatever the plan holds.
+    const other = buildAuditFanOutPlan({ ...INPUT, runId: 'run-2' })
+    expect(auditWorkflowRequest(other, { parent: {} }).script).toBe(request.script)
+  })
+
+  it('states the three hooks the script may use', () => {
+    expect(AUDIT_FANOUT_SCRIPT).toContain('phase(')
+    expect(AUDIT_FANOUT_SCRIPT).toContain('agent(')
+    expect(AUDIT_FANOUT_SCRIPT).toContain('parallel(')
+    expect(AUDIT_FANOUT_SCRIPT).toContain('args.plan')
+  })
+
+  it('omits the signal when none was given, rather than sending undefined', () => {
+    expect(auditWorkflowRequest(PLAN, { parent: {} }).signal).toBeUndefined()
+    expect(auditWorkflowRequest(PLAN, { parent: {}, signal: 'sig' }).signal).toBe('sig')
+  })
+})

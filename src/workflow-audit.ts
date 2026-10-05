@@ -160,3 +160,55 @@ export function describeAuditFanOut(result: AuditFanOutResult): string {
   return 'audit fan-out: ' + total + ' reviewer(s), ' + result.failed + ' FAILED ('
     + names.join(', ') + ') — the audit is INCOMPLETE, not smaller'
 }
+
+/**
+ * T2 — the canonical script the ENGINE runs, and the request that starts it.
+ *
+ * ⚠⚠ MEASURED, AND IT CHANGES WHERE THE HOOKS LIVE. The engine is a service —
+ * `WorkflowEngine.start(request): WorkflowRun`, *"Parse and execute a workflow script"*, with the
+ * request carrying **the script, its `args`, the parent agent and an optional cancel signal** — and
+ * its `workflow/*` lifecycle events are documented as **"observe-only … never expose run control"**.
+ * So `phase()` / `agent()` / `parallel()` are hooks available to a SCRIPT, not functions the plugin
+ * may call directly: the plugin's job is to hand the engine a script plus the plan, and to read the
+ * frames afterwards. {@link orchestrateAudit} is therefore the shape a script (or a test double)
+ * drives, and this is the shape the plugin submits.
+ *
+ * ⚠ THE PLUGIN DOES NOT SHIP A GENERATED SCRIPT. A script built by string concatenation from a plan
+ * would put reviewer prompts into a program's source, where a stray quote becomes a syntax error in
+ * the orchestration layer — the worst place for one. The script is a CONSTANT that reads the plan
+ * from `args`, which also keeps the orchestration auditable: one script, reviewed once.
+ */
+export const AUDIT_FANOUT_SCRIPT = [
+  'const plan = args.plan',
+  'for (const phase of plan.phases) {',
+  '  phase(phase.title)',
+  '  await parallel(phase.items.map((item) => () => agent(item.prompt, { label: item.label, phase: phase.title })))',
+  '}',
+  'return args.plan.runId',
+].join('\n')
+
+/** What the engine needs to start an audit fan-out. Mirrors `WorkflowStartRequest` structurally. */
+export interface AuditWorkflowRequest {
+  script: string
+  args: { plan: AuditFanOutPlan }
+  parent: unknown
+  signal?: unknown
+}
+
+/**
+ * Build the engine request for a plan.
+ *
+ * `parent` is the exact live Agent, as the engine requires for child authority; it passes through
+ * untouched rather than reshaped, because the engine authenticates by object identity.
+ */
+export function auditWorkflowRequest(
+  plan: AuditFanOutPlan,
+  options: { parent: unknown; signal?: unknown },
+): AuditWorkflowRequest {
+  return {
+    script: AUDIT_FANOUT_SCRIPT,
+    args: { plan },
+    parent: options.parent,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  }
+}

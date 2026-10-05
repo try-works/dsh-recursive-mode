@@ -336,3 +336,50 @@ export function runExtractor(
     }
   }
 }
+
+/**
+ * T30 — turn the extractor's payload into items the grouping can use.
+ *
+ * ⚠ A MALFORMED PAYLOAD IS NOT A BROKEN EXTRACTOR. By the time this runs the extractor has exited 0 and
+ * produced parseable JSON, so the transport is fine; a payload carrying no items is an extractor that
+ * found nothing, which is **exit 3, not exit 2**. Keeping those apart is why `runExtractor` answers
+ * first and this second.
+ *
+ * ⚠ A PARTIAL ANSWER NEITHER LOSES THE BATCH NOR INVENTS EVIDENCE: an entry missing its text is
+ * SKIPPED rather than defaulted, because an item with invented text would be taught as a learning
+ * nobody extracted. An entry with no `runId` is skipped too — the grouping counts DISTINCT runs, so an
+ * unattributed observation would be pooled into a run it did not come from.
+ */
+export function parseExtractorItems(payload: unknown): TrainingItem[] {
+  const container = payload as { items?: unknown } | null
+  const raw = Array.isArray(payload) ? payload : (container === null ? null : container.items ?? null)
+  if (!Array.isArray(raw)) return []
+  const items: TrainingItem[] = []
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== 'object') continue
+    const candidate = entry as { runId?: unknown; paths?: unknown; text?: unknown }
+    if (typeof candidate.text !== 'string' || candidate.text.trim() === '') continue
+    if (typeof candidate.runId !== 'string' || candidate.runId.trim() === '') continue
+    const paths = Array.isArray(candidate.paths)
+      ? candidate.paths.filter((path): path is string => typeof path === 'string')
+      : []
+    items.push({ runId: candidate.runId, paths, text: candidate.text })
+  }
+  return items
+}
+
+/**
+ * T30 — the whole round trip, in the order the failure codes demand: resolve the command, run it,
+ * parse the payload, then group. Each stage keeps its own meaning — no command or a non-zero exit is
+ * **exit 2**; a payload with nothing usable in it is **exit 3**.
+ */
+export function extractAndGroup(
+  runner: (cmd: string) => ExtractorRun,
+  env: Record<string, string | undefined>,
+  options: { isWinner?: (item: TrainingItem) => boolean } = {},
+): { outcome: ExtractorOutcome; items: TrainingItem[]; groups: TrainingGroup[] } {
+  const outcome = runExtractor(runner, resolveExtractor(env))
+  if (!outcome.ok) return { outcome, items: [], groups: [] }
+  const items = parseExtractorItems(outcome.payload)
+  return { outcome, items, groups: groupLearnings(items, options.isWinner ?? (() => true)) }
+}

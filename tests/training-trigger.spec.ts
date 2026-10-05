@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import {
   runPhase8Trigger, countPhase8LockedRuns, trainingGate, groupLearnings, inferSubsystem,
   TRAINING_EXIT, PHASE8_ARTIFACT, resolveExtractor, runExtractor, TRAINING_EXTRACTOR_ENV,
+  parseExtractorItems, extractAndGroup,
   type TrainingItem,
 } from '../src/training.ts'
 
@@ -226,5 +227,62 @@ describe('T30 — an extractor that fails is not a run with nothing to learn', (
     expect(outcome.ok).toBe(true)
     expect(outcome.payload).toEqual({ items: [{ subsystem: 'lock' }] })
     expect(outcome.failure).toBeUndefined()
+  })
+})
+
+/**
+ * T30 — the payload reaches the grouping, and a partial answer invents nothing.
+ */
+describe('T30 — extractor payload → items → groups', () => {
+  it('parses a well-formed payload, with and without the container', () => {
+    const one = { runId: 'run-1', paths: ['src/lock.ts'], text: 'a' }
+    expect(parseExtractorItems({ items: [one] })).toEqual([one])
+    expect(parseExtractorItems([one])).toEqual([one])
+  })
+
+  it('SKIPS an entry with no text or no runId rather than inventing either', () => {
+    // Invented text would be taught as a learning nobody extracted, and an unattributed item would be
+    // pooled into a run it did not come from — the grouping counts DISTINCT runs.
+    const items = parseExtractorItems({
+      items: [
+        { runId: 'run-1', paths: ['src/a.ts'], text: 'kept' },
+        { runId: 'run-1', paths: ['src/a.ts'], text: '   ' },
+        { paths: ['src/a.ts'], text: 'no run id' },
+        { runId: 'run-2', text: 'no paths' },
+        'not an object',
+        null,
+      ],
+    })
+    expect(items.length).toBe(2)
+    expect(items[0].text).toBe('kept')
+    expect(items[1].runId).toBe('run-2')
+    expect(items[1].paths).toEqual([])
+  })
+
+  it('returns NOTHING for a payload with no items, which is exit 3 and not exit 2', () => {
+    expect(parseExtractorItems({})).toEqual([])
+    expect(parseExtractorItems({ items: 'nope' })).toEqual([])
+    expect(parseExtractorItems(null)).toEqual([])
+  })
+
+  it('runs the whole round trip and GROUPS what came back', () => {
+    const { outcome, groups } = extractAndGroup(
+      () => ({ status: 0, stdout: JSON.stringify({ items: [
+        { runId: 'run-1', paths: ['src/lock.ts'], text: 'a' },
+        { runId: 'run-2', paths: ['src/lock.ts'], text: 'b' },
+      ] }) }),
+      { [TRAINING_EXTRACTOR_ENV]: 'grpo' },
+    )
+    expect(outcome.ok).toBe(true)
+    expect(groups.length).toBe(1)
+    expect(groups[0].subsystem).toBe('lock')
+    expect(groups[0].runs).toBe(2)
+  })
+
+  it('stops at the extractor when it cannot run, with no items and no groups', () => {
+    const { outcome, items, groups } = extractAndGroup(() => ({ status: 0, stdout: '{}' }), {})
+    expect(outcome.failure).toBe('EXTRACTOR_UNAVAILABLE')
+    expect(items).toEqual([])
+    expect(groups).toEqual([])
   })
 })

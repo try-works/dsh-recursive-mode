@@ -20,6 +20,7 @@ import { createRecursivePhaseTool } from './recursive_phase.tool.ts'
 import { createRecursiveAuditTeamTool } from './recursive_audit_team.tool.ts'
 import { createRecursiveReviewTool } from './recursive_review.tool.ts'
 import { createRecursiveAskTool } from './recursive_ask.tool.ts'
+import { createRecursivePreviewTool } from './recursive_preview.tool.ts'
 import type { SubagentsRuntimeLike } from './delegation.ts'
 import { registerRecursiveCommand } from './commands.ts'
 import { evaluateToolGuard, coerceAskToDecision, type ToolGuardDecision } from './enforcement.ts'
@@ -280,6 +281,8 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     // T23: the three human gates as structured decisions. Registered here so the ask is a TOOL call
     // — which is what the host renders as a card — rather than prose a person has to interpret.
     ctx.tools.register(createRecursiveAskTool(recursive)),
+    // T26: the read-only view of what the enforcement contract will do, before it fires.
+    ctx.tools.register(createRecursivePreviewTool(recursive)),
       ...(agentTeams ? [ctx.tools.register(createRecursiveAuditTeamTool(agentTeams))] : []),
     ]
 

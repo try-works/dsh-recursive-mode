@@ -41,6 +41,12 @@ export interface ToolErrorSpec {
  */
 export const TOOL_ERRORS = {
   /* 1xxx — input the caller must supply. */
+  BAD_PROBE_ARGUMENTS: {
+    code: 'RM1144',
+    klass: 'input',
+    problem: 'probeArguments is not a JSON object',
+    next: 'pass a JSON object such as {"artifact":"01-as-is.md"} so the preview can evaluate the guard against real arguments',
+  },
   BAD_ASK_GATE: {
     code: 'RM1141',
     klass: 'input',

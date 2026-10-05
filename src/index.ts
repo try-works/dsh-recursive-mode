@@ -123,6 +123,56 @@ export const inject = ['tools']
  * repo/run work and NO session-event emission here: zero recursive/* events
  * are ever appended (resume-crash fix), and the board reads the live fs route.
  */
+/** T38: the built-in guard's hook name — the chain's identity for "this was the plugin's own". */
+const BUILTIN_GUARD_HOOK_NAME = 'builtin-tool-guard'
+
+/**
+ * T38 — the tool guard, as a function rather than an inline block.
+ *
+ * Extracted so the SAME code can run as a hook on the registry: a built-in and a
+ * sibling then share one chain, one ordering rule and one failure policy, instead of
+ * the built-in being privileged code that always runs first. Every side effect stays
+ * here — the guard-decision log is written by whoever computes the decision, so moving
+ * the call site cannot lose it.
+ *
+ * The `ask` coercion is unchanged and stays key-frozen: `coerceAskToDecision`'s output
+ * is asserted with an exact `toEqual`, so the rebuilt object carries the guard's `rule`
+ * and `transition` forward rather than letting the coercion drop them.
+ */
+function runToolGuard(
+  recursive: RecursiveRuntime,
+  exec: unknown,
+  root: string,
+  runId: string,
+): ToolGuardDecision {
+  const guardMode = recursive.enforcementConfig.toolGuards
+  const decision = evaluateToolGuard(exec as never, root, runId, guardMode)
+  const coerced = coerceAskToDecision(decision, guardMode)
+  const final: ToolGuardDecision = coerced === decision
+    ? decision
+    : { ...coerced, rule: decision.rule, transition: decision.transition }
+  // T15 (C/D): every decision is logged — allows included — so the rolling trace shows
+  // what the guard decided AND why, not only refusals. File-backed evidence in the
+  // control-plane config dir: zero session-event emission.
+  if (root) {
+    const record: GuardDecisionRecord = {
+      at: new Date().toISOString(),
+      runId,
+      tool: (exec as { name?: string } | null)?.name ?? '',
+      kind: final.kind,
+      rule: final.rule ?? 'none',
+    }
+    if (final.kind === 'allow') {
+      if (final.warn) record.reason = final.warn
+    } else if (final.reason) {
+      record.reason = final.reason
+    }
+    if (final.transition) record.transition = final.transition
+    appendGuardDecision(root, record)
+  }
+  return final
+}
+
 export function apply(ctx: Context, config?: { shellOnly?: boolean; repoRoot?: string }) {
   // R4 shell split (02-to-be-plan.addendum-r4-r2-mount-resolution.md): the
   // global bare-name row in cordis.patch.yml mounts with config.shellOnly=true
@@ -232,6 +282,28 @@ export function apply(ctx: Context, config?: { shellOnly?: boolean; repoRoot?: s
     const sessionsStore = ctx.get('sessions') as
       | { get?: (id: string) => { header?: { cwd?: string } } | undefined }
       | undefined
+    // T38 — THE BUILT-IN GUARD IS NOW A HOOK ON THE SAME CHAIN AS EVERYONE ELSE.
+    //
+    // Registered at PRIORITY 0 so a sibling with a higher priority runs FIRST and can
+    // pre-empt it cheaply — which is the point of participation. The guard stays the
+    // baseline that runs when nobody objects.
+    //
+    // `fail_closed` because this is a GATING point: a guard that cannot decide must not
+    // let the call through. The FULL decision rides back as an annotation, so `ask` and
+    // `allow` survive with `warn`/`rule`/`transition` intact — the listener returns that
+    // object VERBATIM, which is what keeps `guard-path` byte-identical.
+    recursive.hooks.register('pre_trigger', {
+      name: BUILTIN_GUARD_HOOK_NAME,
+      priority: 0,
+      onError: 'fail_closed',
+      run: (input) => {
+        const payload = input as { exec?: unknown; root?: string; runId?: string }
+        const decision = runToolGuard(recursive, payload.exec, payload.root ?? '', payload.runId ?? '')
+        return decision.kind === 'deny'
+          ? { decision: 'deny' as const, reason: decision.reason ?? 'denied by the tool guard', annotations: { guardDecision: decision } }
+          : { decision: 'continue' as const, annotations: { guardDecision: decision } }
+      },
+    })
     const toolRuntime = ctx as unknown as { on?: (event: string, listener: (payload: unknown, next?: unknown) => unknown) => () => void }
     if (toolRuntime.on) {
       disposers.push(toolRuntime.on('tools/pre-execute', async (payload, next) => {
@@ -264,12 +336,22 @@ export function apply(ctx: Context, config?: { shellOnly?: boolean; repoRoot?: s
         const preTrigger = await recursive.hooks.run('pre_trigger', {
           tool: exec.name,
           args: exec.arguments,
+          exec,
           root,
           runId,
         })
-        if (preTrigger.decision === 'deny' || preTrigger.decision === 'hold') {
-          const by = preTrigger.ran[preTrigger.ran.length - 1]?.name ?? 'a pre_trigger hook'
+        const decider = preTrigger.ran[preTrigger.ran.length - 1]
+
+        // A SIBLING stopped the chain. Checked by the DECIDER, not by the built-in's
+        // mere absence: a sibling with a LOWER priority than the guard runs after it, so
+        // "the guard is in the trail" does not mean "the guard decided".
+        if ((preTrigger.decision === 'deny' || preTrigger.decision === 'hold') && decider?.name !== BUILTIN_GUARD_HOOK_NAME) {
+          const by = decider?.name ?? 'a pre_trigger hook'
           const why = preTrigger.reason ?? 'no reason given'
+          // A `hold` is treated as a refusal at this seam. `hold` means "stop and wait"
+          // for a point that can resume later; a tool call has nothing to resume, so
+          // pretending to hold would silently proceed — worse than refusing, because the
+          // caller would never learn a hook wanted to stop it.
           return {
             kind: 'deny',
             reason: preTrigger.decision === 'hold'
@@ -278,37 +360,20 @@ export function apply(ctx: Context, config?: { shellOnly?: boolean; repoRoot?: s
           }
         }
 
-        const guardMode = recursive.enforcementConfig.toolGuards
-        const decision = evaluateToolGuard(exec as never, root, runId, guardMode)
-        // T6 (approval ask→policy bridge): an `ask` must never be a silent
-        // allow. Strict coerces to deny; advisory allows but carries a warn that
-        // the caller logs below. The approval seam is the follow-on (Phase D).
-        // The coerced object is rebuilt so the guard's machine-readable `rule` and
-        // `transition` survive the coercion — `coerceAskToDecision` itself stays
-        // key-frozen because its output is asserted with an exact `toEqual`.
-        const coerced = coerceAskToDecision(decision, guardMode)
-        const final: ToolGuardDecision = coerced === decision
-          ? decision
-          : { ...coerced, rule: decision.rule, transition: decision.transition }
-        // T15 (C/D): every decision is logged — allows included — so the rolling
-        // trace shows what the guard decided AND why, not only refusals. File-backed
-        // evidence in the control-plane config dir: zero session-event emission.
-        if (root) {
-          const record: GuardDecisionRecord = {
-            at: new Date().toISOString(),
-            runId,
-            tool: exec.name,
-            kind: final.kind,
-            rule: final.rule ?? 'none',
-          }
-          if (final.kind === 'allow') {
-            if (final.warn) record.reason = final.warn
-          } else if (final.reason) {
-            record.reason = final.reason
-          }
-          if (final.transition) record.transition = final.transition
-          appendGuardDecision(root, record)
+        // The guard itself failed: it is fail_closed, so the refusal is reported with
+        // its own error rather than as a silent allow.
+        if (decider?.name === BUILTIN_GUARD_HOOK_NAME && decider.error !== undefined) {
+          return { kind: 'deny', reason: 'the tool guard failed: ' + decider.error }
         }
+
+        const builtIn = preTrigger.ran.find((entry) => entry.name === BUILTIN_GUARD_HOOK_NAME)
+        const final = builtIn?.annotations?.guardDecision as ToolGuardDecision | undefined
+        if (final === undefined) {
+          // Unreachable while the built-in is registered unconditionally. It fails
+          // CLOSED rather than allowing, because "we could not decide" is not permission.
+          return { kind: 'deny', reason: 'the tool guard produced no decision' }
+        }
+        // The guard's own object, returned VERBATIM — the pinned contract.
         if (final.kind === 'deny') return final
         if (final.kind === 'allow' && final.warn) {
           // Package-tagged host logging; never a silent pass under approval=never.

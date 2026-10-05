@@ -386,3 +386,131 @@ describe('T27 — a sibling hook vetoes a real tool call, and changes nothing wh
     }
   })
 })
+
+/**
+ * T38 — the plugin's OWN guard is a hook like any other.
+ *
+ * The properties that matter are about PEERAGE, not about the guard working (that is
+ * `guard-path`'s job, and its 10 pinned tests pass unchanged): the built-in sits on the
+ * chain at priority 0, a higher-priority sibling pre-empts it, and the guard's own deny
+ * short-circuits a lower-priority sibling exactly as any hook's would.
+ */
+describe('T38 — the built-in tool guard runs on the chain', () => {
+  async function mountWithRun() {
+    const repo = mkdtempSync(join(tmpdir(), 'rm-t38-'))
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(plugin, { repoRoot: repo })
+    await ctx.recursive.initRun('t38-run')
+    const runDir = join(repo, '.recursive', 'run', 't38-run')
+    return {
+      ctx, repo, runDir,
+      dispose: async () => {
+        await ctx.fiber.dispose()
+        rmSync(repo, { recursive: true, force: true })
+      },
+    }
+  }
+
+  it('is registered at priority 0, so it is the baseline others may pre-empt', async () => {
+    const m = await mountWithRun()
+    try {
+      const chain = m.ctx.recursive.hooks.list('pre_trigger')
+      const guard = chain.find((entry) => entry.name === 'builtin-tool-guard')
+      expect(guard).toBeDefined()
+      expect(guard!.priority).toBe(0)
+      // A gating point, so its default failure policy is fail_closed.
+      expect(guard!.onError).toBe('fail_closed')
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('a HIGHER-priority sibling pre-empts it: the guard never runs', async () => {
+    const m = await mountWithRun()
+    try {
+      m.ctx.recursive.hooks.register('pre_trigger', {
+        name: 'pre-empting-sibling', priority: 100,
+        run: () => ({ decision: 'deny', reason: 'stopped before the guard looked' }),
+      })
+      const result = await m.ctx.recursive.hooks.run('pre_trigger', {
+        tool: 'recursive_status', args: {}, exec: { name: 'recursive_status', arguments: {} },
+        root: m.repo, runId: 't38-run',
+      })
+      expect(result.decision).toBe('deny')
+      // ONLY the sibling ran: the built-in's absence is the evidence it was pre-empted.
+      expect(result.ran.map((r) => r.name)).toEqual(['pre-empting-sibling'])
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('the guard DENYING short-circuits a lower-priority sibling, as any hook would', async () => {
+    const m = await mountWithRun()
+    try {
+      // STRICT mode is what makes the guard DENY. In advisory mode an out-of-order lock
+      // is an `ask` that `coerceAskToDecision` turns into an allow-with-warning, so the
+      // chain continues and nothing is short-circuited — my first version of this test
+      // asserted a denial under advisory and was simply wrong about the default.
+      m.ctx.recursive.setEnforcementConfig({ toolGuards: 'strict' })
+      let siblingRan = false
+      m.ctx.recursive.hooks.register('pre_trigger', {
+        name: 'late-sibling', priority: -100,
+        run: () => { siblingRan = true },
+      })
+      const result = await m.ctx.recursive.hooks.run('pre_trigger', {
+        tool: 'recursive_lock',
+        args: { artifact: '01-as-is.md' },
+        exec: { name: 'recursive_lock', arguments: { artifact: '01-as-is.md' } },
+        root: m.repo,
+        runId: 't38-run',
+      })
+      expect(result.decision).toBe('deny')
+      expect(result.ran.map((r) => r.name)).toEqual(['builtin-tool-guard'])
+      expect(siblingRan).toBe(false)
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('the guard’s decision reaches the caller VERBATIM through a real tool call', async () => {
+    const m = await mountWithRun()
+    try {
+      m.ctx.recursive.setEnforcementConfig({ toolGuards: 'strict' })
+      const out = await m.ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('t38-a'),
+        name: 'recursive_lock',
+        arguments: { runId: 't38-run', artifact: '01-as-is.md' },
+        agent: { session: { header: { cwd: m.repo } } },
+      } as never)
+      const text = JSON.stringify(out)
+      // The guard's own monotonic lock-order wording, not a wrapper's paraphrase.
+      expect(text).toContain('monotonic lock-order')
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('in ADVISORY mode the same call is allowed with the guard’s warning kept', async () => {
+    // The default mode, and the reason the test above needs strict: an `ask` under
+    // advisory is an allow that CARRIES the warning — never a silent pass.
+    const m = await mountWithRun()
+    try {
+      const result = await m.ctx.recursive.hooks.run('pre_trigger', {
+        tool: 'recursive_lock',
+        args: { artifact: '01-as-is.md' },
+        exec: { name: 'recursive_lock', arguments: { artifact: '01-as-is.md' } },
+        root: m.repo,
+        runId: 't38-run',
+      })
+      expect(result.decision).toBe('continue')
+      const decision = result.ran[0].annotations?.guardDecision as { kind: string; warn?: string }
+      expect(decision.kind).toBe('allow')
+      expect(decision.warn).toContain('monotonic lock-order')
+    } finally {
+      await m.dispose()
+    }
+  })
+})

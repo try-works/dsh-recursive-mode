@@ -14,6 +14,7 @@ import {
   writeReceipt,
 } from './lock.ts'
 import type { RecursiveStatusResult } from './types.ts'
+import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
 import { resolveControlPlaneRoot, type WorkspaceRegistryLike } from './workspace.ts'
 import { phaseRulesFor, type PhaseRules } from './phase-rules.ts'
 import { closeoutPhase } from './closeout.ts'
@@ -56,6 +57,19 @@ export interface LintArtifactResult {
   warnings: string[]
   passed: boolean
 }
+
+/**
+ * T15 (G): the folded status PLUS the rolling guard-decision evidence. Declared
+ * as an intersection rather than by editing RecursiveStatusResult/foldRun — the
+ * fold's own shape is parity-asserted and stays exactly as it was.
+ */
+export type RecursiveStatusWithGuardDecisions = RecursiveStatusResult & { guardDecisions?: GuardDecisionRecord[] }
+
+/** How many recent decisions to read from the log before scoping to one run. */
+const GUARD_DECISION_READ_LIMIT = 200
+
+/** How many of that run's decisions the status surface carries. */
+const GUARD_DECISION_SURFACE_LIMIT = 20
 
 const ARTIFACT_STUB = {
   '00-requirements.md': ['Run: ', 'Phase: 0', 'Status: DRAFT', 'Workflow version: recursive-mode-audit-v2', 'Inputs: none', 'Outputs: none', 'Scope note: '],
@@ -450,12 +464,19 @@ export class RecursiveRuntime extends Service {
     return null
   }
 
-  async status(runId?: string, agent?: { session?: { header?: { cwd?: string } } } | null): Promise<RecursiveStatusResult | null> {
+  async status(runId?: string, agent?: { session?: { header?: { cwd?: string } } } | null): Promise<RecursiveStatusWithGuardDecisions | null> {
     const root = await this.resolveRootFor(agent)
     if (!root) return null
     const resolved = resolveRunDir(root, runId)
     if (!resolved) return null
-    return foldRun(resolved.runDir, resolved.runId)
+    // T15 (G): surface the rolling guard-decision evidence BESIDE the fold, spread
+    // over it — foldRun's own output shape is parity-asserted (status.parity) and
+    // must not change. Scoped to the resolved run so the field answers "what did
+    // the guard decide about THIS run", newest first.
+    const guardDecisions = readGuardDecisions(root, GUARD_DECISION_READ_LIMIT)
+      .filter((d) => d.runId === resolved.runId)
+      .slice(0, GUARD_DECISION_SURFACE_LIMIT)
+    return { ...foldRun(resolved.runDir, resolved.runId), guardDecisions }
   }
 
   /**

@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { discoverRuns } from './run.ts'
 import { foldRun } from './status.ts'
 import { getLockStatus, receiptPath, readReceipt } from './lock.ts'
-import type { RecursiveProjection, RecursiveRunCard, RecursivePhaseRow, RecursiveRunState } from './types.ts'
+import type { RecursiveProjection, RecursiveRunCard, RecursivePhaseRow, RecursiveRunState, RecursiveTamper } from './types.ts'
 
 /** One locked-phase fact from a lock receipt (artifacts/<file>.receipt.json). */
 interface LockFacts {
@@ -71,17 +71,41 @@ export function foldRunCard(runDir: string, runId: string, worktreeRoot: string)
     worktreeRoot,
     phases,
     state,
-    tampers: {},
+    tampers: tampersOf(status),
     subagents: {},
   }
 }
 
 /**
+ * T15 (F) — tamper facts by DERIVATION, never by persistence.
+ *
+ * `foldRun` already decides, per phase, whether a LOCKED artifact's stored hash
+ * still matches its content: a mismatch lands in `lockProblems` as the literal
+ * 'LockHash mismatch' and clears `lockValid`. That IS the tamper fact, so the
+ * card reads it off the fold instead of replaying the observed-tamper log —
+ * which means it survives a cold resume, honours plan §4.0 ("derived beats
+ * stored"), and stays correct even if the log was rotated or never written.
+ *
+ * Keyed by artifact FILE NAME (e.g. '00-requirements.md'), matching the phase
+ * keys above. `foldRun` itself is untouched: its output shape is
+ * parity-asserted by tests/status.parity.spec.ts.
+ */
+function tampersOf(status: ReturnType<typeof foldRun>): Record<string, RecursiveTamper> {
+  const tampers: Record<string, RecursiveTamper> = {}
+  for (const phase of status.phases) {
+    if (phase.status !== 'LOCKED' || phase.lockValid) continue
+    if (!phase.lockProblems.includes('LockHash mismatch')) continue
+    tampers[phase.file] = { path: phase.file, reason: phase.lockProblems.join('; ') }
+  }
+  return tampers
+}
+
+/**
  * Derive the run-level state from the folded status. The fs stores no run-level
  * state file, so the honest mapping is: 'complete' when every non-optional phase
- * exists and is lock-valid, else 'active'. Transient facts (gateBlocked, tamper,
- * subagent activity) are NOT fs-recoverable and read as absent (recorded
- * limitation; future enhancement).
+ * exists and is lock-valid, else 'active'. Tamper facts ARE fs-recoverable and
+ * are derived by tampersOf above; gateBlocked and subagent activity are not
+ * (recorded limitation; future enhancement).
  */
 function runStateOf(status: ReturnType<typeof foldRun>): RecursiveRunState {
   const mandatory = status.phases.filter(p => !p.optional)

@@ -1,0 +1,19 @@
+
+ RUN  v2.1.9 D:/DEV/dsh-recursive-mode
+
+ ❯ tests/guard-path.spec.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/guard-path.spec.ts [ tests/guard-path.spec.ts ]
+Error: Failed to load url ../src/guard-log.ts (resolved id: ../src/guard-log.ts) in D:/DEV/dsh-recursive-mode/tests/guard-path.spec.ts. Does the file exist?
+ ❯ loadAndTransform node_modules/.pnpm/vite@5.4.21_@types+node@20.19.43/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:51969:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  08:04:55
+   Duration  2.32s (transform 809ms, setup 0ms, collect 0ms, tests 0ms, environment 0ms, prepare 396ms)
+
+

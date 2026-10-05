@@ -89,6 +89,8 @@ Concretely, "done" means:
 
 ### Gap map (native capability → status)
 
+> **T31a step 4 — re-walked at `dsh-v0.2.0-rc.2`.** Every capability this table names as *existing* was verified against the pinned tag tree, not the old revision: `@deepseek-ai/dsh-workflow` (workflowEngine), `dsh-settings`, `dsh-jobs`, `dsh-agent-loop`, `dsh-llm`, `dsh-skill`, `dsh-session-reference` (fileReferences/sessionReferenceResolver), `dsh-tool-fs`, `dsh-plan-mode`, `dsh-storage`, `dsh-repeat-tool-reminder`, `dsh-hook-protocol` and the `session-format-v0-to-v1`…`v3-to-v4` chain all exist at `0.2.0-rc.2`. So the ❌ rows below are **capabilities that exist and are unused**, which is what makes them backlog rather than blockers. Two cells were corrected during the rebuild (client-runtime, the dead deps) and one is outright **wrong as written** — see the `fs/observed` row.
+
 | DSH capability | Status in the plugin |
 |---|---|
 | `tools`, `systemPrompt.section`, `commands.register`, `webServer.register`, `sessions.get`, `workspaceRegistry` | ✅ used |
@@ -96,7 +98,8 @@ Concretely, "done" means:
 | `subagents.startContinuable/followup/interrupt/drain*` | ✅ used (T4, done) |
 | `agentTeams` (`createTask` / `waitForChange` / `interrupt`) | ✅ used (T3, done) |
 | `goals` | ✅ used (T1, done) |
-| `agent/pre-step`, `tools/pre-execute`, `fs/observed` | ⚠️ used, but the guard receives no runId (T15) |
+| `agent/pre-step`, `tools/pre-execute` | ⚠️ used, but the guard receives no runId (T15) |
+| `fs/observed` | ⛔ **NOT used — this row previously claimed "⚠️ used".** There was **no `fs/observed` listener anywhere in `src/`**; the string appeared only in comments (`enforcement.ts:149`, `index.ts:291`, `runtime.ts:714`). `detectTamper` was exported with no live caller. T15 creates the listener. A plan that counts a comment as a wiring is exactly the class of error §7's verification discipline exists to catch |
 | `sessionProjections` | ⛔ **settled — deliberately not adopted** (T5) |
 | `fs/write-intent` / `edit-intent` | ⛔ **settled — host owns the single-slot waterfall** (T11) |
 | `workflowEngine` | ❌ unused (T2) |
@@ -248,7 +251,7 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 - **Note from audit 1:** the harness's equivalent is a `pre_generate` hook that injects rules once per session and recalls memories as one appended message, reading *whether an update is due from the window the step sends* — which removes the need for a delivery ledger entirely. Worth copying that trick.
 ---
 
-### T15 — Repair the enforcement path: give the guard a runId, put the transition gate on the live path · **backlog — highest priority**
+### T15 — Repair the enforcement path: give the guard a runId, put the transition gate on the live path · **done**
 
 - **Why:** This is a bug, not a design gap, and it invalidates §1 criterion 2 and the §3 Outer axis as written.
 - `src/index.ts:222` calls `evaluateToolGuard(exec, root, '', …)` with an **empty runId** (line 197 before the T-1 message-source fix shifted the file). The locked-artifact write branch does not need it (it resolves the target path directly), so that half works — but the **monotonic lock-order** and **Phase-3 TDD evidence** branches resolve prerequisites against `<root>/.recursive/run`, which holds run directories, not artifacts. Both are therefore inert.
@@ -261,6 +264,14 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 - **Files:** `src/enforcement.ts`, `src/index.ts`, `src/runtime.ts`, `src/lifecycle.ts`, `tests/guard-path.spec.ts` (new).
 - **Acceptance:** the lock-order and TDD branches fire; every deny carries a machine-readable reason; the decision log shows what the guard decided and why.
 - **Evidence:** audit 1 §Enforcement; verified by grep in this session.
+
+- **RESULT — done, and independently audited.** Implemented by a delegated subagent against a RED contract written by the orchestrator; the contract (`tests/guard-path.spec.ts`, 10 tests) was **never modified** — its sha256 is byte-identical to the snapshot taken before the implementer started (`evidence/logs/red/T15-guard-path.spec.SNAPSHOT.ts`, sha256 `25FF9063…B7C4`). Verification was performed by the orchestrator, not taken from the implementer's report:
+  - the bug was proved **by execution** before the fix: same function, same disk state, `runId=''` → `{"kind":"allow"}` while `runId='audit-probe'` → `deny 'monotonic lock-order: 00-requirements.md (DRAFT)'` (`evidence/logs/red/T15-empty-runid-proof.txt`);
+  - the 10-test contract passes 10/10 (`evidence/logs/green/T15-audit-independent-run.txt`);
+  - `pnpm typecheck` exits 0 and the regression set — every parity spec, `no-emission`, `enforcement`, `tools`, `smoke`, `lifecycle`, `policy-render` — is **15 files / 87 tests green** (`T15-audit-regression.txt`), with the full suite at **47 files / 293 tests** excluding the then-in-flight T25 spec (`T15-audit-full-suite-minus-T25.txt`).
+  - **What shipped:** `src/guard-log.ts` (new — rolling, bounded-to-500, never-throwing JSONL evidence trace under `.recursive/config/`), the guard resolves the real active run with `resolveRunDir` and **no time-based cache** (a stale cached run id would reintroduce exactly this bug), `validateTransition` is consulted and attached but stays **advisory-only** so no verdict and no parity golden changed, every decision is logged including allows, the first-ever `fs/observed` listener records detected tampers synchronously and cannot throw, and `foldRunCard` now **derives** `tamper` facts from the folded `lockProblems` instead of hardcoding `{}` — derived, so it survives a cold resume and needs no store (§4.0).
+  - **Two things the plan had wrong, found while doing this:** (1) the §2 gap map claimed `fs/observed` was "used"; there was **no listener at all** — the string appeared only in comments (row corrected); (2) `detectTamper` needed a listener created, not merely wired. The `reviewedFiles`-only hole this work exposed in the linter became **T33**.
+  - **Deliberate deviation from the item spec:** "surface the last N decisions on the board card" was implemented as *derived tamper facts on the card* plus the decision log on `recursive_status`; the card's tamper row is derived rather than replayed from the log, because replaying would make cold resume show nothing.
 
 ### T16 — Declarative, ordered tool policy with `ask` as the no-match default · **backlog**
 
@@ -368,7 +379,10 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 
 - **Why:** the harness enforces documentation with a test that **fails the build** if a shipped prompt names a removed id or a worker the agent is meant to discover — and it exists because *the removal originally missed all eight provider identity prompts; agents kept reaching for `react` because they were still being told to*. This repo has golden lint fixtures but nothing guarding its prose, and both audits found real drift in both codebases as a result.
 - **The concrete bug this would catch today:** `writeActionRecord` emits `# Subagent action record: <id>` while `ts-lint.ts` requires the literal `# Subagent Action Record` plus `Run ID` and `Timestamp` in `## Metadata` and `Diff Basis` under `## Inputs Provided` — and every top-level `.md` under `subagents/` is linted as an action record. **Plugin-generated action records currently fail the repo's own lint contract.**
-- **What:** `tests/docs-contract.spec.ts` asserting: (a) every file path referenced from `README.md`, `PROPOSAL.md`, `STRENGTHENING-PLAN.md` and `skills/**` exists; (b) `package.json` description agrees with the registered tool count; (c) **every marker string the linter requires is emitted by the writer that produces it**, including the action-record headings and fields; (d) no shipped prompt or skill names a withdrawn tool, phase or verb.
+- **What:** `tests/docs-contract.spec.ts` asserting: (a) every file path that **purports to be an existing file of this repo** and is referenced from `PROPOSAL.md`, `STRENGTHENING-PLAN.md`, `HANDOFF-review-and-opine.md` and `skills/**` exists; (b) `package.json` description agrees with the registered tool count; (c) **every marker string the linter requires is emitted by the writer that produces it**, including the action-record headings and fields; (d) no shipped prompt or skill names a withdrawn tool, phase or verb.
+  - **⚠ AMENDED — criterion (a) as originally written was unworkable, and measuring it is what showed that.** The first version demanded that *every* referenced path exist, naming `README.md` among the documents. Both halves are wrong: there is deliberately **no `README.md` at the repo root**, and a naive "every path exists" rule fails on the plan's own forward references. Measured on the rebuilt tree: `STRENGTHENING-PLAN.md` has **77** repo-relative references and **40** of them do not resolve — because they are this plan's own **planned deliverables** (`src/policy-globs.ts`, `src/identity.ts`, `src/hooks.ts`, `src/memory.ts`, `src/phase-graph.ts`, `src/recursive_preview.tool.ts`, `src/settings.ts`, `src/errors.ts`, `src/jobs-runner.ts`, `src/recursive_ask.tool.ts`, …). Requiring those to exist would force the backlog to stop describing the work it schedules. `PROPOSAL.md` has 7 repo-relative references and 5 unresolved, four of which are paths in the **parent methodology repo** (`skills/recursive-mode/scripts/recursive-status.py`, `skills/recursive-mode/references/agents-block.md`, `skills/recursive-mode/references/bootstrap/RECURSIVE.md`, `skills/recursive-review-bundle/SKILL.md`), i.e. cross-repo, not drift. `HANDOFF-review-and-opine.md` is clean: 18 references, 18 resolve.
+  - So (a) enforces **class 1 only** — paths that claim to be existing files *of this repo* — and explicitly excludes **class 2** (planned/not-yet-built deliverables) and **class 3** (cross-repo and absolute paths). The spec must comment *why* those classes are excluded, so a later reader does not mistake the scoping for toothlessness, and must include a **non-vacuity self-check** (the class-1 set is non-empty, and a deliberately bogus repo path would be caught) so the test cannot pass by matching nothing.
+  - **One real instance of class-1 drift the amended criterion catches:** `PROPOSAL.md` names `scripts/test-recursive-mode-smoke.py` while the repo ships `scripts/test-recursive-mode-smoke.ts` — exactly the prose/code drift this item exists to catch.
 - **TDD Mode:** `strict`.
 - **RED:** `tests/docs-contract.spec.ts` written RED against the current tree — it must fail on the action-record mismatch and on any dead path reference.
 - **GREEN:** fix `writeActionRecord` to the linter's contract; fix or remove dead references.
@@ -495,6 +509,35 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 - **GREEN:** `src/training.ts` (new), `src/closeout.ts` (trigger on 08 re-run), `src/recursive_closeout.tool.ts` (surface the result).
 - **Acceptance:** a repo with two or more Phase-8-locked runs, on a closeout re-run, either writes a schema-valid learning set into the memory plane or fails with a typed reason and writes nothing. Never a silent success.
 - **Evidence:** `D:\DEV\recursive-mode\skills\recursive-training\SKILL.md` and `references/phase8-and-loading.md`; audit 1's memory worker for the supersede/pin/doctor discipline.
+
+### T32 — Verify the receipt hash chain on read · **backlog — small; closes an unowned finding**
+
+- **Why:** the review's finding E, re-verified independently during the rebuild and still true: **`previous_receipt_hash` is declared (`lock.ts:55`) and written (`lock.ts:199`), and nothing ever reads it.** `validateChain` answers a different question — *which phase is the first mandatory non-LOCKED one* — so it never compares a receipt to its predecessor. Monotonic locking is described in PROPOSAL.md and in the handoff as a load-bearing property ("phases lock monotonically: a locked artifact is hash-stamped, and lock receipts chain by `previous_receipt_hash`"); today the chain is **emitted but not enforced**, so a receipt set that has been reordered, truncated or spliced reads as healthy. This is the same class of defect as T15 — a written-and-exported mechanism with no live consumer — and it had no owning item, which is why it is recorded here rather than left in a review appendix.
+- **What:** in `validateChain` (or a sibling `validateReceiptChain`), walk the run's receipts in phase order and assert each receipt's `previous_receipt_hash` equals its predecessor's artifact hash; report the first break with both values and the two phase names. Surface it through the same channel T15 builds for guard decisions, so a broken chain is visible on `recursive_status` rather than only in a test.
+- **TDD Mode:** `strict` — this is pure data over receipt files.
+- **RED:** `tests/receipt-chain.spec.ts` — a clean chain validates; a receipt whose `previous_receipt_hash` is stale is reported with the offending pair; a chain whose first receipt carries a non-null `previous_receipt_hash` is reported; a run with a single receipt validates; a receipt set with a gap (a locked phase whose predecessor is not locked) is reported rather than passing silently.
+- **GREEN:** `src/lock.ts` (`validateReceiptChain` + `validateChain` delegation), `src/status.ts` or `src/runtime.ts` (surface), `src/types.ts` (wire shape when surfaced).
+- **Files:** `src/lock.ts`, `src/runtime.ts`, `tests/receipt-chain.spec.ts` (new).
+- **Acceptance:** a run whose receipt chain has been reordered or spliced fails loudly and names the first broken link; an untouched run is unaffected, because the common case must not regress.
+- **Constraint:** read-only. This item must not rewrite or "repair" receipts — the chain is evidence, and a verification that mutates what it verifies is worthless.
+- **Evidence:** `src/lock.ts` read + repository-wide grep for `previous_receipt_hash` (2 hits: declaration and write) and `validateChain` (definition + re-export + one parity test that exercises the break phase, not the chain). Verified in the rebuild session.
+
+### T33 — The lint section parsers cannot read a document's FINAL section (`\Z` is a literal `Z` in JS) · **backlog — porting bug; makes part of a contract unsatisfiable**
+
+- **Why, with proof.** `getHeadingBody` (`ts-lint.ts:137`) and `getSubheadingBody` (`:145`) end their lazy capture with the lookahead `(?=^[ \t]*##\s+|\Z)`. That `\Z` was carried over from the canonical Python implementation, where `\Z` means *absolute end of string*. **In JavaScript `\Z` is an unrecognised escape and degrades to an identity escape, i.e. it matches a literal `Z` character.** Verified by execution: `/\Z/.test('nothing here') === false` but `/\Z/.test('a Z here') === true`. Consequences, both verified:
+  - If the section is followed by another heading, the first alternative matches and everything works — which is why the bug hid for so long.
+  - If the section is the LAST one in the string handed to the helper, the lazy capture can only terminate at a literal `Z`. With no `Z` present the match fails outright and the helper returns `''`. Measured: `getHeadingBody('## First\nbody one\n## Last\nbody two', 'Last') === ''`; appending a dummy section after it returns `"body two"`; a trailing newline does not help.
+- **Why it matters here — it is the THIRD side of the T25 contract.** A section's *last* sub-heading is therefore always invisible. In `lintSubagentActionRecordFile` that means `getSubheadingBody(claimedFileImpact, 'Reviewed')` — `Reviewed` being the final sub-heading of `## Claimed File Impact` — always reads empty, so `claimedFileRefs.size === 0` and the record fails `Claimed File Impact must cite at least one created, modified, reviewed, or relevant untouched file`. **A read-only review delegation — a reviewer that creates and modifies nothing, which is this plugin's primary delegation use case — can therefore never produce a record the repo's own linter accepts**, no matter how correct the writer is. Independently reproduced by the orchestrator with a hand-built record (`reviewedFiles` set, `createdFiles`/`modifiedFiles` empty).
+- **How it surfaced:** the T25 implementer hit the same root cause from the other direction and worked around it by appending a trailing `## Record Provenance` section (commented "LOAD-BEARING, do not delete") so `## Verification Handoff` is no longer the final section, and by keeping a `Z`-bearing ISO timestamp last in `## Metadata`. The workaround is honest and documented, but it only covers the whole-section case, not the last-sub-*heading* case.
+- **What:** translate the anchor faithfully — `\Z` (Python, absolute end of input) is `(?![\s\S])` in JS, not `\Z`. Apply it in both helpers. Then re-examine the two workarounds and delete whichever are no longer needed.
+- **⚠ Do not treat the parity goldens as an oracle for this change.** The goldens were captured in the old tree and (measured) contain four `Missing or empty section` verdicts whose headings are **genuinely absent** from the fixture, so they do not discriminate the bug either way. Because the canonical implementation is Python — where `\Z` is correct — fixing the port should move it **toward** canonical parity. If a golden does shift, analyse which behaviour is canonical before regenerating anything, and record the decision.
+- **TDD Mode:** `strict`.
+- **RED:** `tests/section-parser.spec.ts` — a heading followed by another heading reads its body; the **final** heading reads its body; a body containing a literal `Z` is not truncated at it; the final sub-heading of a section reads its body; a genuinely absent heading still reads `''`; a heading whose body is only `- none` reads `- none`.
+- **GREEN:** `src/ts-lint.ts` (both helpers), plus whatever workaround comment in `src/delegation.ts` becomes obsolete.
+- **Acceptance:** every section and sub-section of a document is readable regardless of its position; a read-only review delegation produces an action record the repo's own linter accepts with **zero** violations; `lint-parity` is green or its shift is explained and recorded.
+- **Blast radius to check:** 63 call sites of the two helpers inside `ts-lint.ts` — many apply to documents whose last section is exactly the one being read (e.g. `## Diff Basis For Later Audits`, `## Plan Drift Check`), so expect previously-empty reads to become populated. Run the full suite and the parity goldens before believing the change is contained.
+- **Evidence:** this session — execution probes of `/\Z/`, of `getHeadingBody`/`getSubheadingBody` on synthetic documents with and without a trailing section, and of `lintSubagentActionRecordFile` over a `writeActionRecord` output carrying only `reviewedFiles`.
+
 ---
 
 ## 5. To-do checklist (ordered)
@@ -511,9 +554,10 @@ Sprint 0 — rebase onto the pinned baseline
 [#] T31b tracking 0.2.1-alpha.1                        DEFERRED — not a gate (see §9.3)
 
 Sprint 1 — make enforcement real (no new infrastructure)
-[ ] T15 repair the enforcement path — runId, validateTransition, detectTamper, decision log
+[x] T15 repair the enforcement path — runId, validateTransition, detectTamper, decision log  ← DONE (audited: 10/10 contract, 47 files/293 tests)
 [ ] T16 declarative ordered tool policy (ask as the no-match default)
 [ ] T25 executable documentation tests (catches the action-record mismatch today)
+[ ] T33 lint section parsers: `\Z` is a literal Z in JS — the final section is unreadable, so a read-only review record cannot satisfy the linter
 [ ] T24 result caps, elision markers, stable error codes
 
 Sprint 2 — make the workflow legible
@@ -525,6 +569,7 @@ Sprint 2 — make the workflow legible
 [ ] T17 phase dependency as a DAG
 
 Sprint 3 — make it bounded and extensible
+[ ] T32 verify the receipt hash chain on read (written but never read — closes review finding E)
 [ ] T19 deterministic operation identity from canonical inputs
 [ ] T20 bound recovery on no-progress, with explicit resume
 [ ] T28 budgets (audit rounds, repair attempts, depth, fan-out, result bytes)
@@ -577,7 +622,8 @@ Evidence paths marked `(planned)` do **not** exist yet — they are the spec tha
 | T12 | phase rules as skills | strict | backlog | (planned) `tests/skill-registration.spec.ts` | (planned) same | pairs with T22's preloaded contracts |
 | T13 | planMode for phases 0-2 | strict/pragmatic | backlog | (planned) `tests/plan-mode-integration.spec.ts` | manual integration | plan-before-implement at the harness level |
 | T14 | memory retrieval into bundle | strict | backlog | (planned) `tests/memory-retrieval.spec.ts` | (planned) same | copy the harness trick: read whether an update is due **from the window the step sends** |
-| T15 | **repair the enforcement path** | strict | **backlog — first** | (planned) `tests/guard-path.spec.ts` | (planned) same | runId is `''` at `index.ts:222`; `validateTransition` never called; `detectTamper` has no caller |
+| T15 | **repair the enforcement path** | strict | **done** | `tests/guard-path.spec.ts` (10) + `tests/guard-log.spec.ts` (4) | full suite 47 files/293 tests + typecheck 0 | runId was `''` at `index.ts:222`; `validateTransition` never called; `detectTamper` had no caller and **no `fs/observed` listener existed at all**. Now: real run id (no cache), advisory-only transition consult, capped never-throwing decision log, sync `fs/observed` listener, derived tamper facts. Contract never weakened (sha256 `25FF9063…`) |
+| T33 | lint section parsers: final section unreadable | strict | backlog | (planned) `tests/section-parser.spec.ts` | (planned) same | `\Z` in `getHeadingBody`/`getSubheadingBody` is a **literal `Z`** in JS, so the last section AND the last sub-heading of a section read as `''`. Makes a read-only review delegation's action record unsatisfiable. Faithful translation is `(?![\s\S])`. 63 call sites; goldens do **not** discriminate it |
 | T16 | declarative tool policy | strict | backlog | (planned) `tests/policy-globs.spec.ts` | (planned) same | deny wins; invalid pattern fails closed; **no match means ask**; per-phase baseline |
 | T17 | phase dependency as a DAG | strict | backlog | (planned) `tests/phase-graph.spec.ts` | parity specs must stay green | changes the data model; back-edges from `upstream-gap` addenda are the motivating case |
 | T18 | quiescence rule + in-flight by folding | strict | backlog | (planned) `tests/quiescence.spec.ts` | (planned) same | a lock may not happen with pending work; pending work is derived, not tracked |
@@ -593,6 +639,7 @@ Evidence paths marked `(planned)` do **not** exist yet — they are the spec tha
 | T28 | budgets | strict | backlog | (planned) `tests/budgets.spec.ts` | (planned) same | a child narrows, never widens |
 | T29 | memory injection at run start | strict | backlog | (planned) `tests/memory-load.spec.ts` | (planned) same | the plane is scaffolded and linted but **never read**. Cannot be accepted on an empty plane — T30 must run twice first |
 | T30 | learnings extraction at run close | strict/pragmatic | backlog | (planned) `tests/training-trigger.spec.ts` | (planned) same | the plane is **never written**; `memory/training/` holds only `.gitkeep`. Fail loudly, never claim success. **No parameter updates** |
+| T32 | verify the receipt hash chain on read | strict | backlog | (planned) `tests/receipt-chain.spec.ts` | (planned) same | **review finding E, re-verified: `previous_receipt_hash` is declared + written and NEVER read.** `validateChain` answers a different question (first non-LOCKED phase). Read-only — must never repair what it verifies |
 | T-1 | **recover the baseline** | pragmatic | **done** | `evidence/logs/red/T-1-{typecheck-before,suite-baseline}.txt` | `evidence/logs/green/T-1-{typecheck,suite,build,smoke}-green.txt` | 13 type-import sites (`JsonValue` ← `dsh-util-values`; `CallId` → `ToolCallId`; **+ the rc.2 `MessageSourceMap` break**), 3 removed deps (`code-runtime` unresolvable, `invariants` forward-compat, `client-runtime` → `client-modules`), and `init-templates.parity` fixed as a **non-hermetic test**, not a regression. See the T-1 RESULT block |
 | T31a | rebase peers onto `dsh-v0.2.0-rc.2` | strict/pragmatic | **done** (bump) / open (gap map) | fresh `pnpm install` against the pinned checkout | green suite on the new baseline (§7.0) | peers now pin `0.2.0-rc.2`. **`file:` → `link:` was mandatory**: rc.2 packages use `workspace:*` internally, which a `file:` install cannot satisfy. Target is the **latest release** `639ed01539`. Shallow clone: never quote local diffs |
 | T31b | track `0.2.1-alpha.1` | — | **DEFERRED** | — | — | Explicit decision not to track (§9.3). Cheap future bump; does not gate anything |

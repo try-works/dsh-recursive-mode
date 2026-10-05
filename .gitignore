@@ -21,5 +21,9 @@ lib/
 # this repo is where the checker (check-reusable-repo-hygiene) is meant to be wired in.
 .recursive/run/
 
-# T15 decision log (rolling, git-ignored per plan §4 T15 step 4)
-.recursive/config/guard-decisions.log
+# T15 enforcement evidence traces (rolling, bounded, git-ignored per plan §4 T15 step 4).
+# Local evidence, not a control-plane artifact: the guard decision log and the
+# observed-write tamper log are regenerated as the plugin runs, and committing them
+# would put machine-specific absolute paths and timestamps into a reusable repo.
+.recursive/config/guard-decisions.jsonl
+.recursive/config/observed-tampers.jsonl

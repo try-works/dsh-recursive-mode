@@ -1,0 +1,5 @@
+npm warn Unknown env config "manage-package-manager-versions". This will stop working in the next major version of npm.
+runId=""           -> {"kind":"allow"}
+runId=audit-probe  -> {"kind":"deny","reason":"monotonic lock-order: 00-requirements.md (DRAFT)"}
+BUG PROVEN (empty allows, real denies): true
+

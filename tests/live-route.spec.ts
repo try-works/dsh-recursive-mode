@@ -11,7 +11,7 @@
  * header cwd; the client-passed cwd is only a fallback hint.
  */
 import { describe, it, expect, vi } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { RECURSIVE_API_PREFIX, makeRecursiveRoutes, mountRecursiveRoutesOnce, type RecursiveRouteHost } from '../src/live-route.ts'
@@ -31,11 +31,36 @@ function emissionSites(text: string): number {
   return (text.match(EMISSION_RE) ?? []).length
 }
 
+/**
+ * Walk src/ collecting .ts/.tsx files (server + client).
+ *
+ * The scan below used to iterate a HARDCODED list of eight names
+ * (index/runtime/policy/status/lock/lifecycle/bootstrap/enforcement), so every
+ * source file added afterwards was invisible to it — including T15's
+ * `guard-log.ts` and whatever T17/T21/T29 add. The zero-emission INVARIANT is
+ * separately guarded by `tests/no-emission.spec.ts`, which already walks src/
+ * recursively; this spec's narrower emission check was the one with the hole.
+ * Walking the tree keeps the two guards honest about the same file set.
+ */
+function listSourceFiles(dir: string): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) out.push(...listSourceFiles(full))
+    else if (/\.tsx?$/.test(entry.name)) out.push(full)
+  }
+  return out
+}
+
 describe('G1 zero-emission (static)', () => {
   it('src has no recursive/* emission call site and no events.ts', () => {
-    for (const file of ['index.ts', 'runtime.ts', 'policy.ts', 'status.ts', 'lock.ts', 'lifecycle.ts', 'bootstrap.ts', 'enforcement.ts']) {
-      const text = readFileSync(join(SRC, file), 'utf8')
-      expect(emissionSites(text), file + ' must not emit recursive/*').toBe(0)
+    const files = listSourceFiles(SRC)
+    // Guard the guard: an empty walk would make every assertion below vacuous.
+    expect(files.length).toBeGreaterThan(0)
+    for (const file of files) {
+      const text = readFileSync(file, 'utf8')
+      const rel = file.replace(SRC.replace(/\\/g, '/'), 'src').replace(/\\/g, '/')
+      expect(emissionSites(text), rel + ' must not emit recursive/*').toBe(0)
     }
     expect(() => readFileSync(join(SRC, 'events.ts'))).toThrow()
   })

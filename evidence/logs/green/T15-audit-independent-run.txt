@@ -1,0 +1,13 @@
+
+ RUN  v2.1.9 D:/DEV/dsh-recursive-mode
+
+ ✓ tests/guard-path.spec.ts (10 tests) 326ms
+ ✓ tests/guard-log.spec.ts (4 tests) 1953ms
+   ✓ guard-log.ts — the T15 evidence trace > is bounded: over the cap it keeps only the newest records 1898ms
+
+ Test Files  2 passed (2)
+      Tests  14 passed (14)
+   Start at  08:19:05
+   Duration  3.51s (transform 1.56s, setup 0ms, collect 2.31s, tests 2.28s, environment 1ms, prepare 878ms)
+
+

@@ -14,7 +14,8 @@ import { createRecursiveWorktreeTool } from './recursive_worktree.tool.ts'
 import { createRecursivePhaseTool } from './recursive_phase.tool.ts'
 import { createRecursiveAuditTeamTool } from './recursive_audit_team.tool.ts'
 import { registerRecursiveCommand } from './commands.ts'
-import { evaluateToolGuard, coerceAskToDecision } from './enforcement.ts'
+import { evaluateToolGuard, coerceAskToDecision, type ToolGuardDecision } from './enforcement.ts'
+import { appendGuardDecision, appendObservedTamper, type GuardDecisionRecord } from './guard-log.ts'
 import type { GoalServiceLike } from './goals-projection.ts'
 import type { TeamRuntimeLike } from './teams-loop.ts'
 import { renderRecursivePolicy } from './policy.ts'
@@ -24,6 +25,7 @@ import { mountRecursiveRoutesOnce, makeRecursiveRoutes, type RecursiveRouteHost 
 import { registerRecursiveSkill } from './skills.ts'
 import { enumerateRuns, stageBWorkflowInit } from './bootstrap.ts'
 import { getNextLegalPhase, getLockStatus } from './lock.ts'
+import { resolveRunDir } from './run.ts'
 import { phaseLintRulesMessage, ReminderOnceGate } from './phase-rules.ts'
 
 /**
@@ -211,27 +213,110 @@ export function apply(ctx: Context, config?: { shellOnly?: boolean; repoRoot?: s
 
     // Phase C R4: tools/pre-execute surgical guards (Layer 2, caller of the
     // transition set). Scope-filtered to the active run's worktree.
+    //
+    // T15 — this listener used to hand `evaluateToolGuard` an EMPTY runId, so its
+    // `runDir` resolved to `<root>/.recursive/run` — the directory that holds run
+    // DIRECTORIES, not artifacts. The monotonic lock-order and Phase-3 TDD
+    // branches could therefore never fire; only the locked-write branch worked
+    // (it resolves its target path directly). The REAL active run id is now
+    // resolved per call, the same way recursive_status/phaseRules do it.
+    const sessionsStore = ctx.get('sessions') as
+      | { get?: (id: string) => { header?: { cwd?: string } } | undefined }
+      | undefined
     const toolRuntime = ctx as unknown as { on?: (event: string, listener: (payload: unknown, next?: unknown) => unknown) => () => void }
     if (toolRuntime.on) {
-      disposers.push(toolRuntime.on('tools/pre-execute', (payload, next) => {
+      disposers.push(toolRuntime.on('tools/pre-execute', async (payload, next) => {
         const exec = payload as { name?: string; arguments?: unknown; agent?: { session?: { header?: { cwd?: string } } } | null } | null
         if (!exec?.name) return typeof next === 'function' ? next() : { kind: 'allow' }
         // B3: per-call root is the session cwd (authoritative when the registry is
         // absent), never process.cwd().
-        const root = exec?.agent?.session?.header?.cwd ?? ''
-        const decision = evaluateToolGuard(exec as never, root, '', recursive.enforcementConfig.toolGuards)
-        if (decision.kind === 'allow') return typeof next === 'function' ? next() : { kind: 'allow' }
-        if (decision.kind === 'deny') return decision
+        const cwd = exec?.agent?.session?.header?.cwd ?? ''
+        const root = (await recursive.resolveRootForRoute(undefined, cwd, sessionsStore)) ?? cwd
+        // T15 (A): the active run id is resolved from the FILESYSTEM on every call
+        // — `resolveRunDir` is the canonical latest-run-by-mtime used by
+        // recursive_status/phaseRules. Deliberately NO ttl/time cache: a cached run
+        // id would silently reintroduce exactly the empty-runId bug being fixed
+        // here, because a run created moments ago must be visible immediately. If a
+        // cache is ever added it must be provably invalidated on run creation.
+        const runId = root ? resolveRunDir(root)?.runId ?? '' : ''
+        const guardMode = recursive.enforcementConfig.toolGuards
+        const decision = evaluateToolGuard(exec as never, root, runId, guardMode)
         // T6 (approval ask→policy bridge): an `ask` must never be a silent
         // allow. Strict coerces to deny; advisory allows but carries a warn that
         // the caller logs below. The approval seam is the follow-on (Phase D).
-        const coerced = coerceAskToDecision(decision, recursive.enforcementConfig.toolGuards)
-        if (coerced.kind === 'deny') return coerced
-        if (coerced.kind === 'allow' && coerced.warn) {
+        // The coerced object is rebuilt so the guard's machine-readable `rule` and
+        // `transition` survive the coercion — `coerceAskToDecision` itself stays
+        // key-frozen because its output is asserted with an exact `toEqual`.
+        const coerced = coerceAskToDecision(decision, guardMode)
+        const final: ToolGuardDecision = coerced === decision
+          ? decision
+          : { ...coerced, rule: decision.rule, transition: decision.transition }
+        // T15 (C/D): every decision is logged — allows included — so the rolling
+        // trace shows what the guard decided AND why, not only refusals. File-backed
+        // evidence in the control-plane config dir: zero session-event emission.
+        if (root) {
+          const record: GuardDecisionRecord = {
+            at: new Date().toISOString(),
+            runId,
+            tool: exec.name,
+            kind: final.kind,
+            rule: final.rule ?? 'none',
+          }
+          if (final.kind === 'allow') {
+            if (final.warn) record.reason = final.warn
+          } else if (final.reason) {
+            record.reason = final.reason
+          }
+          if (final.transition) record.transition = final.transition
+          appendGuardDecision(root, record)
+        }
+        if (final.kind === 'deny') return final
+        if (final.kind === 'allow' && final.warn) {
           // Package-tagged host logging; never a silent pass under approval=never.
-          console.warn('[recursive] tool guard (advisory): ' + coerced.warn + ' — allowing')
+          console.warn('[recursive] tool guard (advisory): ' + final.warn + ' — allowing')
         }
         return typeof next === 'function' ? next() : { kind: 'allow' }
+      }))
+    }
+
+    // T15 (E): the fs/observed lock-tamper path. The harness contract is a plain
+    // SYNCHRONOUS emit fired AFTER a successful write, so this listener cannot
+    // veto anything and contractually must not throw — it only RECORDS. Before
+    // T15 the plugin had no fs/observed listener at all (the string appeared in
+    // comments only), so `detectTamper` was exported and unit-tested with no live
+    // caller and a tampered lock surfaced nowhere but prompt text.
+    const observationRuntime = ctx as unknown as { on?: (event: string, listener: (target: unknown, observation: unknown, actor: unknown) => void) => () => void }
+    if (observationRuntime.on) {
+      disposers.push(observationRuntime.on('fs/observed', (target, observation, actor) => {
+        try {
+          // Only a present observation can be a tamper; absent/unrelated are ignored.
+          if ((observation as { kind?: string } | null)?.kind !== 'present') return
+          const displayPath = (target as { displayPath?: string } | null)?.displayPath ?? ''
+          if (!displayPath) return
+          // Cheap shape test BEFORE any filesystem work: fs/observed fires on reads
+          // too, so enumerating runs for every observation would be a readdir per
+          // file touch. This is EXACTLY detectTamper's own admission test (same
+          // normalized string, same two conditions), so it can never reject a
+          // candidate detectTamper would have accepted.
+          const normalized = displayPath.replace(/\\/g, '/')
+          if (!normalized.endsWith('.md') || !normalized.includes('/.recursive/run/')) return
+          // The actor is the tool execution. This event cannot await, so the root is
+          // the actor's session cwd (the same B4 sync shortcut fsPolicyIntent takes:
+          // the session cwd is authoritative, the registry path is async-only).
+          const cwd = (actor as { agent?: { session?: { header?: { cwd?: string } } } } | null)?.agent?.session?.header?.cwd ?? ''
+          if (!cwd) return
+          const runId = resolveRunDir(cwd)?.runId ?? ''
+          const tamper = recursive.detectTamper(normalized, cwd, runId)
+          if (!tamper) return
+          appendObservedTamper(cwd, {
+            at: new Date().toISOString(),
+            runId: tamper.runId,
+            path: tamper.path,
+            reason: tamper.reason,
+          })
+        } catch {
+          // Observe-only: the fs/observed contract forbids throwing.
+        }
       }))
     }
 
@@ -292,11 +377,10 @@ export function apply(ctx: Context, config?: { shellOnly?: boolean; repoRoot?: s
     // mountOnce-global: apply() runs per-session, but the route must register
     // exactly once (WebServer.register throws on duplicate kind+path) and serve
     // PER-WORKSPACE state. No-op when the host composes no webServer (headless).
+    // (`sessionsStore` is resolved once, above the pre-execute listener, which now
+    // needs it too.)
     const webServer = ctx.get('webServer') as
       | { register: (route: { kind: string; path: string; handler: unknown }) => () => void }
-      | undefined
-    const sessionsStore = ctx.get('sessions') as
-      | { get?: (id: string) => { header?: { cwd?: string } } | undefined }
       | undefined
     if (webServer) {
       const host: RecursiveRouteHost = {

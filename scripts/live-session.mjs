@@ -97,10 +97,10 @@ console.log('[live] repo:    ' + repo)
 // the CWD, so a temp repo on `E:` gives `ERR_MODULE_NOT_FOUND: Cannot find package 'tsx'`, and `NODE_PATH`
 // does not help because it applies to CommonJS resolution only. Running tsx's own CLI by absolute path
 // makes it resolve its dependencies from ITS location instead of the session's.
-const TSX_CLI = join(HARNESS, 'node_modules', 'tsx', 'dist', 'cli.mjs')
+const TSX_LOADER = 'file:///D:/deepseek-harness/node_modules/.pnpm/tsx@4.22.4/node_modules/tsx/dist/loader.mjs'
 
 const result = spawnSync(process.execPath, [
-  TSX_CLI,
+  '--import', TSX_LOADER,
   SRC_BIN,
   'headless',
   '--profile', 'headless',

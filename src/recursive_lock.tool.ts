@@ -1,4 +1,5 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { toolError } from './errors.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RecursiveRuntime } from './runtime.ts'
 
@@ -17,16 +18,16 @@ export function createRecursiveLockTool(recursive: RecursiveRuntime) {
     },
     async execute(args: { runId?: string; artifact?: string; reopen?: boolean }, exec) {
       if (!args.runId || args.runId.trim() === '') {
-        return { error: 'runId is required' } as const
+        return { error: toolError('MISSING_RUN_ID') } as const
       }
       if (!args.artifact || args.artifact.trim() === '') {
-        return { error: 'artifact is required' } as const
+        return { error: toolError('MISSING_ARTIFACT') } as const
       }
       try {
         const result = await recursive.lockArtifact(args.runId.trim(), args.artifact.trim(), args.reopen === true, exec.agent as { session?: { header?: { cwd?: string } } } | null)
         return result as unknown as JsonValue
       } catch (err) {
-        return { error: err instanceof Error ? err.message : String(err) } as const
+        return { error: toolError('RUNTIME_REFUSED', err instanceof Error ? err.message : String(err)) } as const
       }
     },
   })

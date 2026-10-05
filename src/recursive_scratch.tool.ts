@@ -1,4 +1,5 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { toolError } from './errors.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RecursiveRuntime } from './runtime.ts'
 
@@ -26,14 +27,14 @@ export function createRecursiveScratchTool(recursive: RecursiveRuntime) {
       const runId = args.runId?.trim() ?? ''
       const target = args.target ?? ''
       if (!action || !runId || !target) {
-        return { error: 'action, runId, and target are required' } as const
+        return { error: toolError('MISSING_SCRATCH_ARGS') } as const
       }
       if (target !== 'md' && target !== 'ts') {
-        return { error: 'target must be md or ts' } as const
+        return { error: toolError('BAD_TARGET') } as const
       }
       const root = await recursive.resolveWorkspaceRoot(exec.agent)
       if (!root) {
-        return { error: 'session is not attached to a registered workspace (cannot resolve control-plane root)' } as const
+        return { error: toolError('NO_WORKSPACE') } as const
       }
       const result = recursive.scratchRun(root, runId, action, target as 'md' | 'ts', args.content)
       return result as unknown as JsonValue

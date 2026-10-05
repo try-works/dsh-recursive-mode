@@ -1,4 +1,5 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { toolError } from './errors.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RecursiveRuntime } from './runtime.ts'
 
@@ -28,18 +29,18 @@ export function createRecursiveWorktreeTool(recursive: RecursiveRuntime) {
       // so tests and headless callers work without a live session header.
       const root = await recursive.resolveRootFor(exec.agent as { session?: { header?: { cwd?: string } } } | null)
       if (!root) {
-        return { error: 'session is not attached to a registered workspace (cannot resolve control-plane root)' } as const
+        return { error: toolError('NO_WORKSPACE') } as const
       }
       if (action === 'create') {
         if (!args.runId || args.runId.trim() === '') {
-          return { error: 'runId is required for create' } as const
+          return { error: toolError('MISSING_CREATE_RUN_ID') } as const
         }
         const result = recursive.createRunWorktree(root, args.runId.trim(), args.baseBranch?.trim() || undefined)
         return result as unknown as JsonValue
       }
       if (action === 'promote') {
         if (!args.fromBranch || !args.toBranch) {
-          return { error: 'fromBranch and toBranch are required for promote' } as const
+          return { error: toolError('MISSING_PROMOTE_BRANCHES') } as const
         }
         const result = recursive.promoteRunBranch(root, args.fromBranch.trim(), args.toBranch.trim())
         return result as unknown as JsonValue
@@ -48,7 +49,7 @@ export function createRecursiveWorktreeTool(recursive: RecursiveRuntime) {
         const result = recursive.worktreeStatus(root)
         return result as unknown as JsonValue
       }
-      return { error: 'action must be create | promote | status' } as const
+      return { error: toolError('BAD_ACTION') } as const
     },
   })
 }

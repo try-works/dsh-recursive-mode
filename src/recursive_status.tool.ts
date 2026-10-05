@@ -1,4 +1,5 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { toolError } from './errors.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RecursiveRuntime } from './runtime.ts'
 
@@ -17,7 +18,7 @@ export function createRecursiveStatusTool(recursive: RecursiveRuntime) {
       // B3: per-call workspace root via exec.agent.session.header.cwd (registry
       // first, cwd fallback) — never the host checkout process.cwd().
       const result = await recursive.status(args.runId, exec.agent as { session?: { header?: { cwd?: string } } } | null)
-      if (!result) return { error: 'no recursive run found' } as const
+      if (!result) return { error: toolError('NO_RUN') } as const
       return result as unknown as JsonValue
     },
   })

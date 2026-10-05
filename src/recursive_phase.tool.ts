@@ -1,4 +1,5 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { toolError } from './errors.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RecursiveRuntime } from './runtime.ts'
 
@@ -22,7 +23,7 @@ export function createRecursivePhaseTool(recursive: RecursiveRuntime) {
     },
     async execute(args: { runId?: string }, exec) {
       const result = await recursive.phaseRules(args.runId, exec.agent as { session?: { header?: { cwd?: string } } } | null)
-      if (!result) return { error: 'no recursive phase found' } as const
+      if (!result) return { error: toolError('NO_PHASE') } as const
       return result as unknown as JsonValue
     },
   })

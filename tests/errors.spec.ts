@@ -8,7 +8,12 @@
  * entry renders a `Next:` clause.
  */
 import { describe, it, expect } from 'vitest'
+import { readFileSync, readdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { TOOL_ERRORS, toolError, hasToolErrorCode, type ToolErrorSpec } from '../src/errors.ts'
+
+const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'src')
 
 const ENTRIES = Object.entries(TOOL_ERRORS) as [string, ToolErrorSpec][]
 const CLASSES = ['input', 'value', 'workspace', 'state', 'runtime', 'capability']
@@ -81,5 +86,64 @@ describe('T24 — tool-error registry', () => {
     expect(hasToolErrorCode('Artifact not found: 02-to-be-plan.md')).toBe(false)
     // A lookalike that is not a code at the start must not be treated as one.
     expect(hasToolErrorCode('see RM1101 for details')).toBe(false)
+  })
+})
+
+/**
+ * T24 — the "every refusal is coded" rule, enforced over the SOURCE.
+ *
+ * A registry only helps if the tools actually use it, and a convention decays:
+ * the next tool someone adds would return a bare sentence and nothing would
+ * notice. So the rule is checked statically, the same way `no-emission` guards
+ * its invariant. The patterns below are exactly the shapes that previously
+ * bypassed the registry.
+ */
+describe('T24 — every recursive_* tool refusal goes through the registry', () => {
+  const TOOL_FILES = readdirSync(SRC_DIR).filter((n) => /^recursive_.*\.tool\.ts$/.test(n))
+
+  it('has tool files to check (the scan is not vacuous)', () => {
+    expect(TOOL_FILES.length).toBeGreaterThanOrEqual(8)
+  })
+
+  it('no tool returns a raw error string literal or an unwrapped thrown message', () => {
+    const offences: string[] = []
+    for (const name of TOOL_FILES) {
+      const text = readFileSync(join(SRC_DIR, name), 'utf8')
+      text.split('\n').forEach((line, i) => {
+        if (/error:\s*['"]/.test(line)) offences.push(name + ':' + (i + 1) + ' raw string literal -> ' + line.trim())
+        if (/error:\s*err instanceof/.test(line)) offences.push(name + ':' + (i + 1) + ' unwrapped throw -> ' + line.trim())
+        if (/error:\s*message\s*\}/.test(line)) offences.push(name + ':' + (i + 1) + ' unwrapped variable -> ' + line.trim())
+      })
+    }
+    expect(offences).toEqual([])
+  })
+
+  it('every tool that can refuse imports the registry', () => {
+    const missing: string[] = []
+    for (const name of TOOL_FILES) {
+      const text = readFileSync(join(SRC_DIR, name), 'utf8')
+      if (/error:/.test(text) && !/from '\.\/errors\.ts'/.test(text)) missing.push(name)
+    }
+    expect(missing).toEqual([])
+  })
+
+  it('every code literal a tool passes to toolError exists in the registry', () => {
+    const names = new Set(Object.keys(TOOL_ERRORS))
+    const unknown: string[] = []
+    for (const name of TOOL_FILES) {
+      const text = readFileSync(join(SRC_DIR, name), 'utf8')
+      for (const m of text.matchAll(/toolError\(\s*'([A-Z_]+)'/g)) {
+        if (!names.has(m[1] ?? '')) unknown.push(name + ' -> ' + m[1])
+      }
+    }
+    expect(unknown).toEqual([])
+  })
+
+  it('render a refusal from every registry entry the tools actually use', () => {
+    // Guards the rendering path for the entries in production use, so a broken
+    // registry entry cannot hide behind a unit test that never exercises it.
+    for (const name of Object.keys(TOOL_ERRORS) as Array<keyof typeof TOOL_ERRORS>) {
+      expect(toolError(name)).toMatch(/^RM\d{4} [a-z]+: .+\. Next: .+\.$/)
+    }
   })
 })

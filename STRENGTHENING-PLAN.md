@@ -378,7 +378,7 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 - **Acceptance:** the three human gates render as cards, and their answers land in the artifact.
 - **Evidence:** audit 1 §Asking the user.
 
-### T24 — Result caps, elision markers, and stable error codes · **backlog**
+### T24 — Result caps, elision markers, and stable error codes · **done**
 
 - **Why:** `recursive_lint` returns unbounded `errors[]` and `warnings[]`; `ts-lint.ts` is a 126 KB port that can emit hundreds of findings into one tool result. The harness caps at `max_result_bytes` (256 KiB) and replaces the excess with a **self-describing** marker that says what was removed and how to get it back — and its directory worker makes every error *one self-sufficient prose sentence* (`<code> <class>: <problem> Did you mean: … Next: call <fn> to …`) because a JSON envelope **arrives double-escaped and is unreadable to an LLM**.
 - **What:** (1) Cap and elide in the lint tool's `render`, emitting `{ elided: true, total, shown, hint }` with a self-describing hint. (2) Add `mode: 'summary' | 'full'`. (3) Give every `recursive_*` tool error a stable code and class plus a `Next:` clause naming the exact call that resolves it.
@@ -387,6 +387,14 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 - **GREEN:** `src/recursive_lint.tool.ts`, `src/ts-lint.ts` (cap), new `src/errors.ts` (codes).
 - **Acceptance:** no tool result is unbounded; every refusal says what to do next in a greppable form.
 - **Evidence:** audit 1 §Result caps and §Error codes.
+
+- **RESULT — done.** Shipped in three commits (`4928802`, `c99a7f3`, this one) because the pieces are independently verifiable:
+  - **`src/errors.ts`** — a 13-entry registry covering all 19 refusal sites across the 9 tools. Every error renders as ONE sentence, `<code> <class>: <problem>[ - <detail>]. Next: <the exact call that resolves it>.` The class group is embedded in the code itself (third character: 1 input, 2 value, 3 workspace, 4 state, 5 runtime, 6 capability) so a log grep for `RM1` finds every input-shaped failure without knowing the registry, and the spec asserts the third character matches the entry's own class. A case fails any entry whose `Next:` names neither a real tool call nor an explicit action — a refusal with no route is one the caller can only guess at.
+  - **`src/result-cap.ts`** — `recursive_lint` was unbounded (`errors[]`/`warnings[]` could carry every finding a 126 KB lint port produces). Now bounded by `mode` (`full` 200 / `summary` 10 per list), with `failCount`/`warnCount` always carrying the **true** totals so the real size of the problem stays visible. Every clip is REPORTED through `elided[]`: a silent truncation would leave the reader unable to tell a complete result from a clipped one. The hint's route is deliberately **iterative** ("fix the shown findings and re-run") because the cap is a hard bound — promising a bypass flag that is itself capped would be a lie.
+  - **All 9 tools wired**, and the rule is now ENFORCED rather than conventional: a static scan over `src/recursive_*.tool.ts` fails on a raw error string literal, an unwrapped thrown message, a missing registry import, or a `toolError('...')` naming a code that does not exist. Without that guard the next tool someone adds would quietly bypass the registry.
+  - **A runtime refusal is WRAPPED, not passed through**: a bare thrown message carries no stable code to branch on, but the sentence is the useful part, so it survives as the detail (`RM5501 runtime: … - Artifact not found: 02-to-be-plan.md. Next: …`).
+  - **Audit note — the item was done twice.** The first attempt wired the tools with a scripted `Get-Content`/`String.Replace`/`Set-Content` sweep, which **silently corrupted eight of them** (every `t` became `o`, every quote became `n`: `import` → `imporo`), while the script reported "changed" for each file. The corruption was caught by printing the changed files in the very next verification step and repaired exactly with `git checkout` by explicit path, which was only safe because nothing had been committed and the agent's in-flight work was never staged. The wiring was then redone with the `edit` tool. Lesson recorded: no shell string surgery on source files.
+  - **Gates:** `pnpm typecheck` 0, `pnpm test` **52 files / 376 tests**, `pnpm build` 0, smoke PASS.
 
 ### T25 — Executable documentation tests · **done**
 
@@ -609,7 +617,7 @@ Sprint 1 — make enforcement real (no new infrastructure)
 [x] T16 declarative ordered tool policy (ask as the no-match default)  ← DONE (found 2 bricking bugs; phase-6/8 scopes unimplementable as written)
 [x] T25 executable documentation tests (catches the action-record mismatch today)  ← DONE (7 violations, not 5)
 [x] T33 lint section parsers: `\Z` is a literal Z in JS — the final section is unreadable  ← DONE (4 regexes, no golden moved)
-[ ] T24 result caps, elision markers, stable error codes
+[x] T24 result caps, elision markers, stable error codes  ← DONE (registry over all 9 tools, statically enforced)
 
 Sprint 2 — make the workflow legible
 [ ] T18 quiescence rule for recursive_lock + derive in-flight work by folding
@@ -684,7 +692,7 @@ Evidence paths marked `(planned)` do **not** exist yet — they are the spec tha
 | T21 | incremental fold + named position | strict | backlog | (planned) `tests/fold-incremental.spec.ts` | (planned) same | `{source, position, state}` frame; append-only assertion; one `position` per phase |
 | T22 | stable prompt prefix + digest | strict/pragmatic | backlog | (planned) `tests/policy-sections.spec.ts` | (planned) same | **largest cost lever**; fully compatible with zero-emission |
 | T23 | `recursive_ask` | strict | backlog | (planned) `tests/recursive-ask.spec.ts` | (planned) same | three human gates render as cards |
-| T24 | result caps + error codes | strict | backlog | (planned) `tests/result-caps.spec.ts` | (planned) same | self-describing elision; stable greppable codes with a `Next:` clause |
+| T24 | result caps + error codes | strict | **done** | `tests/errors.spec.ts` (12) + `tests/result-caps.spec.ts` (11) | full suite 52 files/376 tests + typecheck 0 | 13-entry registry over all 19 refusal sites, class group embedded in the code; lint result bounded by `mode` with true totals kept and every clip reported; the "every refusal is coded" rule is ENFORCED by a static scan, so a new tool cannot bypass it |
 | T25 | executable documentation tests | strict | **done** | `tests/docs-contract.spec.ts` (15) | full suite 48 files/308 tests + typecheck 0 | **The execution proof found SEVEN writer violations, not the review's five** — rows 1-5 confirmed, plus a composite `Review Bundle`/`Upstream Artifacts` defect and the T33 `\Z` false positive. `(a)`'s criterion had to be scoped to class 1 (the plan's own 40 planned deliverables must not be required to exist). The `reviewedFiles`-only hole is pinned with `it.fails` |
 | T26 | `recursive_preview` | strict | backlog | (planned) `tests/preview.spec.ts` | (planned) same | read-only; states what it cannot compute |
 | T27 | hook registry | strict | backlog | (planned) `tests/hook-registry.spec.ts` | (planned) same | note: `tests/hooks.spec.ts` already exists for DSH hooks — use a distinct name |

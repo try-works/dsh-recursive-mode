@@ -1,4 +1,5 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { toolError } from './errors.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RecursiveRuntime } from './runtime.ts'
 
@@ -22,11 +23,11 @@ export function createRecursiveCloseoutTool(recursive: RecursiveRuntime) {
     },
     async execute(args: { phase?: string; runId?: string }, exec) {
       if (!args.phase || !args.runId || args.runId.trim() === '') {
-        return { error: 'phase and runId are required' } as const
+        return { error: toolError('MISSING_PHASE_AND_RUN') } as const
       }
       const root = await recursive.resolveWorkspaceRoot(exec.agent)
       if (!root) {
-        return { error: 'session is not attached to a registered workspace (cannot resolve control-plane root)' } as const
+        return { error: toolError('NO_WORKSPACE') } as const
       }
       const result = recursive.closeoutRun(root, args.runId.trim(), args.phase.trim())
       return result as unknown as JsonValue

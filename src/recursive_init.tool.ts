@@ -1,4 +1,5 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { toolError } from './errors.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RecursiveRuntime } from './runtime.ts'
 
@@ -17,7 +18,7 @@ export function createRecursiveInitTool(recursive: RecursiveRuntime) {
     },
     async execute(args: { runId?: string; createWorktree?: boolean; baseBranch?: string }, exec) {
       if (!args.runId || args.runId.trim() === '') {
-        return { error: 'runId is required' } as const
+        return { error: toolError('MISSING_RUN_ID') } as const
       }
       try {
         const result = await recursive.initRun(
@@ -27,7 +28,7 @@ export function createRecursiveInitTool(recursive: RecursiveRuntime) {
         )
         return result as unknown as JsonValue
       } catch (err) {
-        return { error: err instanceof Error ? err.message : String(err) } as const
+        return { error: toolError('RUNTIME_REFUSED', err instanceof Error ? err.message : String(err)) } as const
       }
     },
   })

@@ -362,6 +362,35 @@ export class RecursiveRuntime extends Service {
     }
     if (input.parent !== undefined) request.parent = input.parent
 
+    // T19 — DETERMINISTIC OPERATION IDENTITY for the delegation itself. The id
+    // covers the inputs PLUS the artifact's BODY, and the body is what keeps a
+    // re-review of a REPAIRED artifact a genuinely different operation rather than a
+    // recognised repeat. `childId` is deliberately NOT part of it: a fresh round
+    // allocates one at random, so including it would make the id meaningless.
+    //
+    // The body — not the `LockHash` — for the reason T37 found the hard way: a lock
+    // hash covers the wall-clock `LockedAt`, so it changes between two locks of
+    // byte-identical content and would make this identity fire only half the time.
+    const artifactBody = (() => {
+      try {
+        return lockHashFromContent(
+          readFileSync(input.artifactPath, 'utf8').replace(/^[ \t]*Status:.*$/m, '').replace(/^[ \t]*LockedAt:.*\n?/m, ''),
+        )
+      } catch {
+        return 'absent'
+      }
+    })()
+    const operation = operationId({
+      act: 'delegate-review',
+      input: {
+        runId: input.runId,
+        phase: input.phase,
+        role: input.role,
+        delegationId: input.delegationId,
+        body: artifactBody,
+      },
+    })
+
     let result: SubagentResultLike | null = null
     let error: string | null = null
     let continuable: ContinuableDelegationLike | null = null
@@ -370,6 +399,24 @@ export class RecursiveRuntime extends Service {
     // an ordinary wait as a failure of the delegation.
     let parked = false
     let parkedReason: string | null = null
+    // The run directory the operation index lives under. Computed once, and the
+    // index is skipped entirely when there is no root: `join('', …)` would otherwise
+    // resolve a RELATIVE path and could read or write an unrelated directory.
+    const operationsDir = input.root ? join(input.root, '.recursive', 'run', input.runId) : ''
+
+    // T19 — a RECOGNISED repeat is not re-executed. Only an operation that already
+    // COMPLETED and was ACCEPTED blocks a retry: a failed or refused attempt must
+    // stay retryable, and a repaired artifact is a different operation entirely
+    // because its body is part of the id. Without this the same review could spawn a
+    // second reviewer for an artifact that has not changed.
+    const prior = operationsDir === '' ? null : findOperation(operationsDir, operation)
+    if (prior?.outcome === 'accepted') {
+      throw new Error(
+        'review of ' + input.phase + ' is a recognised repeat of an operation already accepted (operation ' +
+        operation + '); the artifact has not changed since it passed',
+      )
+    }
+
     if (decision.tier === 'native' || decision.tier === 'external-cli') {
       if (!input.subagents) {
         error = 'no ctx.subagents runtime available (self-audit fallback)'
@@ -422,6 +469,19 @@ export class RecursiveRuntime extends Service {
 
     const evaluation = result ? evaluateDelegationResult(result) : { accepted: false, reason: error ?? 'no result' }
 
+    // T19 — persist the attempt so a RESTART can match it. Only an accepted review is
+    // recorded as `accepted`, which is what makes the recognition above block a
+    // genuine repeat while leaving every failure path retryable. Best-effort: a
+    // failed index write must never change the outcome of a review that already ran.
+    if (operationsDir !== '') {
+      recordOperation(operationsDir, {
+        id: operation,
+        act: 'delegate-review',
+        at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+        outcome: evaluation.accepted ? 'accepted' : 'unaccepted',
+      })
+    }
+
     // R6: record the attempt as an action record (accepted only if evaluation passes).
     const actionRecordPath = writeActionRecord({
       root: input.root,
@@ -471,6 +531,8 @@ export class RecursiveRuntime extends Service {
       error,
       /** T35: which child lifecycle actually carried this delegation. */
       delegationMode,
+      /** T19: the deterministic id of this review, persisted so a restart can match it. */
+      operationId: operation,
       /**
        * T36: true when the round has NOT settled yet, so the caller resumes with
        * `continuable.childId` on a later turn. `parkedReason` carries the loop's own

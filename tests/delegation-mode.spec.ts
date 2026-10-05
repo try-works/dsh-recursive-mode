@@ -21,10 +21,12 @@
  */
 import { describe, it, expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RecursiveRuntime } from '../src/runtime.ts'
+import { operationId, findOperation, readOperations, recordOperation } from '../src/identity.ts'
+import { lockHashFromContent } from '../src/lock.ts'
 import type { SubagentsRuntimeLike, SubagentParentHandle, SubagentResultLike } from '../src/delegation.ts'
 
 const POLICY = {
@@ -138,5 +140,132 @@ describe('T35 — delegation is continuable by default', () => {
     const { result } = await review({ continuable: true })
     const record = JSON.stringify(result)
     expect(record).toContain('continuable')
+  })
+})
+
+/**
+ * T19 — operation identity for a delegation.
+ *
+ * The id must make a repeat recognisable WITHOUT making legitimate work
+ * unrecognisable: a review of a REPAIRED artifact is a different operation, and a
+ * FAILED review must stay retryable. These cases share one root, because the point
+ * is what a SECOND call sees that the first one recorded.
+ */
+describe('T19 — delegateReview identity', () => {
+  const ARTIFACT = '03-implementation-summary.md'
+
+  /** One root, reused, so the operation index accumulates across calls. */
+  async function setup() {
+    const root = makeRoot()
+    const ctx = new Context()
+    await ctx.plugin(RecursiveRuntime, { repoRoot: root })
+    const fake = fakeSubagents({ continuable: true })
+    const artifactPath = join(root, '.recursive', 'run', 'run-1', ARTIFACT)
+    const call = () => ctx.recursive.delegateReview({
+      root,
+      runId: 'run-1',
+      phase: '3',
+      role: 'code-reviewer',
+      delegationId: 'd1',
+      childId: 'c1',
+      artifactPath,
+      upstreamArtifacts: [] as string[],
+      auditQuestions: ['does it work?'],
+      requiredOutput: 'verdict',
+      providers: { spawn: { name: 'spawn', capabilities: { outputSchema: true } } },
+      subagents: fake.runtime,
+      parent: {} as SubagentParentHandle,
+      awaitRoundResult: async () => APPROVED,
+    } as never)
+    return {
+      root,
+      call,
+      artifactPath,
+      runDir: join(root, '.recursive', 'run', 'run-1'),
+      dispose: async () => {
+        await ctx.fiber.dispose()
+        rmSync(root, { recursive: true, force: true })
+      },
+    }
+  }
+
+  /** The id the runtime computes: inputs plus the artifact BODY, never a lock hash. */
+  function expectedId(runDir: string): string {
+    const content = readFileSync(join(runDir, ARTIFACT), 'utf8')
+    const body = lockHashFromContent(
+      content.replace(/^[ \t]*Status:.*$/m, '').replace(/^[ \t]*LockedAt:.*\n?/m, ''),
+    )
+    return operationId({
+      act: 'delegate-review',
+      input: { runId: 'run-1', phase: '3', role: 'code-reviewer', delegationId: 'd1', body },
+    })
+  }
+
+  it('reports the id and RECORDS the attempt, so a restart can match it', async () => {
+    const m = await setup()
+    try {
+      const id = expectedId(m.runDir)
+      expect(findOperation(m.runDir, id)).toBeNull()
+      const result = await m.call() as { operationId?: string }
+      expect(result.operationId).toBe(id)
+      const recorded = findOperation(m.runDir, id)
+      expect(recorded).not.toBeNull()
+      expect(recorded!.act).toBe('delegate-review')
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('an ACCEPTED review is recorded as accepted — which is what blocks a repeat', async () => {
+    const m = await setup()
+    try {
+      await m.call()
+      const record = readOperations(m.runDir).find((r) => r.act === 'delegate-review')
+      expect(record).toBeDefined()
+      expect(record!.outcome).toBe('accepted')
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('only an ACCEPTED record blocks a retry — an unaccepted one stays retryable', async () => {
+    const m = await setup()
+    try {
+      const id = expectedId(m.runDir)
+      // Every failure path records a non-accepted outcome precisely so the work can
+      // be attempted again; this seeds that state directly.
+      recordOperation(m.runDir, { id, act: 'delegate-review', at: 't', outcome: 'unaccepted' })
+      await expect(m.call()).resolves.toBeTruthy()
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('a RECOGNISED repeat of an ACCEPTED review is refused, not re-delegated', async () => {
+    const m = await setup()
+    try {
+      const id = expectedId(m.runDir)
+      // Seed the index as if this exact review had already passed — the state a
+      // retry-after-lost-response presents.
+      recordOperation(m.runDir, { id, act: 'delegate-review', at: 't', outcome: 'accepted' })
+      await expect(m.call()).rejects.toThrow(/recognised repeat/)
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('a REPAIRED artifact is a DIFFERENT operation, so it can be reviewed again', async () => {
+    const m = await setup()
+    try {
+      const before = expectedId(m.runDir)
+      recordOperation(m.runDir, { id: before, act: 'delegate-review', at: 't', outcome: 'accepted' })
+      // The repair changes the artifact, and the BODY is part of the id — so the
+      // recognised-repeat guard no longer matches and the review proceeds.
+      writeFileSync(m.artifactPath, '# Impl\n\nStatus: `DRAFT`\n\n## TODO\n\n- [x] done\n\nrepaired\n', 'utf8')
+      expect(expectedId(m.runDir)).not.toBe(before)
+      await expect(m.call()).resolves.toBeTruthy()
+    } finally {
+      await m.dispose()
+    }
   })
 })

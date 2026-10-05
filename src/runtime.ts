@@ -151,6 +151,34 @@ export class RecursiveRuntime extends Service {
   private readonly jobs: JobsRegistryLike | null
 
   /**
+   * T23 — write a gate's answer into an artifact as a marker line.
+   *
+   * ⚠ REPLACED IN PLACE when the artifact already carries that gate's marker: two `TDD Mode:` lines
+   * would leave two answers to one question and make "what was decided?" depend on which a reader
+   * found first. The write is confined to the run directory, and an artifact that does not exist is
+   * CREATED — a decision recorded nowhere is not recorded.
+   */
+  recordAskAnswer(root: string, runId: string, artifact: string, marker: string): { path: string; replaced: boolean } {
+    const dir = join(root, '.recursive', 'run', runId)
+    const path = join(dir, artifact)
+    const label = marker.slice(2).split(':')[0].trim()
+    let content = ''
+    try {
+      content = readFileSync(path, 'utf8')
+    } catch {
+      // A missing artifact is created below, so the decision still has somewhere to live.
+    }
+    const lines = content === '' ? [] : content.replace(/\n$/, '').split('\n')
+    const at = lines.findIndex((line) => line.startsWith('- ' + label + ':'))
+    const replaced = at >= 0
+    if (replaced) lines[at] = marker
+    else lines.push(marker)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(path, lines.join('\n') + '\n', 'utf8')
+    return { path, replaced }
+  }
+
+  /**
    * T2: the workflow engine, when the composition mounts one.
    *
    * OPTIONAL like every other seam here — without it an audit fan-out reports that it could not be

@@ -18,6 +18,11 @@
  * answer silently overwrites the first — a decision the workflow never sees. The guard refuses the
  * second ask in the same step rather than letting the last writer win.
  */
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import type { RecursiveRuntime } from './runtime.ts'
+import { toolError } from './errors.ts'
+
 
 /** The identifiers the workflow uses for its three human gates. */
 export const ASK_GATE_IDS = ['tdd-mode', 'qa-signoff', 'gate-block'] as const
@@ -172,4 +177,80 @@ export function createAskLedger(): { claim(gateId: AskGateId): void; asked(): As
     },
     asked: () => [...asked],
   }
+}
+
+/** Which artifact each gate's answer belongs in, when the caller does not name one. */
+export const GATE_DEFAULT_ARTIFACT: Record<AskGateId, string> = {
+  'tdd-mode': '03-implementation-summary.md',
+  'qa-signoff': '05-manual-qa.md',
+  // A gate block can happen at any phase, so its marker belongs where the caller says.
+  'gate-block': '',
+}
+
+/**
+ * T23 — the tool.
+ *
+ * TWO BRANCHES, and the split is the point: called WITHOUT an answer it ASKS (returning the validated
+ * question, which the host renders as a card), and called WITH one it RECORDS — validating the label,
+ * writing the marker into the artifact, and reporting the line it wrote. A tool that did both in one
+ * call would have to invent the answer.
+ *
+ * ⚠ THE WRITE-BACK IS A MARKER LINE, REPLACED IN PLACE when the artifact already carries one. A
+ * second `TDD Mode:` line would leave two answers to one question and make "what was decided?"
+ * depend on which a reader found first.
+ */
+export function createRecursiveAskTool(recursive: RecursiveRuntime) {
+  return defineTool({
+    name: 'recursive_ask',
+    description: 'Ask one of the three human gates as a structured decision (tdd-mode, qa-signoff, gate-block), or record the answer. Call without `answer` to ask; call with it to write the answer into the artifact as a durable marker. One ask per step.',
+    parameters: {
+      gate: { type: 'string', description: 'tdd-mode | qa-signoff | gate-block. Required.' },
+      runId: { type: 'string', description: 'Run id. Required; must resolve inside the current workspace.' },
+      artifact: { type: 'string', description: 'Artifact file the answer belongs in. Optional; defaults per gate (gate-block has none, so it is required for that gate).' },
+      answer: { type: 'string', description: 'One of the gate\'s option labels. Omit to ASK.' },
+    },
+    output: {
+      schema: { type: 'json' },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    },
+    async execute(args: { gate?: string; runId?: string; artifact?: string; answer?: string }, exec) {
+      const gateId = (args.gate ?? '').trim() as AskGateId
+      const runId = args.runId?.trim() ?? ''
+      if (runId === '') return { error: toolError('MISSING_RUN_ID') } as const
+      if (!ASK_GATE_IDS.includes(gateId)) {
+        return { error: toolError('BAD_ASK_GATE', 'gate must be one of ' + ASK_GATE_IDS.join(' | ')) } as const
+      }
+      const root = await recursive.resolveWorkspaceRoot(exec.agent)
+      if (!root) return { error: toolError('NO_WORKSPACE') } as const
+
+      const artifact = (args.artifact ?? GATE_DEFAULT_ARTIFACT[gateId]).trim()
+      let question: AskQuestion
+      try {
+        question = buildAskQuestion(gateId)
+      } catch (err) {
+        // The plugin's own gate data failing validation is a defect, so it is reported as one
+        // rather than asked: a malformed card would be answered by a person who cannot fix it.
+        return { error: toolError('BAD_ASK_GATE', err instanceof Error ? err.message : String(err)) } as const
+      }
+
+      // ASK.
+      if (args.answer === undefined) {
+        return { gate: gateId, marker: ASK_GATES[gateId].marker, artifact, question } as unknown as JsonValue
+      }
+
+      // RECORD.
+      let answer: string
+      try {
+        answer = validateAskAnswer(gateId, args.answer)
+      } catch (err) {
+        return { error: toolError('BAD_ASK_ANSWER', err instanceof Error ? err.message : String(err)) } as const
+      }
+      if (artifact === '') {
+        return { error: toolError('MISSING_ASK_ARTIFACT', 'this gate needs an explicit artifact to record into') } as const
+      }
+      const marker = answerMarker(gateId, answer)
+      const written = recursive.recordAskAnswer(root, runId, artifact, marker)
+      return { gate: gateId, answer, marker, artifact, path: written.path, replaced: written.replaced } as unknown as JsonValue
+    },
+  })
 }

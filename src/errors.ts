@@ -41,6 +41,24 @@ export interface ToolErrorSpec {
  */
 export const TOOL_ERRORS = {
   /* 1xxx — input the caller must supply. */
+  BAD_ASK_GATE: {
+    code: 'RM1141',
+    klass: 'input',
+    problem: 'the requested human gate is not one of tdd-mode, qa-signoff or gate-block',
+    next: 'call recursive_ask with gate: tdd-mode | qa-signoff | gate-block',
+  },
+  BAD_ASK_ANSWER: {
+    code: 'RM1142',
+    klass: 'input',
+    problem: 'the answer is not one of the labels the gate offered',
+    next: 'use one of the labels the ask returned; an unoffered answer reads as a decision while being a transcription error',
+  },
+  MISSING_ASK_ARTIFACT: {
+    code: 'RM1143',
+    klass: 'input',
+    problem: 'this gate has no default artifact, so one must be named',
+    next: 'pass artifact: <file> so the answer has somewhere durable to land',
+  },
   MISSING_RUN_ID: {
     code: 'RM1101',
     klass: 'input',

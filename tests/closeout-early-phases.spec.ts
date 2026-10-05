@@ -55,6 +55,11 @@ describe('FU-8 extension: the closeout covers the early phases', () => {
     expect(receipt).toContain('Status: `DRAFT`')
     expect(receipt).toContain('Phase: `Phase 3 (Implementation)`')
     expect(receipt).toContain('## TDD Mode')
+    // ⚠ THE GATES ARE THE POINT, and my first version omitted them: init-templates.ts writes `Coverage: FAIL` /`r
+    // `Approval: FAIL` into these sections for the canonical 00-requirements artifact, so a stub missing them`r
+    // would fail this plugin own gate checks.
+    expect(receipt).toContain('## Coverage Gate')
+    expect(receipt).toContain('## Approval Gate')
     expect(result.addenda).toEqual([])
   })
 

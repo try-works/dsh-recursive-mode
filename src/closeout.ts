@@ -113,12 +113,16 @@ export const PHASE_CONFIG: Record<string, CloseoutPhaseConfig> = {
 const REQUIRED_SECTIONS: Record<string, string[]> = {
   // The early phases keep the artifact's own canonical headings, which `recursive_init` templates and
   // `recursive_lint` both know; these are the stub's minimum, not a replacement for them.
-  '00R': ['TODO', 'Problem Statement', 'Acceptance Criteria', 'Scope Boundary', 'Out of Scope'],
-  '00W': ['TODO', 'Worktree State', 'In-Flight Work', 'Baseline Expectations'],
-  '01': ['TODO', 'Observed Behaviour', 'Evidence', 'Surprises'],
-  '01.5': ['TODO', 'Root Cause', 'Rejected Explanations', 'Confidence'],
-  '02': ['TODO', 'Intended Change', 'Slices', 'Verification Plan', 'Risks'],
-  '03': ['TODO', 'TDD Mode', 'Files Changed', 'Deviations From Plan'],
+  // ⚠ MEASURED FROM init-templates.ts, not invented: its canonical 00-requirements builder emits exactly
+  // TODO / Requirements / Out of Scope / Constraints / Coverage Gate / Approval Gate. The gates are the point -
+  // the builder writes `Coverage: FAIL` and `Approval: FAIL` into them, and a stub missing those sections
+  // would fail this plugin's own gate checks.
+  '00R': ['TODO', 'Requirements', 'Out of Scope', 'Constraints', 'Coverage Gate', 'Approval Gate'],
+  '00W': ['TODO', 'Worktree State', 'In-Flight Work', 'Baseline Expectations', 'Coverage Gate', 'Approval Gate'],
+  '01': ['TODO', 'Observed Behaviour', 'Evidence', 'Surprises', 'Coverage Gate', 'Approval Gate'],
+  '01.5': ['TODO', 'Root Cause', 'Rejected Explanations', 'Confidence', 'Coverage Gate', 'Approval Gate'],
+  '02': ['TODO', 'Intended Change', 'Slices', 'Verification Plan', 'Risks', 'Coverage Gate', 'Approval Gate'],
+  '03': ['TODO', 'TDD Mode', 'Files Changed', 'Deviations From Plan', 'Coverage Gate', 'Approval Gate'],
   '04': ['TODO', 'Pre-Test Implementation Audit', 'Environment', 'Execution Mode', 'Commands Executed (Exact)', 'Results Summary', 'Evidence and Artifacts', 'Failures and Diagnostics (if any)', 'Flake/Rerun Notes', 'Requirement Completion Status', 'Traceability', 'Coverage Gate', 'Approval Gate'],
   '05': ['TODO', 'Execution Mode', 'QA Execution Record', 'QA Scenarios and Results', 'User Sign-Off', 'Requirement Completion Status', 'Traceability', 'Coverage Gate', 'Approval Gate'],
   '06': ['TODO', 'Decisions Changes Applied', 'Rationale', 'Resulting Decision Entry', 'Traceability', 'Coverage Gate', 'Approval Gate'],

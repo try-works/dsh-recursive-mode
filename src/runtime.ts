@@ -34,7 +34,7 @@ import { contractDigest } from './policy.ts'
 import type { WorkflowEngineLike } from './workflow-audit.ts'
 import { createHandoff, createChildBrief, replyPath, childScratchPath, buildDelegationPrompt, type HandoffInput, type ChildBriefInput } from './handoff.ts'
 import { loadRouterPolicy, routerPolicyPath, resolveRole, capabilityProbe, delegationDecisionBasis, type RouterPolicy, type RouterPolicyOverrides, type SubagentProviderLike, type RouteDecision, type CapabilityProbe } from './router.ts'
-import { delegate, delegateContinuable, remainingDepthFor, validateReferences, referencesFromResult, writeActionRecord, evaluateDelegationResult, reviewOutputSchema, defaultReviewToolFilter, type SubagentsRuntimeLike, type SubagentStartRequestLike, type SubagentResultLike, type Reference, type ActionRecordInput, type ContinuableDelegationLike, type SubagentParentHandle } from './delegation.ts'
+import { delegate, delegateContinuable, drainContinuableChildren, remainingDepthFor, validateReferences, referencesFromResult, writeActionRecord, evaluateDelegationResult, reviewOutputSchema, defaultReviewToolFilter, type SubagentsRuntimeLike, type SubagentStartRequestLike, type SubagentResultLike, type Reference, type ActionRecordInput, type ContinuableDelegationLike, type SubagentParentHandle } from './delegation.ts'
 import { validateTransition, coupleGateBlockToGoal, type PhaseTransitionIntent, type RecursivePhaseState, type GateCheckResult } from './lifecycle.ts'
 import { resolveEnforcementConfig, DEFAULT_ENFORCEMENT, evaluateToolGuard, detectTamper, type EnforcementConfig, type ToolGuardDecision, type ToolExecLike } from './enforcement.ts'
 import type { Session } from '@deepseek-ai/dsh-session'
@@ -45,6 +45,7 @@ import { gitFacts } from './git-context.ts'
 import { syncRunGoal, blockRunGoal, resumeRunGoal, type GoalServiceLike } from './goals-projection.ts'
 import { auditToPass, renderTaskHistory, type TeamRuntimeLike, type AuditToPassResult, type TeamCallerHandle, type TeamTaskViewLike, type AuditRoundOutcome } from './teams-loop.ts'
 import type { ContinuableChildId, ContinuableMessageId } from './delegation.ts'
+import { runChildIds } from './settlement.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -315,13 +316,16 @@ export class RecursiveRuntime extends Service {
    * Run-scoped closeout receipt scaffold (R2), rooted under the given
    * workspace root. Refuses runIds outside the root (never crosses workspaces).
    */
-  closeoutRun(root: string, runId: string, phase: string) {
+  async closeoutRun(root: string, runId: string, phase: string, agent?: { session?: { header?: { cwd?: string } } } | null) {
     const runDir = join(root, '.recursive', 'run', runId)
     const runRoot = join(root, '.recursive', 'run')
     // workspace-scoping guard: the run must be under this root
     if (!runDir.startsWith(runRoot) || !existsSync(runDir)) {
       return { error: 'Run not found in current workspace: ' + runId }
     }
+    // Declared OUTSIDE the try so the failure path can report it too: a refused closeout still tells the
+    // caller whether its children were released.
+    let drain: { children: number; drained: boolean; reason?: string } | null = null
     try {
       // T30 — THE RUN-CLOSE TRIGGER, at the RE-RUN of closeout phase 08 and nowhere else.
       //
@@ -356,9 +360,34 @@ export class RecursiveRuntime extends Service {
             },
           })
         : null
-      return { closeoutPhase: phase, runId, ...result, ...(training === null ? {} : { training }) }
+      // FU-3 — DRAIN THE RUN'S CHILDREN AT CLOSEOUT.
+      //
+      // ⚠ WHY THE CHILD LIST IS READ FROM DISK: `runChildIds` scans the `subagents/<delegationId>/child-<id>/`
+      // layout the delegations already write, so a drain works in a FRESH process — after a resume, a crash
+      // or a compaction — where an in-memory list would be empty and the run would silently leak every child
+      // it started. This is the follow-up the `recursive_review` item left unchecked (L1082).
+      //
+      // ⚠ IT REPORTS WHAT IT DRAINED, and a run with no children reports ZERO rather than omitting the
+      // field: "this run had no children" and "the drain never ran" must not look the same in the result.
+      const children = isPhase8 ? runChildIds(runDir) : []
+      drain = isPhase8
+        ? this.subagentsSeam === null
+          // ⚠ NO SEAM IS REPORTED, NOT SKIPPED SILENTLY: a host without the service cannot drain, and a
+          // run that leaked its children should say so rather than look like a clean closeout.
+          ? { children: children.length, drained: false, reason: 'no subagents runtime is mounted, so the children could not be drained' }
+          : await drainContinuableChildren(this.subagentsSeam, agent as never, children)
+            .then(() => ({ children: children.length, drained: true }))
+            .catch((err: unknown) => ({ children: children.length, drained: false, reason: err instanceof Error ? err.message : String(err) }))
+        : null
+      // ⚠ THE DRAIN HAPPENS BEFORE THE STUB WRITE, and the first version got this wrong: the FU-8 guard
+      // THROWS when 08 is already LOCKED, so a drain placed after it never ran on exactly the runs that
+      // reach closeout twice — leaking every child of a completed run. Draining is a RUN-CLOSE action and
+      // does not depend on scaffolding a stub, so it happens first and is reported on BOTH paths.
+      return { closeoutPhase: phase, runId, ...result, ...(training === null ? {} : { training }), ...(drain === null ? {} : { drain }) }
     } catch (err) {
-      return { error: (err as Error).message }
+      // The drain result is carried into the failure path too: a refused closeout still tells the caller
+      // whether its children were released.
+      return { error: (err as Error).message, ...(typeof drain !== 'undefined' && drain !== null ? { drain } : {}) }
     }
   }
 

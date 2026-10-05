@@ -29,7 +29,7 @@ export function createRecursiveCloseoutTool(recursive: RecursiveRuntime) {
       if (!root) {
         return { error: toolError('NO_WORKSPACE') } as const
       }
-      const result = recursive.closeoutRun(root, args.runId.trim(), args.phase.trim())
+      const result = await recursive.closeoutRun(root, args.runId.trim(), args.phase.trim(), exec.agent as { session?: { header?: { cwd?: string } } } | null)
       return result as unknown as JsonValue
     },
   })

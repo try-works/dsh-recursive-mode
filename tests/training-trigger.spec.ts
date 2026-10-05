@@ -335,7 +335,7 @@ describe('T30 — closeout phase 08 invokes the trigger, and a first lock trains
     try {
       const runtime = new RecursiveRuntime(ctx, { repoRoot: root })
       await runtime.initRun('r1')
-      const result = runtime.closeoutRun(root, 'r1', '08') as { error?: string; training?: { code: string; reason: string } }
+      const result = await runtime.closeoutRun(root, 'r1', '08', null) as { error?: string; training?: { code: string; reason: string } }
       if (result.error === undefined) {
         // The trigger ran: this field only exists because the closeout path calls it.
         expect(result.training).toBeDefined()

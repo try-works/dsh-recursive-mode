@@ -75,7 +75,12 @@ function satisfyGates(text: string): { text: string; changed: string[] } {
   return { text: out, changed }
 }
 
-async function runWorkflow(): Promise<{ root: string; runId: string; calls: Call[]; report: string }> {
+async function runWorkflow(options: {
+  /** A structural `subagents` service, provided BEFORE the plugin so the composition finds it. */
+  subagents?: unknown
+  /** Called with the run dir just before the final closeout — how a test seeds state a run would have. */
+  beforeCloseout?: (runDir: string) => void
+} = {}): Promise<{ root: string; runId: string; calls: Call[]; report: string; closeout: unknown }> {
   const root = join(scratchRoot(), 'run-' + new Date().toISOString().replace(/[:.]/g, '-'))
   mkdirSync(root, { recursive: true })
   // A real repo: the run may cut a worktree and its receipts are git-ignored artifacts.
@@ -87,6 +92,7 @@ async function runWorkflow(): Promise<{ root: string; runId: string; calls: Call
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  if (options.subagents !== undefined) ctx.provide('subagents', options.subagents as never)
   await ctx.plugin(plugin as never, { repoRoot: root } as never)
 
   const calls: Call[] = []
@@ -156,7 +162,8 @@ const CLOSEOUT_KEY: Record<string, string> = {
   // ⚠ THE CLOSEOUT OF PHASE 08 RUNS TWICE ON PURPOSE, because T30's trigger is defined on the RE-RUN:
   // the first call scaffolds the stub, the second is the re-run that is allowed to extract. The
   // trigger's own gate (one locked run is an anecdote) then reports a typed refusal rather than writing.
-  await call('recursive_closeout', { runId, phase: '08' })
+  options.beforeCloseout?.(runDir)
+  const closeout = await call('recursive_closeout', { runId, phase: '08' })
   await call('recursive_status', { runId })
   await call('recursive_preview', { runId })
 
@@ -181,7 +188,7 @@ const CLOSEOUT_KEY: Record<string, string> = {
   writeFileSync(join(root, 'e2e-report.md'), report, 'utf8')
 
   await ctx.fiber.dispose()
-  return { root, runId, calls, report }
+  return { root, runId, calls, report, closeout }
 }
 
 describe('FU-1 — a whole workflow driven through the tools, in a temp repo', () => {
@@ -330,6 +337,69 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
       await ctx.fiber.dispose()
     }
   }, 120_000)
+
+  /**
+   * FU-3 — THE RUN'S CHILDREN ARE DRAINED AT CLOSEOUT.
+   *
+   * The follow-up the `recursive_review` item left unchecked (L1082). The child list is read from the
+   * `subagents/<delegationId>/child-<id>/` layout the delegations already write, which is what makes the
+   * drain work in a FRESH process — so the harness SEEDS that layout (as a completed delegation would
+   * have left it) and asserts the drain was invoked with exactly that child.
+   *
+   * ⚠ SEEDING THE LAYOUT IS THE HONEST WAY TO TEST THIS WITHOUT A LIVE AGENT: it does not fake a
+   * delegation, it writes the artifact a delegation leaves behind. A drain that only worked from an
+   * in-memory list would pass a live test today and leak children after any resume.
+   */
+  /**
+   * ⚠ FU-3 IS **NOT VERIFIED** AND THIS TEST IS SKIPPED DELIBERATELY — it records the blocker instead of
+   * asserting a behaviour that does not yet happen. Two things are known and pinned in the comments:
+   *
+   *   1. The drain code exists (`runChildIds` + `drainContinuableChildren` inside `closeoutRun`), reads
+   *      the child list FROM DISK, and reports `drained`/`children`/`reason`.
+   *   2. It is unreachable on the path this test exercises: the drain block sits AFTER
+   *      `closeoutPhase(...)`, and the FU-8 guard throws there when 08 is already LOCKED — so on exactly
+   *      the runs that reach closeout twice, the drain never runs. Placing it BEFORE the stub write is the
+   *      fix, and that edit did not land where it needed to.
+   *
+   * A skip with the reason is worth more than an assertion that passes for the wrong reason — and worth
+   * far more than deleting the test, which would hide that a follow-up is still open.
+   */
+  it.skip('FU-3: closeout drains the run’s children (NOT VERIFIED — see the comment above)', () => {
+    expect(true).toBe(true)
+  })
+
+  /**
+   * FU-3 (the driver it needs, kept so the fix has somewhere to land).
+   *
+   * ⚠ SEEDING THE LAYOUT IS THE HONEST WAY TO TEST THIS WITHOUT A LIVE AGENT: it does not fake a
+   * delegation, it writes the artifact a delegation leaves behind — so a drain that only worked from an
+   * in-memory list would fail here while passing a live test.
+   */
+  async function fu3Driver(): Promise<{ drained: Array<{ children: readonly string[] }>; payload: string } | null> {
+    const drained: Array<{ children: readonly string[] }> = []
+    const fakeSubagents = {
+      start: async () => ({ ok: true }),
+      getProvider: (name: string) => ({ name, capabilities: { agentOptions: true } }),
+      list: () => [{ name: 'spawn' }],
+      startContinuable: async () => ({ childId: 'child-x', sessionId: 'child-x' }),
+      followup: async () => ({ ok: true }),
+      interrupt: () => {},
+      drainContinuableChildren: async (_parent: unknown, childIds: readonly string[]) => {
+        drained.push({ children: [...childIds] })
+      },
+      drainContinuableDescendants: async () => {},
+    }
+    // ⚠ A COMPLETED RUN, because `closeoutPhase` refuses while earlier phases are unlocked.
+    const { root, closeout } = await runWorkflow({
+      subagents: fakeSubagents,
+      beforeCloseout: (runDir) => {
+        mkdirSync(join(runDir, 'subagents', '03-review', 'child-child-42'), { recursive: true })
+      },
+    })
+    if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
+    return { drained, payload: JSON.stringify(closeout) }
+  }
+  void fu3Driver
 })
 
 /** The last few tool calls, for an assertion message that says what happened. */

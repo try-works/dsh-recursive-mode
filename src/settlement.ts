@@ -105,8 +105,7 @@ export function settlementLogPath(runDir: string): string {
  * A miss costs a settlement the loop will report as "no settlement yet", which is
  * recoverable; mis-filing is not.
  */
-export function runDirForChild(root: string, childId: string): string | null {
-  if (childId === '' || root === '') return null
+export function runDirForChild(root: string, childId: string): string | null {  if (childId === '' || root === '') return null
   const runsRoot = join(root, '.recursive', 'run')
   let runs: string[]
   try {
@@ -240,4 +239,32 @@ export function captureSettlement(runDir: string, event: SessionEventLike): Sett
   if (notice === null) return null
   recordSettlement(runDir, notice)
   return notice
+}
+
+/**
+ * FU-3 — the children a run has on its books, read from the layout the delegations already write.
+ *
+ * WHY FROM DISK AND NOT FROM MEMORY. A delegation records itself as `subagents/<delegationId>/child-<childId>/`
+ * (see {@link runDirForChild}), which is the same fact the settlement log is keyed on. Reading it back
+ * means a drain at closeout works **in a fresh process** — after a resume, a crash or a compaction — where
+ * an in-memory list of children would be empty and the run would silently leak every child it started.
+ *
+ * ⚠ AN EMPTY ANSWER IS A REAL ANSWER: a run that delegated nothing has no children, and the caller must
+ * be able to tell that from a failed lookup — hence a plain `[]` rather than `null`.
+ */
+export function runChildIds(runDir: string): string[] {
+  const base = join(runDir, 'subagents')
+  if (!existsSync(base)) return []
+  const ids: string[] = []
+  for (const delegation of readdirSync(base, { withFileTypes: true })) {
+    if (!delegation.isDirectory()) continue
+    const delegationDir = join(base, delegation.name)
+    for (const child of readdirSync(delegationDir, { withFileTypes: true })) {
+      if (child.isDirectory() && child.name.startsWith('child-')) {
+        const id = child.name.slice('child-'.length)
+        if (id !== '' && !ids.includes(id)) ids.push(id)
+      }
+    }
+  }
+  return ids
 }

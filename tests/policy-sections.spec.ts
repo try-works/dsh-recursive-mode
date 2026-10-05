@@ -11,7 +11,10 @@
  * caching**, and the digest is a **local identifier** — never a cache directive.
  */
 import { describe, it, expect } from 'vitest'
-import { renderStableContract, renderPhaseTail, contractDigest } from '../src/policy.ts'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { renderStableContract, renderPhaseTail, contractDigest, renderRecursivePolicy } from '../src/policy.ts'
 import { DEFAULT_ENFORCEMENT } from '../src/enforcement.ts'
 
 describe('T22 — the stable contract does not vary with the phase', () => {
@@ -87,5 +90,57 @@ describe('T22 — the digest is a LOCAL identifier, not a cache directive', () =
     expect(digest).not.toContain('cache')
     expect(renderStableContract().toLowerCase()).not.toContain('cache_boundary')
     expect(renderStableContract().toLowerCase()).not.toContain('cache')
+  })
+})
+
+/**
+ * T22 — THE PREFIX PROPERTY, asserted on the RENDERED section rather than on its ingredients.
+ *
+ * This is the whole point of the split and the only claim that survived the premise check: the
+ * section the prompt layer receives must BEGIN with the byte-identical contract, because a prefix
+ * that a provider could cache has to be stable before it is first — whatever the provider then does
+ * with it. Asserting it on the pieces would not prove the COMPOSITION put them in that order.
+ */
+describe('T22 — the rendered section begins with the stable contract', () => {
+  function renderForPhase(fileName: string, body: string): string {
+    const root = mkdtempSync(join(tmpdir(), 'rm-t22-'))
+    try {
+      const runDir = join(root, '.recursive', 'run', 'r1')
+      mkdirSync(runDir, { recursive: true })
+      writeFileSync(join(runDir, fileName), body, 'utf8')
+      return renderRecursivePolicy({ worktreeRoot: root, runId: 'r1' })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+
+  it('STARTS with the contract, byte for byte', () => {
+    const rendered = renderForPhase('01-as-is.md', '# As-is\n\nStatus: `DRAFT`\n')
+    expect(rendered.startsWith(renderStableContract())).toBe(true)
+  })
+
+  it('keeps the prefix byte-identical between two different phases', () => {
+    // The precondition for any provider-side caching: a prefix that changed with the phase would be
+    // stable in name only.
+    const first = renderForPhase('01-as-is.md', '# As-is\n\nStatus: `DRAFT`\n')
+    const second = renderForPhase('03-implementation-summary.md', '# Impl\n\nStatus: `DRAFT`\n')
+    const prefix = renderStableContract()
+    expect(first.startsWith(prefix)).toBe(true)
+    expect(second.startsWith(prefix)).toBe(true)
+    // ⚠ NOTE ON WHAT THIS CASE DOES *NOT* CLAIM: with no lock chain in the fixture, `foldRun`
+    // derives no current phase, so both renders carry the same "unknown" tail and the two strings
+    // are equal. That is the fixture, not the split — the split's non-triviality is asserted in the
+    // tail describe above, where two explicit phases give two different tails. Asserting inequality
+    // HERE would be asserting something about the fixture.
+    expect(first).toBe(second)
+  })
+
+  it('keeps the lines the CONSUMERS read — a recomposition must not lose content', () => {
+    // `docs-contract` and `r5-parity` assert these by presence, and they are the reason the
+    // recomposition was verified against them rather than assumed safe.
+    const rendered = renderForPhase('03-implementation-summary.md', '# Impl\n\nStatus: `DRAFT`\n')
+    expect(rendered).toContain('recursive_phase')
+    expect(rendered).toContain('required sections')
+    expect(rendered).toContain('Current phase:')
   })
 })

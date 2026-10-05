@@ -44,12 +44,17 @@ export function renderRecursivePolicy(context: PolicyContext | null): string {
   }
 
   const strictness = (gate: EnforcementConfig[keyof EnforcementConfig]) => gate
+  // T22 — THE STABLE PREFIX COMES FIRST, then the per-phase tail.
+  //
+  // ⚠ The four lines that used to open this array were the phase-independent contract, rendered
+  // inline; they now come from `renderStableContract`, so the contract has ONE definition and the
+  // prefix is byte-identical for the whole run — which is the precondition for any provider-side
+  // caching, whatever the provider does with it. The current phase and its next artifact move to
+  // `renderPhaseTail`, because they are precisely what changes between phases; a prefix that carried
+  // them would be stable in name only.
   const lines = [
-    'You are in a recursive-mode session (enforcement active).',
-    '- Current phase: ' + (currentPhase || 'unknown'),
-    '- Next required artifact: ' + (nextRequired || 'none - run complete'),
-    '- Lock chain: phases lock monotonically (' + PHASE_SEQUENCE.join(' -> ') + ').',
-    '- Gates in force: pre-step ' + strictness(config.preStep) + ', tool guards ' + strictness(config.toolGuards) + ', tamper ' + strictness(config.tamper) + '.',
+    renderStableContract(config),
+    renderPhaseTail(status?.currentPhase ?? null),
     '- A transition that fails its gates is BLOCKED (strict) or warns (advisory); no rejected transition advances state.',
     '- Writes to a Status: LOCKED phase doc are denied/asked; reopen explicitly to edit.',
     '- Phase 3 lock requires TDD evidence (strict) or rationale (pragmatic); Phase 5 requires QA sign-off for human/hybrid modes.',
@@ -130,9 +135,12 @@ export function contractDigest(config: EnforcementConfig = DEFAULT_ENFORCEMENT):
  * wants a cacheable prefix takes {@link renderStableContract} and puts this after it.
  */
 export function renderPhaseTail(
-  phase: { label: string; phaseName: string; status: string } | null,
+  phase: { label: string; phaseName: string; status: string; key?: string } | null,
 ): string {
   if (phase === null) return '- Current phase: unknown\n- Next required artifact: none - run complete'
+  // The key is part of the original wording (`phaseName (key)`), so it is carried when present
+  // rather than dropped — a recomposition must not quietly lose information a reader had.
+  const next = phase.key === undefined ? phase.phaseName : phase.phaseName + ' (' + phase.key + ')'
   return '- Current phase: ' + phase.label + ' (' + phase.status + ')\n'
-    + '- Next required artifact: ' + phase.phaseName
+    + '- Next required artifact: ' + next
 }

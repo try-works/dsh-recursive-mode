@@ -689,6 +689,17 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 
 ---
 
+### T37 — The suite is INTERMITTENTLY red (observed once, not yet reproduced) · **backlog — unowned flake**
+
+- **Why.** Every green claim in this plan rests on `pnpm test` being deterministic. During T19's part-1 commit the full suite reported **`1 failed | 509 passed (510)`**, and five subsequent runs (three consecutive, then two more) reported **510/510**. So a real failure occurs at a low rate and was not captured: the failing spec's NAME was lost because the check that ran it only matched the summary counts. That is the worst kind of red — it costs a full re-run to disprove and it teaches a reader to ignore a failure.
+- **What.** Reproduce it, then either fix the cause or, if it is a genuinely environment-dependent test, make that dependence explicit and deterministic. Candidate suspects, in order: (1) the `tests/global-setup.ts` mtime stamping of fixtures, since several specs depend on file **mtime ordering** and a stamp racing a test's own writes would flip a "latest run" resolution; (2) `tests/identity.spec.ts`'s three runtime cases, which are the newest and use `new Date()` timestamps plus real `lockArtifact` writes; (3) the `fs/observed` guard-log path, which writes from a synchronous listener while specs run in parallel.
+- **Method (the part that was wrong last time).** Capture the failing spec and test NAME, not just the counts: run the suite in a loop and print every `❯ … failed` line, or run with a reporter that names failures. A flake that is only observed as a count cannot be owned.
+- **TDD Mode:** strict — the fix must come with a test that fails deterministically without it, or an explicit documented reason the test is environment-bound.
+- **Acceptance:** either the flake is gone, or its cause is named and bounded in this item.
+- **Evidence:** the pre-commit run at `e7f55c4` (`1 failed | 509 passed`), versus five subsequent 510/510 runs. Recorded rather than dismissed because a suite that is red one run in six silently weakens every other item's verification.
+
+---
+
 ## 5. To-do checklist (ordered)
 
 Ordered by value-to-risk, not by T-number. **T-1 is first because the tree is red**, and every item's acceptance test is "the suite stays green". T15 follows because it is a bug that invalidates a stated success criterion.
@@ -731,6 +742,7 @@ Sprint 3 — make it bounded and extensible
 [x] T34 make the repo installable from any location  ← DONE (proven on drive E:; the commands self-repair the links)
 [x] T32 verify the receipt hash chain on read  ← DONE (the item's stated linkage is unverifiable; integrity + splice + gap checks shipped)
 [~] T19 deterministic operation identity  ← PART 1 DONE (identity module + reopen wired at the real seam); delegate/round wiring OPEN
+[ ] T37 the suite is INTERMITTENTLY red (1 in ~6 runs; reproduce and name the cause, don't just re-run)
 [ ] T20 bound recovery on no-progress, with explicit resume
 [ ] T28 budgets (audit rounds, repair attempts, depth, fan-out, result bytes)
 [ ] T27 hook registry (named points, priority, timeout, failure policy)

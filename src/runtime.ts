@@ -19,6 +19,7 @@ import type { PendingWorkItem, RecursiveStatusResult } from './types.ts'
 import { findOperation, countOperations, operationId, recordOperation } from './identity.ts'
 import { createHookRegistry, type HookRegistry } from './hooks.ts'
 import { runTracked, abortReason, type JobsRegistryLike } from './jobs-runner.ts'
+import { recordJobRun } from './job-log.ts'
 import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
 import { resolveControlPlaneRoot, type WorkspaceRegistryLike } from './workspace.ts'
@@ -1097,6 +1098,10 @@ export class RecursiveRuntime extends Service {
         return lintRun(root, runId)
       },
     })
+    // T39: record the run in the RUN LAYER, where the run id is known — see job-log.ts for why
+    // this is a file rather than an event subscription (an event carries a job id, not the run
+    // it belongs to, and parsing run ids back out of labels is a mapping that breaks silently).
+    recordJobRun(root, runId, { kind: 'lint', label: 'lint ' + runId + ' ' + target, result: linted })
     if (linted.status !== 'completed' || linted.value === undefined) {
       // A killed or failed job is reported through the EXISTING error path, so the tool's
       // payload shape does not change and every existing assertion still holds.

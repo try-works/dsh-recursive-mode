@@ -18,6 +18,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RecursiveRuntime } from '../src/runtime.ts'
+import { readJobRuns } from '../src/job-log.ts'
 import {
   runTracked, describeJobRun, TIMEOUT_REASON,
   type JobHooksLike, type JobSpecLike, type JobsRegistryLike,
@@ -235,6 +236,26 @@ describe('T10 — lintArtifact runs as a native job', () => {
       expect(result.runId).toBe('r1')
       expect(result.artifact).toBe('01-as-is.md')
       expect(Array.isArray(result.errors)).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('RECORDS the run in the run layer, so the board has it without polling', async () => {
+    // T39's surfacing: the board reads a file rather than subscribing, because the run id is
+    // known HERE and an event would not carry it.
+    const { root } = makeRun()
+    const ctx = new Context()
+    try {
+      const runtime = new RecursiveRuntime(ctx, { repoRoot: root })
+      await runtime.lintArtifact('r1', '01-as-is.md')
+      const records = readJobRuns(root, 'r1')
+      expect(records.length).toBe(1)
+      expect(records[0].kind).toBe('lint')
+      expect(records[0].label).toContain('01-as-is.md')
+      // No registry in this case, so the log SAYS the run was untracked.
+      expect(records[0].tracked).toBe(false)
+      expect(records[0].status).toBe('completed')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

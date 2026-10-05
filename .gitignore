@@ -27,3 +27,9 @@ lib/
 # would put machine-specific absolute paths and timestamps into a reusable repo.
 .recursive/config/guard-decisions.jsonl
 .recursive/config/observed-tampers.jsonl
+
+# T39: the run layer also appears NESTED, under the test fixtures' own repos. The rules above
+# contain a slash, so they are ANCHORED to this directory and never matched `tests/fixtures/...`
+# — a lint run against a fixture left an untracked `jobs/` behind that appeared in every
+# `git status`. Recursive residue is residue wherever it lands.
+**/.recursive/run/

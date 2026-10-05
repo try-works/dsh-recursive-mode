@@ -1,0 +1,34 @@
+# Line-ending policy — LOAD-BEARING, do not remove.
+#
+# This repo's test strategy rests on BYTE-EXACT markdown fixtures and goldens:
+# `init-templates.parity`, `lint-parity`, `bootstrap.parity`, `status.parity`,
+# `r5-parity` and `smoke` compare generated markdown against committed fixtures,
+# and `src/init-templates.ts` / `src/status.ts` normalise CRLF->LF internally but
+# the COMPARISON is byte-for-byte.
+#
+# Without this file, a fresh clone on a machine with the common Windows setting
+# `core.autocrlf=true` materialises every fixture with CRLF, and those six specs
+# fail even though nothing in the code changed. Measured: a fresh clone produced
+# `Test Files 6 failed | 41 passed (47)` with 8 failing tests, all in
+# fixture-reading specs, while the same commit was green in the working tree.
+# `git add` even warns "LF will be replaced by CRLF the next time Git touches it".
+#
+# `eol=lf` here overrides core.autocrlf for matching paths, so checkouts are LF
+# everywhere and the goldens stay byte-exact.
+* text=auto eol=lf
+
+# Windows command scripts are the one place CRLF is conventional. The linter and
+# every parity spec ignore them, so this cannot affect a golden.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary-ish assets must never be text-normalised.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.zip binary

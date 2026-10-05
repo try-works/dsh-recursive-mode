@@ -289,3 +289,68 @@ describe('T10 — lintArtifact runs as a native job', () => {
     }
   })
 })
+
+/**
+ * T10 — the SECOND call site, and the one the item itself names as the hung case.
+ *
+ * The test needs no git repository: what is asserted is that the operation is WRAPPED (a job
+ * of kind `worktree` exists for it) and that the failure path is UNCHANGED, which a non-git
+ * directory exercises for real — `createLinkedWorktree` reports `{ ok: false, error }` there,
+ * and `initRun` must still throw exactly what it threw before.
+ */
+describe('T10 — the worktree create runs as a native job', () => {
+  function jobRecorder() {
+    const specs: JobSpecLike[] = []
+    const progress: string[] = []
+    const registry: JobsRegistryLike = {
+      start(spec) {
+        specs.push(spec)
+        spec.run({ id: 'worktree-1', append: () => {}, updateProgress: (line) => progress.push(line) })
+        return 'worktree-1'
+      },
+    }
+    return { registry, specs, progress }
+  }
+
+  it('initRun with createWorktree starts a job kinded worktree, labelled for the run', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'rm-t10w-'))
+    const ctx = new Context()
+    const jobs = jobRecorder()
+    try {
+      const runtime = new RecursiveRuntime(ctx, { repoRoot: root, jobs: jobs.registry })
+      // A non-git directory, so the create itself fails — which is the point: the JOB is
+      // started and the failure still surfaces exactly as before.
+      await expect(runtime.initRun('r9', null, { createWorktree: true })).rejects.toThrow()
+      expect(jobs.specs.length).toBe(1)
+      expect(jobs.specs[0].kind).toBe('worktree')
+      expect(jobs.specs[0].label).toContain('r9')
+      expect(jobs.progress).toContain('creating r9')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('the failure is the SAME error a caller saw before the wrapping', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'rm-t10w2-'))
+    // A separate Context per runtime: `recursive` is a Cordis service and registering it
+    // twice on one context throws, which is the framework being correct rather than a
+    // problem with the thing under test.
+    const ctxA = new Context()
+    const ctxB = new Context()
+    const withJobs = new RecursiveRuntime(ctxA, { repoRoot: root, jobs: jobRecorder().registry })
+    const withoutJobs = new RecursiveRuntime(ctxB, { repoRoot: root })
+    try {
+      const tracked = await withJobs.initRun('r9', null, { createWorktree: true }).then(
+        () => null, (err: Error) => err.message,
+      )
+      const inline = await withoutJobs.initRun('r9', null, { createWorktree: true }).then(
+        () => null, (err: Error) => err.message,
+      )
+      expect(tracked).not.toBeNull()
+      // Byte-identical: wrapping must not reword a refusal a caller may be matching on.
+      expect(tracked).toBe(inline)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})

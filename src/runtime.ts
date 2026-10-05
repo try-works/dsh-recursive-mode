@@ -746,7 +746,26 @@ export class RecursiveRuntime extends Service {
     let scaffoldRoot = root
     let worktree: CreateWorktreeResult | undefined
     if (opts?.createWorktree) {
-      worktree = createLinkedWorktree({ repoRoot: root, runId, baseBranch: opts.baseBranch })
+      // T10: a linked-worktree create is the operation the item names as the "hung" one — git
+      // can take a long time on a large repo — and like the linter it CANNOT stop mid-flight,
+      // because `createLinkedWorktree` is synchronous. What the job buys is therefore the same
+      // and is stated plainly: the board SEES it running and the caller can stop WAITING.
+      //
+      // The failure path is unchanged: `createLinkedWorktree` reports `{ ok: false, error }`
+      // rather than throwing, so a refused create still throws exactly what it threw before.
+      const created = await runTracked(this.jobs, {
+        kind: 'worktree',
+        label: 'worktree ' + runId,
+        run: async ({ report, signal }) => {
+          report('creating ' + runId)
+          if (signal.aborted) throw new Error('worktree create cancelled before it started')
+          return createLinkedWorktree({ repoRoot: root, runId, baseBranch: opts.baseBranch })
+        },
+      })
+      if (created.status !== 'completed' || created.value === undefined) {
+        throw new Error(created.detail ?? created.error ?? 'worktree create did not complete')
+      }
+      worktree = created.value
       if (!worktree.ok) throw new Error(worktree.error ?? 'worktree create failed')
       scaffoldRoot = worktree.worktreeDir
     }

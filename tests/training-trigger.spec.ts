@@ -175,8 +175,40 @@ describe('T30 — a success that wrote nothing is REPORTED as such', () => {
         },
       })
       expect(result.code).toBe('OK')
-      expect(result.writes).toEqual(['memory/domains/lock.md'])
-      expect(written).toEqual(['memory/domains/lock.md'])
+      // BOTH shards: the domain one, then the task-type one for the mode the group was extracted under.
+      expect(result.writes).toEqual(['memory/domains/lock.md', 'memory/training/winner-only.md'])
+      expect(written).toEqual(result.writes)
+      // ⚠ THE REGISTRY IS NOT REFRESHED without a reader, AND THE RESULT SAYS SO — a silent half-write
+      // would leave MEMORY.md describing a plane that changed underneath it.
+      expect(result.reason).toContain('registry was NOT refreshed')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('REFRESHES the registry through the reader seam, replacing a shard’s line rather than appending', () => {
+    const root = makeRoot(2)
+    try {
+      const files = new Map<string, string>()
+      files.set('memory/MEMORY.md', '# Memory\n\n- `memory/domains/lock.md` — task type: contrastive\n')
+      const items = [
+        { runId: 'run-0', paths: ['src/lock.ts'], text: 'a' },
+        { runId: 'run-1', paths: ['src/lock.ts'], text: 'b' },
+      ]
+      const result = runPhase8Trigger(root, 'run-0', {
+        rerun: true,
+        extractorAvailable: true,
+        items,
+        write: (relativePath, content) => { files.set(relativePath, content); return relativePath },
+        readText: (relativePath) => files.get(relativePath) ?? null,
+      })
+      expect(result.code).toBe('OK')
+      expect(result.writes).toContain('memory/MEMORY.md')
+      const registry = files.get('memory/MEMORY.md') ?? ''
+      // ONE line for that shard, with the CURRENT mode — not a second line claiming the plane holds it twice.
+      expect(registry.split('\n').filter((line) => line.includes('memory/domains/lock.md')).length).toBe(1)
+      expect(registry).toContain('memory/domains/lock.md` — task type: winner-only')
+      expect(registry).toContain('memory/training/winner-only.md')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

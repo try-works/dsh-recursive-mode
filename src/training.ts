@@ -178,6 +178,11 @@ export function runPhase8Trigger(
      * updates").
      */
     write?: (relativePath: string, content: string) => string
+    /**
+     * The registry read seam. WITHOUT IT THE REGISTRY IS NOT REFRESHED and the result SAYS SO, because
+     * a silent half-write would leave `MEMORY.md` describing a plane that has changed underneath it.
+     */
+    readText?: (relativePath: string) => string | null
   } = {},
 ): TrainingResult {
   const locked = countPhase8LockedRuns(root)
@@ -229,10 +234,31 @@ export function runPhase8Trigger(
     const body = renderGroupShard(group)
     writes.push(options.write('memory/domains/' + group.subsystem + '.md', body))
   }
+  // One TRAINING shard per mode, and the registry refreshed to match what was just written.
+  const byMode = new Map<TrainingGroup['mode'], TrainingGroup[]>()
+  for (const group of groups) {
+    const bucket = byMode.get(group.mode)
+    if (bucket === undefined) byMode.set(group.mode, [group])
+    else bucket.push(group)
+  }
+  const registryEntries: Array<{ path: string; taskType: string }> = []
+  for (const [mode, modeGroups] of byMode) {
+    const path = taskTypeShardPath(mode)
+    writes.push(options.write(path, renderTaskTypeShard(modeGroups)))
+    registryEntries.push({ path, taskType: mode })
+  }
+  for (const group of groups) {
+    registryEntries.push({ path: 'memory/domains/' + group.subsystem + '.md', taskType: group.mode })
+  }
+  if (options.readText !== undefined) {
+    const existing = options.readText('memory/MEMORY.md') ?? ''
+    writes.push(options.write('memory/MEMORY.md', updateMemoryRegistry(existing, registryEntries)))
+  }
   return {
     code: 'OK',
     exit: 0,
-    reason: 'extracted ' + groups.length + ' group(s): ' + summary,
+    reason: 'extracted ' + groups.length + ' group(s): ' + summary
+      + (options.readText === undefined ? ' — the registry was NOT refreshed (no reader supplied)' : ''),
     writes,
   }
 }
@@ -335,6 +361,61 @@ export function runExtractor(
       reason: 'the extractor exited 0 but its output is not JSON, which is a BROKEN EXTRACTOR rather than a run with nothing to learn',
     }
   }
+}
+
+/**
+ * T30 — the registry line for a shard, and the registry update.
+ *
+ * ⚠ THE REGISTRY IS REFRESHED BY REPLACING A SHARD'S LINE, NOT BY APPENDING. Two lines for one shard
+ * would make `MEMORY.md` claim the plane holds something twice, and the loader reads the registry
+ * first — so a duplicated marker is not cosmetic, it is a wrong answer about what exists.
+ *
+ * ⚠ AND A SHARD IS NEVER REMOVED HERE. Per the memory-worker discipline this borrows: **supersede,
+ * never delete.** A shard that stops being written keeps its line and its history; removing it is a
+ * tombstone decision, not a side effect of training.
+ */
+export function registryLine(shardPath: string, taskType: string): string {
+  return '- `' + shardPath + '` — task type: ' + taskType
+}
+
+export function updateMemoryRegistry(existing: string, entries: ReadonlyArray<{ path: string; taskType: string }>): string {
+  const lines = existing === '' ? [] : existing.replace(/\n$/, '').split('\n')
+  for (const entry of entries) {
+    const marker = '- `' + entry.path + '`'
+    const at = lines.findIndex((line) => line.startsWith(marker))
+    const line = registryLine(entry.path, entry.taskType)
+    if (at >= 0) lines[at] = line
+    else lines.push(line)
+  }
+  return lines.join('\n') + '\n'
+}
+
+/**
+ * T30 — the task-type shard.
+ *
+ * ⚠ `task-type` IS READ FROM THE GROUP'S MODE, and that is an INTERPRETATION rather than a measured
+ * fact: the parent writes `memory/training/<task-type>.md` without defining the key in the material I
+ * have, so the mode a group was extracted under (`contrastive` / `winner-only`) is what distinguishes
+ * one training shard from another here. Named so a reader can disagree with it instead of discovering it.
+ */
+export function taskTypeShardPath(mode: TrainingGroup['mode']): string {
+  return 'memory/training/' + mode + '.md'
+}
+
+export function renderTaskTypeShard(groups: readonly TrainingGroup[]): string {
+  const lines = [
+    '# Training shards: ' + groups[0].mode,
+    '',
+    'Groups extracted under this mode, one section each. Learning happens through files, not model mutation.',
+    '',
+  ]
+  for (const group of groups) {
+    lines.push('## ' + group.subsystem, '')
+    lines.push('- Runs: ' + group.runs + ' (' + [...new Set(group.items.map((item) => item.runId))].join(', ') + ')')
+    for (const item of group.items) lines.push('- [' + item.runId + '] ' + item.text)
+    lines.push('')
+  }
+  return lines.join('\n') + '\n'
 }
 
 /**

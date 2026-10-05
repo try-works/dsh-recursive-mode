@@ -229,3 +229,69 @@ describe('T36 — the degraded and broken paths are NAMED', () => {
     }
   })
 })
+
+/**
+ * T36 — the driver sends the repair itself when the LOOP stopped early.
+ *
+ * The loop's own verdict reader falls back to APPROVE for a result with no
+ * structured verdict, so a child that answered in prose can make the loop believe it
+ * was approved and END. Without this, the round would sit in `revised` forever with
+ * nothing ever asking the child to fix anything — the exact opposite of the point.
+ */
+describe('T36 — a misread approval still produces a repair instruction', () => {
+  function advanceWith(runDir: string, reply: string, sendRepair?: (childId: string, text: string) => Promise<void>) {
+    return advanceReview({
+      runDir,
+      delegationId: DELEGATION,
+      phase: '3',
+      role: 'code-reviewer',
+      // The loop stopped believing it was approved.
+      delegate: async () => loopResult({ accepted: true }),
+      readReply: () => reply,
+      ...(sendRepair === undefined ? {} : { sendRepair }),
+    })
+  }
+
+  it('SENDS the repair to the same child when the loop stopped on a misread', async () => {
+    const runDir = runRoot()
+    try {
+      const sent: Array<{ childId: string; text: string }> = []
+      const outcome = await advanceWith(runDir, 'it seems fine to me', async (childId, text) => {
+        sent.push({ childId, text })
+      })
+      expect(outcome.status).toBe('revised')
+      expect(sent).toHaveLength(1)
+      expect(sent[0].childId).toBe('child-1')
+      // The instruction names what was wrong, so it can actually be acted on.
+      expect(sent[0].text).toContain('reply.md')
+      expect(outcome.message).toContain('repair instruction was sent')
+    } finally {
+      rmSync(runDir, { recursive: true, force: true })
+    }
+  })
+
+  it('a FAILED repair delivery is reported, and the child is still kept for a retry', async () => {
+    const runDir = runRoot()
+    try {
+      const outcome = await advanceWith(runDir, 'no verdict here', async () => {
+        throw new Error('followup seam unavailable')
+      })
+      expect(outcome.status).toBe('revised')
+      expect(outcome.message).toContain('kept so the repair can be sent')
+      expect(readReviewState(runDir, DELEGATION)!.childId).toBe('child-1')
+    } finally {
+      rmSync(runDir, { recursive: true, force: true })
+    }
+  })
+
+  it('with no repair seam the child is kept and the message says so', async () => {
+    const runDir = runRoot()
+    try {
+      const outcome = await advanceWith(runDir, 'it seems fine to me')
+      expect(outcome.status).toBe('revised')
+      expect(outcome.message).toContain('kept so the repair can be sent')
+    } finally {
+      rmSync(runDir, { recursive: true, force: true })
+    }
+  })
+})

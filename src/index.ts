@@ -13,6 +13,8 @@ import { createRecursiveScratchTool } from './recursive_scratch.tool.ts'
 import { createRecursiveWorktreeTool } from './recursive_worktree.tool.ts'
 import { createRecursivePhaseTool } from './recursive_phase.tool.ts'
 import { createRecursiveAuditTeamTool } from './recursive_audit_team.tool.ts'
+import { createRecursiveReviewTool } from './recursive_review.tool.ts'
+import type { SubagentsRuntimeLike } from './delegation.ts'
 import { registerRecursiveCommand } from './commands.ts'
 import { evaluateToolGuard, coerceAskToDecision, type ToolGuardDecision } from './enforcement.ts'
 import { appendGuardDecision, appendObservedTamper, type GuardDecisionRecord } from './guard-log.ts'
@@ -154,6 +156,11 @@ export function apply(ctx: Context, config?: { shellOnly?: boolean; repoRoot?: s
     // live service's real Agent parameter is a superset of TeamCallerHandle, so
     // the seam passes the exact live Agent the tool extracts from exec.agent.
     const agentTeams = ctx.get('agentTeams') as TeamRuntimeLike | undefined
+    // T36: the continuable-subagent seam the review tool drives. Optional for the
+    // same reason as agentTeams — absent it, `recursive_review` still runs and
+    // reports `unavailable`, naming that the repair path does not exist rather than
+    // pretending the review was a success.
+    const subagentsSeam = ctx.get('subagents') as SubagentsRuntimeLike | undefined
 
     // Packaged skill (dsh plugin standard): register the `recursive-mode` skill
     // into the host skills registry via ctx.skills.registerProvider (the
@@ -171,6 +178,7 @@ export function apply(ctx: Context, config?: { shellOnly?: boolean; repoRoot?: s
       ctx.tools.register(createRecursiveScratchTool(recursive)),
       ctx.tools.register(createRecursiveWorktreeTool(recursive)),
       ctx.tools.register(createRecursivePhaseTool(recursive)),
+      ctx.tools.register(createRecursiveReviewTool(recursive, subagentsSeam)),
       ...(agentTeams ? [ctx.tools.register(createRecursiveAuditTeamTool(agentTeams))] : []),
     ]
 

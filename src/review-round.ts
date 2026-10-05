@@ -28,7 +28,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { readVerdictFromReply, type ContinuableDelegationLike, type DelegationVerdict } from './delegation.ts'
+import { readRepairFromReply, readVerdictFromReply, type ContinuableDelegationLike, type DelegationVerdict } from './delegation.ts'
 
 /** The durable record of an in-flight review, so the next turn can resume it. */
 export interface ReviewState {
@@ -120,6 +120,18 @@ export async function advanceReview(input: {
   delegate: (args: { resumeChild?: string }) => Promise<ContinuableDelegationLike>
   /** The child's reply text for the settled round, or '' when it has not written one. */
   readReply: (childId: string) => string
+  /**
+   * Deliver a repair instruction to the child.
+   *
+   * NEEDED BECAUSE THE LOOP CAN STOP EARLY ON A MISREAD. The loop's own verdict
+   * reader falls back to APPROVE when a result carries no structured verdict, so a
+   * child that answered in prose can make the loop believe it was approved and
+   * END — leaving no repair sent and the child idle. This driver re-reads the reply
+   * fail-closed and disagrees, so it must be able to send the repair itself;
+   * otherwise the round would sit in `revised` forever with nothing ever asking the
+   * child to fix anything.
+   */
+  sendRepair?: (childId: string, instruction: string) => Promise<void>
   now?: () => string
 }): Promise<AdvanceReviewOutcome> {
   const { runDir, delegationId } = input
@@ -204,7 +216,8 @@ export async function advanceReview(input: {
   }
 
   // Anything else — an unreadable reply, a stopped child, a REVISE the loop ended on —
-  // is a REPAIR, not a pass: keep the state so the child can be told to fix it.
+  // is a REPAIR, not a pass: keep the state so the child can be told to fix it, and
+  // TELL IT, since the loop may have stopped believing it was approved.
   if (childId !== undefined) {
     writeReviewState(runDir, {
       delegationId,
@@ -216,15 +229,32 @@ export async function advanceReview(input: {
       lastVerdict: 'REVISE',
     })
   }
+  let repairSent = false
+  if (childId !== undefined && input.sendRepair !== undefined) {
+    try {
+      await input.sendRepair(childId, readRepairFromReply(replyText))
+      repairSent = true
+    } catch {
+      // The repair could not be delivered; the child is still kept, so a later turn
+      // can retry. Reported below rather than swallowed.
+    }
+  }
+  // BOTH facts are always stated: WHY the round is a repair, and what happened to
+  // the child — because a caller that does not know the child was kept cannot know
+  // whether a later turn can still repair it.
+  const why = result.accepted
+    ? 'the reviewer approved, but the reply could not be read as an APPROVE; treated as REVISE so it is not '
+      + 'accepted on a technicality.'
+    : 'the round ended without an approval.'
+  const what = repairSent
+    ? ' A repair instruction was sent to the SAME child.'
+    : ' The child is kept so the repair can be sent to it.'
   return {
     status: 'revised',
     childId,
     verdict: 'REVISE',
     rounds,
-    message: result.accepted
-      ? 'the reviewer approved, but the reply could not be read as an APPROVE; treated as REVISE so it is not '
-        + 'accepted on a technicality.'
-      : 'the round ended without an approval; the child is kept so the repair can be sent to it.',
+    message: why + what,
   }
 }
 

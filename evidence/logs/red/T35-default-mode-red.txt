@@ -1,0 +1,17 @@
+T35 RED EVIDENCE — the spec fails against the PRE-T35 behaviour.
+
+With `delegateReview` restored to its old branch condition
+(`input.mode === 'continuable'`), an omitted mode fell through to one-shot:
+
+  × an omitted mode uses the continuable lifecycle and NEVER start()
+    -> expected [ 'start' ] to include 'startContinuable'
+  × a provider with no continuable capability is NAMED, not hidden behind success
+    -> expected 'one-shot' to be 'continuable-unavailable'
+
+  Tests  2 failed | 3 passed (5)
+
+This is the bug T35 names: every caller omitted `mode`, so every delegation took
+the one-shot path and silently forfeited the repair capability — the child could
+not be messaged again because a one-shot child is not resumable.
+
+The behaviour was then restored and the spec passes 5/5.

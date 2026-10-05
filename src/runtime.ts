@@ -237,6 +237,19 @@ export class RecursiveRuntime extends Service {
    * ctx.subagents with the full request (R4). Workspace-scoped: every path
    * resolves under the session's control-plane root.
    *
+   * DELEGATION IS ALWAYS CONTINUABLE (T35). The default mode is `continuable`:
+   * an explicit `mode: 'one-shot'` is the ONLY way to give up the repair path,
+   * and that path only exists for a caller that genuinely discards the result.
+   *
+   * WHY THIS IS THE DEFAULT. A one-shot child is NOT resumable — the harness
+   * rejects a resume with "subagent cannot be resumed" — so choosing one-shot
+   * forfeits the ability to send a failed review back to the agent that did the
+   * work. A continuable child has ONE durable Session across activations, so a
+   * REVISE reaches the SAME child with its working context intact instead of
+   * spawning a fresh one that must re-read the whole handoff to rediscover what
+   * it already knew. Since verification that cannot be followed by repair is
+   * just a complaint, the repair path is the default rather than an option.
+   *
    * `mode: 'continuable'` (T4) runs the audit→repair→re-audit loop on ONE
    * durable continuable child (startContinuable → followup with the repair
    * instruction → settle) and drains the child on closeout. It requires an
@@ -264,6 +277,11 @@ export class RecursiveRuntime extends Service {
     subagents?: SubagentsRuntimeLike
     maxDepth?: number
     toolFilter?: unknown
+    /**
+     * T35: which child lifecycle to use. DEFAULT `continuable` — a one-shot
+     * child cannot be resumed, so one-shot forfeits the repair path and must be
+     * requested explicitly by a caller that will discard the result.
+     */
     mode?: 'one-shot' | 'continuable'
     awaitRoundResult?: (childId: ContinuableChildId, messageId: ContinuableMessageId) => Promise<SubagentResultLike | null>
     maxRounds?: number
@@ -340,8 +358,9 @@ export class RecursiveRuntime extends Service {
     if (decision.tier === 'native' || decision.tier === 'external-cli') {
       if (!input.subagents) {
         error = 'no ctx.subagents runtime available (self-audit fallback)'
-      } else if (input.mode === 'continuable') {
-        // T4: one durable child carries every round; start() is never called.
+      } else if (input.mode !== 'one-shot') {
+        // T35: continuable BY DEFAULT — only an explicit 'one-shot' opts out of
+        // the repair path, because a one-shot child cannot be resumed.
         continuable = await delegateContinuable({
           subagents: input.subagents,
           provider: decision.provider as string,
@@ -388,7 +407,7 @@ export class RecursiveRuntime extends Service {
       subagentId: input.childId,
       phase: input.phase,
       purpose: input.role + ' for run ' + input.runId,
-      executionMode: decision.tier + (input.mode === 'continuable' ? ' (continuable)' : ''),
+      executionMode: decision.tier + (input.mode !== 'one-shot' ? ' (continuable)' : ''),
       artifactPath: input.artifactPath,
       upstreamArtifacts: input.upstreamArtifacts,
       reviewBundle: bundle.repoRelativePath,
@@ -399,6 +418,16 @@ export class RecursiveRuntime extends Service {
       success: evaluation.accepted,
       stopReason: result?.stopReason,
     })
+
+    // T35: report the mode that ACTUALLY ran, not the one that was asked for. A
+    // missing continuable capability is a real loss — the review can no longer be
+    // sent back to the child that did the work — so it is NAMED rather than
+    // hidden behind a generic success. `continuable-unavailable` is the honest
+    // label for that case: the delegation still happened, the repair path did not.
+    const delegationMode: 'continuable' | 'one-shot' | 'continuable-unavailable' | 'none'
+      = continuable !== null
+        ? (continuable.fellBackToOneShot ? 'continuable-unavailable' : 'continuable')
+        : result !== null ? 'one-shot' : 'none'
 
     // T4: the durable child id is reported for the caller (a tool/closeout that
     // holds the live parent Agent may drain it explicitly); the HOST owns the
@@ -418,6 +447,8 @@ export class RecursiveRuntime extends Service {
       evaluation,
       actionRecordPath,
       error,
+      /** T35: which child lifecycle actually carried this delegation. */
+      delegationMode,
       continuable: continuable ? { rounds: continuable.rounds, childId: continuable.childId, fellBackToOneShot: continuable.fellBackToOneShot } : null,
     }
   }

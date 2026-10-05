@@ -616,6 +616,23 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 
 ---
 
+### T35 — Delegation is ALWAYS continuable; one-shot must be asked for · **done — added mid-Sprint-2**
+
+- **Why (operator directive, and it is the point of verification).** Review that cannot be followed by repair is just a complaint. A **one-shot child is not resumable** — the harness rejects a resume with `subagent cannot be resumed` — so delegating one-shot silently forfeits the ability to send a failed review back to the agent that did the work. A **continuable child has ONE durable Session across activations**, so a `REVISE` reaches the SAME child with its working context intact, instead of spawning a fresh one that must re-read the whole handoff to rediscover what it already knew. This is the mechanism the harness itself provides for exactly this purpose (`startContinuable` → `followup` to the same durable child), so the plugin should be on it by default rather than by request.
+- **The rule.** `delegateReview`'s `mode` defaults to **`continuable`**. An explicit `mode: 'one-shot'` is the ONLY way to give up the repair path, and is reserved for a caller that genuinely discards the result. Two hard preconditions remain, because they are capability facts rather than preferences: the continuable path needs the `awaitRoundResult` observer (the parent-side settlement seam) and the exact live `parent` Agent (followup is authorized by object identity). When either is absent the delegation still happens but the loss is **NAMED** — `delegationMode: 'continuable-unavailable'` — rather than hidden behind a generic success.
+- **TDD Mode:** strict.
+- **RED:** `tests/delegation-mode.spec.ts` — an omitted mode uses the continuable lifecycle and never calls `start()`; `mode: 'continuable'` behaves identically; only an explicit `mode: 'one-shot'` calls `start()`; a provider without the continuable capability reports `continuable-unavailable`.
+- **Substrate:** none.
+- **Acceptance:** no delegation in this plugin can lose the repair path without saying so.
+- **Evidence:** `tests/delegation-mode.spec.ts` (5 tests; RED captured at 2 failing against the pre-T35 behaviour in `evidence/logs/red/T35-default-mode-red.txt`); full suite **55 files / 410 tests**; typecheck 0.
+
+- **RESULT — done, and it exposed that the seam had never been exercised at all.** The RED run is the finding: with the old branch condition, the spec fails with `expected [ 'start' ] to include 'startContinuable'` — i.e. **every** caller that omitted `mode` (which was all of them) took the one-shot path. The default is now continuable, the actual mode is reported as `delegationMode` (`continuable` | `one-shot` | `continuable-unavailable` | `none`), and the action record's `executionMode` is derived from what ACTUALLY ran rather than what was requested.
+  - **Second finding, and it is the real one: `delegateReview` HAS NO CALLERS.** Not in `src/`, not in `tests/`, not in `scripts/` — the T4 continuable loop is fully implemented, covered at the `delegateContinuable` level, and reached by nothing. So flipping the default changes the behaviour of a path no production caller walks yet, and this spec is that method's **first** coverage. The directive is therefore only half-satisfied by the default: delegations must also be **wired to this entry point** for a failed review to become a repair. Recorded as the next item rather than folded in, because wiring changes which mechanism drives review (this seam vs. the `agentTeams` board used by `recursive_audit_team`) and that choice deserves its own decision.
+  - **A caveat on the fallback, stated plainly:** when the continuable seam is missing, the delegation still returns a usable result and the review still happens — only the *repair round-trip* is unavailable. `continuable-unavailable` is therefore a capability degradation, not a failure, and a caller must not read it as one.
+  - **Whole-repo note:** the same reasoning applies to any future delegation path in this plugin — including the `agentTeams` board, which can carry a repair instruction but only to a **task**, not to the session that did the work. That asymmetry is worth remembering when the two mechanisms are reconciled.
+
+---
+
 ## 5. To-do checklist (ordered)
 
 Ordered by value-to-risk, not by T-number. **T-1 is first because the tree is red**, and every item's acceptance test is "the suite stays green". T15 follows because it is a bug that invalidates a stated success criterion.
@@ -645,6 +662,7 @@ Sprint 2 — make the workflow legible
 [ ] T17 phase dependency as a DAG
 
 Sprint 3 — make it bounded and extensible
+[x] T35 delegation is ALWAYS continuable (one-shot must be asked for)  ← DONE (default flipped; delegateReview had NO callers — wiring is the next item)
 [ ] T34 make the repo installable from any location (the checkout-relative `link:` trap)
 [ ] T32 verify the receipt hash chain on read (written but never read — closes review finding E)
 [ ] T19 deterministic operation identity from canonical inputs
@@ -707,6 +725,7 @@ Evidence paths marked `(planned)` do **not** exist yet — they are the spec tha
 | T19 | deterministic operation identity | strict | backlog | (planned) `tests/identity.spec.ts` | (planned) same | canonical JSON then SHA-256 + byte length; two independent systems converged on this |
 | T20 | no-progress recovery bound | strict | backlog | (planned) `tests/audit-progress.spec.ts` | (planned) same | cap on `consecutiveNoProgress`; terminal state needs an explicit resume |
 | T21 | incremental fold + named position | strict | **done** | `tests/fold-incremental.spec.ts` (11, RED 11) + 4 client cases | full suite 54 files/405 tests + typecheck 0 | `size:mtimeMs` frame cache (zero artifact reads when unchanged) + `foldDiagnostics()`; the append-only assertion THROWS on a vanished artifact but a cold fold stays honest; `position` is a closed 7-word vocabulary, with `tampered` outranking other lock problems. **It found a real disagreement:** the client called an `invalid-lock` phase "locked" because it tested only `status`. `currentPhase` keeps its parity-pinned shape |
+| T35 | delegation is always continuable | strict | **done** | `tests/delegation-mode.spec.ts` (5, RED 2) | full suite 55 files/410 tests + typecheck 0 | `mode` defaults to `continuable` — only an explicit `mode: 'one-shot'` opts out — because a one-shot child is NOT resumable, so one-shot forfeits repair. `delegationMode` reports what actually ran and names `continuable-unavailable` rather than hiding it. **Finding: `delegateReview` had no callers at all**, so this is its first coverage; wiring a caller is the next item |
 | T22 | stable prompt prefix + digest | strict/pragmatic | backlog | (planned) `tests/policy-sections.spec.ts` | (planned) same | **largest cost lever**; fully compatible with zero-emission |
 | T23 | `recursive_ask` | strict | backlog | (planned) `tests/recursive-ask.spec.ts` | (planned) same | three human gates render as cards |
 | T24 | result caps + error codes | strict | **done** | `tests/errors.spec.ts` (12) + `tests/result-caps.spec.ts` (11) | full suite 52 files/376 tests + typecheck 0 | 13-entry registry over all 19 refusal sites, class group embedded in the code; lint result bounded by `mode` with true totals kept and every clip reported; the "every refusal is coded" rule is ENFORCED by a static scan, so a new tool cannot bypass it |

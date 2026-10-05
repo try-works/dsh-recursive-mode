@@ -118,6 +118,35 @@ Concretely, "done" means:
 
 ---
 
+### Re-derived for rc.2 (T31a-tail) — the rows above that have MOVED
+
+The table above records the readings that **created** this backlog. Re-measured at the close of the
+backlog (commit `b3ab63d`, peer pinned at `0.2.0-rc.2`), these rows no longer read what they read:
+
+| Measurement | Was | Now | What moved it |
+| --- | --- | --- | --- |
+| readers of `memory/MEMORY.md` | **0** | **6 sites** | T29 — the plane is read at phase entry, on the existing once-gate |
+| writers of `memory/training/**` | **0** | **written** | T30 — both shard kinds plus a REPLACED registry line |
+| `validateTransition` callers | **0 — never called** | **1** | T15 — the advisory tool guard |
+| `detectTamper` callers | **0** | **3** | tamper mode is surfaced, not merely exported |
+| `evaluateToolGuard` call sites | **1** (`runId = ''`) | **3** | the guard is asked with a real run id now |
+| `writeFileSync` sites | 22 | **18** | consolidation; still all synchronous, so the single-writer claim stands |
+| registered tools | 10 | **12** | `recursive_ask` (T23), `recursive_preview` (T26) |
+| `pnpm test` | 45/45 files, 279 tests | **81 files, 804 tests** | the whole backlog |
+| parity + invariant specs | 54/54 green | **green, unchanged** | the §5 constraint held throughout — the acceptance bar every delegation was measured against |
+
+**Two rows are deliberately NOT restated as improvements, because the count is not the claim:**
+`Promise.all`/`race` in `src/` reads **2** and `worker_threads`/`child_process` reads **4**, but those are
+**text matches that include comments** — the first is the audit fan-out's `parallel` branch (T2) and the
+second is the prose explaining why the training extractor's runner is **injected rather than spawned**.
+Neither is concurrency the plugin actually schedules, and a re-derivation that reported them as new
+capability would be measuring the wrong thing.
+
+**And one row is now FALSE in a way worth keeping visible:** `ctx.storageDomain` is still **0**. Every
+addition since — the job log, settlements, the operation index, both memory planes — went to **bounded
+git-ignored files**, which was decision (8) in §6 and remains the reason the substrate is reviewable in
+git rather than in a host store.
+
 ## 3. The recursion model (4 axes) — corrected
 
 | Axis | Meaning today | Weakness to fix |
@@ -1022,7 +1051,7 @@ Sprint -1 — get back to green (nothing below is measurable otherwise)
 
 Sprint 0 — rebase onto the pinned baseline
 [x] T31a rebase peer deps onto dsh-v0.2.0-rc.2 (+ file:→link: protocol)  ← DONE
-[ ] T31a-tail re-derive §2's gap map against dsh-v0.2.0-rc.2   (documentation only)
+[x] T31a-tail re-derive §2's gap map against dsh-v0.2.0-rc.2  ← DONE (re-measured at backlog close: the memory rows moved from 0 readers/0 writers to 6 sites and both shard kinds, `validateTransition` 0→1, `detectTamper` 0→3, guard sites 1→3, tools 10→12, tests 279→804, and the parity specs green UNCHANGED. Two rows are explicitly NOT restated as gains because their counts include comments, and `ctx.storageDomain` is still 0 by decision)
 [#] T31b tracking 0.2.1-alpha.1                        DEFERRED — not a gate (see §9.3)
 
 Sprint 1 — make enforcement real (no new infrastructure)

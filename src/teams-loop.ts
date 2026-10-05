@@ -34,7 +34,7 @@ export interface TeamCallerHandle {
  * the plugin, so it comes from the shared module rather than a local copy. That would
  * be the one place two implementations could silently disagree.
  */
-import { operationId } from './identity.ts'
+import { canonicalInput, operationId } from './identity.ts'
 
 /** Minimal cancellation shape (a live AbortSignal satisfies it). */
 export interface TeamAbortSignalLike {
@@ -119,6 +119,11 @@ export interface AuditLoopRound {
   readonly verdict: AuditVerdict
   readonly repair?: string
   readonly taskRevision: number
+  /**
+   * T20: true when this round produced the SAME progress cursor as its predecessor —
+   * the same finding, restated. Rendered so the board shows a loop as a loop.
+   */
+  readonly noProgress?: boolean
 }
 
 /** The auditToPass result. */
@@ -139,6 +144,21 @@ export interface AuditToPassResult {
    * artifact is locked, because a recognised repeat performs no locking.
    */
   readonly recognisedRepeat?: boolean
+  /**
+   * T20: how many rounds ran. The absolute backstop, reported so a caller can see how
+   * close the loop came to its cap.
+   */
+  readonly attempts?: number
+  /** T20: consecutive rounds that produced the SAME progress cursor. */
+  readonly consecutiveNoProgress?: number
+  /** T20: the last round's progress cursor — what the round said was wrong. */
+  readonly progressCursor?: string
+  /**
+   * T20: true when the loop stopped in a state that must NOT be retried
+   * automatically — no progress, or the attempt cap. The caller has to decide to
+   * resume, deliberately, rather than a loop quietly grinding on or quietly giving up.
+   */
+  readonly resumeRequired?: boolean
 }
 
 /**
@@ -182,6 +202,14 @@ export interface AuditToPassInput {
   readonly reviewerName?: string
   /** Round cap (fail loud past it; no lock). */
   readonly maxRounds?: number
+  /**
+   * T20: how many CONSECUTIVE rounds may repeat the same progress cursor before the
+   * loop stops and demands a resume. Default 2, so three identical rounds terminate:
+   * the first sets the cursor and the next two repeat it. Absent the bound, a phase
+   * could restate one unfixed finding until the attempt cap, which is the wrong
+   * budget — a round count indulges a loop while cutting off genuine progress.
+   */
+  readonly maxNoProgress?: number
   /** Per-round wait timeout before the audit round runs (skipped without the seam). */
   readonly waitTimeoutMs?: number
 }
@@ -202,7 +230,13 @@ export function renderTaskHistory(task: TeamTaskViewLike | undefined, rounds: re
   }
   for (const round of rounds) {
     const repair = round.repair ? ' — ' + round.repair : ''
-    lines.push('round ' + round.round + ': ' + round.verdict + ' (task rev ' + round.taskRevision + ')' + repair)
+    const marker = round.noProgress ? ' [no progress]' : ''
+    lines.push('round ' + round.round + ': ' + round.verdict + ' (task rev ' + round.taskRevision + ')' + repair + marker)
+  }
+  // T20: a loop should LOOK like a loop on the board, not just end like one.
+  const noProgressRounds = rounds.filter((round) => round.noProgress === true).length
+  if (noProgressRounds > 0) {
+    lines.push('no progress: ' + noProgressRounds + ' round(s) restated the same finding — an explicit resume is required')
   }
   return lines.join('\n')
 }
@@ -267,6 +301,11 @@ export async function auditToPass(input: AuditToPassInput): Promise<AuditToPassR
 async function runAuditToPass(input: AuditToPassInput): Promise<AuditToPassResult> {
   const { teams, caller, runId, phase, runAuditRound, lockPhase } = input
   const maxRounds = input.maxRounds ?? 3
+  // T20: the no-progress bound, and the counters that make it visible.
+  const maxNoProgress = input.maxNoProgress ?? 2
+  let consecutiveNoProgress = 0
+  let progressCursor = ''
+  let attempts = 0
   const waitTimeoutMs = input.waitTimeoutMs ?? 30_000
   const waitForChange = teams.waitForChange
   const interrupt = teams.interrupt
@@ -295,11 +334,23 @@ async function runAuditToPass(input: AuditToPassInput): Promise<AuditToPassResul
       const outcome = await runAuditRound(round, current)
       if (!isSameTask(current, task.id)) return { ok: false, reason: 'round observed a foreign task', taskId: task.id, rounds, locked: false, taskView: current }
 
+      // T20 — THE PROGRESS CURSOR. A round's statement of what is wrong is its verdict
+      // plus the repair it produced (that repair is synthesized from the findings, so
+      // it is the round's own summary of the problem). The SAME cursor twice running
+      // means the previous repair did not change anything, which is a loop; a CHANGED
+      // cursor is progress and resets the counter. Canonical JSON, so two structurally
+      // identical rounds cannot differ by key order.
+      attempts = round
+      const cursor = canonicalInput({ verdict: outcome.verdict, repair: outcome.repair ?? '', reason: outcome.reason ?? '' })
+      const repeated = cursor === progressCursor
+      consecutiveNoProgress = repeated ? consecutiveNoProgress + 1 : 0
+      progressCursor = cursor
+
       if (outcome.verdict === 'APPROVE') {
         const completed = await teams.updateTask(caller, { taskId: task.id, expectedRevision: current.revision, action: 'complete' })
         await lockPhase()
         rounds.push({ round, verdict: 'APPROVE', taskRevision: completed.revision })
-        return { ok: outcome.accepted, reason: outcome.accepted ? 'audit passed and phase locked' : 'verdict APPROVE but delegation not accepted', taskId: task.id, rounds, locked: true, taskView: completed }
+        return { ok: outcome.accepted, reason: outcome.accepted ? 'audit passed and phase locked' : 'verdict APPROVE but delegation not accepted', taskId: task.id, rounds, locked: true, taskView: completed, attempts, consecutiveNoProgress, progressCursor }
       }
 
       if (outcome.verdict === 'REJECT') {
@@ -318,11 +369,43 @@ async function runAuditToPass(input: AuditToPassInput): Promise<AuditToPassResul
         description: current.description + '\nround ' + round + ' repair: ' + repair,
       })
       current = edited
-      rounds.push({ round, verdict: 'REVISE', repair, taskRevision: edited.revision })
+      rounds.push({ round, verdict: 'REVISE', repair, taskRevision: edited.revision, ...(repeated ? { noProgress: true } : {}) })
+
+      // T20 — STOP THE LOOP, DO NOT SPEND THE CAP ON IT. A phase that restates the
+      // same finding has not been repaired, and more rounds will not repair it. The
+      // terminal state demands an EXPLICIT resume: silently grinding on wastes the
+      // budget, and silently giving up hides an unfixed phase.
+      if (consecutiveNoProgress >= maxNoProgress) {
+        const released = await teams.updateTask(caller, { taskId: task.id, expectedRevision: current.revision, action: 'release' })
+        return {
+          ok: false,
+          reason: 'no progress: ' + consecutiveNoProgress + ' consecutive rounds repeated the same finding (' + repair + ')',
+          taskId: task.id,
+          rounds,
+          locked: false,
+          taskView: released,
+          attempts,
+          consecutiveNoProgress,
+          progressCursor,
+          resumeRequired: true,
+        }
+      }
     }
-    // Round cap: release and fail loud — never lock without an APPROVE.
+    // Round cap: release and fail loud — never lock without an APPROVE. T20 keeps the
+    // cap as the ABSOLUTE backstop for a loop that keeps making progress.
     const released = await teams.updateTask(caller, { taskId: task.id, expectedRevision: current.revision, action: 'release' })
-    return { ok: false, reason: 'max rounds reached without an APPROVE', taskId: task.id, rounds, locked: false, taskView: released }
+    return {
+      ok: false,
+      reason: 'max rounds reached without an APPROVE',
+      taskId: task.id,
+      rounds,
+      locked: false,
+      taskView: released,
+      attempts,
+      consecutiveNoProgress,
+      progressCursor,
+      resumeRequired: true,
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     // A stuck reviewer is interrupted through the team kill switch (the task
@@ -332,7 +415,18 @@ async function runAuditToPass(input: AuditToPassInput): Promise<AuditToPassResul
         interrupt(caller, input.reviewerName ?? 'auditor')
       } catch { /* interrupt is best-effort */ }
     }
-    return { ok: false, reason: message, taskId: task.id, rounds, locked: false, taskView: current }
+    return {
+      ok: false,
+      reason: message,
+      taskId: task.id,
+      rounds,
+      locked: false,
+      taskView: current,
+      attempts,
+      consecutiveNoProgress,
+      progressCursor,
+      resumeRequired: true,
+    }
   }
 }
 

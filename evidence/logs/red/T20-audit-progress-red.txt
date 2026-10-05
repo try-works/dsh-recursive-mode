@@ -1,0 +1,158 @@
+
+ RUN  v2.1.9 D:/DEV/dsh-recursive-mode
+
+ ❯ tests/audit-progress.spec.ts (10 tests | 7 failed) 73ms
+   × T20 — a NON-PROGRESSING audit stops and says why > identical findings terminate as no-progress rather than running out the cap 39ms
+     → expected 'max rounds reached without an APPROVE' to contain 'no progress'
+   × T20 — a NON-PROGRESSING audit stops and says why > the terminal state DEMANDS an explicit resume 6ms
+     → expected undefined to be true // Object.is equality
+   × T20 — a NON-PROGRESSING audit stops and says why > it names the REPEATED instruction, so a human can see what was not fixed 2ms
+     → expected 'max rounds reached without an APPROVE' to contain 'leak'
+   × T20 — a NON-PROGRESSING audit stops and says why > surfaces the counters, because a bound nobody can see is a bound nobody trusts 6ms
+     → actual value must be number or bigint, received "undefined"
+   × T20 — a PROGRESSING audit is not cut short by a round count > DISTINCT findings keep going: the no-progress bound never fires 3ms
+     → expected undefined to be +0 // Object.is equality
+   × T20 — a PROGRESSING audit is not cut short by a round count > the ABSOLUTE cap survives as a backstop for a still-progressing loop 3ms
+     → expected undefined to be true // Object.is equality
+   × T20 — the counters reach the board > renderTaskHistory shows the progress trail 4ms
+     → expected 'task task-a (pending, rev 13): Audit …' to match /no-progress|no progress/i
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/audit-progress.spec.ts > T20 — a NON-PROGRESSING audit stops and says why > identical findings terminate as no-progress rather than running out the cap
+AssertionError: expected 'max rounds reached without an APPROVE' to contain 'no progress'
+
+Expected: "no progress"
+Received: "max rounds reached without an APPROVE"
+
+ ❯ tests/audit-progress.spec.ts:104:27
+    102|     expect(result.ok).toBe(false)
+    103|     expect(result.locked).toBe(false)
+    104|     expect(result.reason).toContain('no progress')
+       |                           ^
+    105|     // It stopped EARLY — the absolute cap was 10 and it never reached…
+    106|     expect(result.rounds.length).toBeLessThan(10)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  tests/audit-progress.spec.ts > T20 — a NON-PROGRESSING audit stops and says why > the terminal state DEMANDS an explicit resume
+AssertionError: expected undefined to be true // Object.is equality
+
+- Expected: 
+true
+
++ Received: 
+undefined
+
+ ❯ tests/audit-progress.spec.ts:111:35
+    109|   it('the terminal state DEMANDS an explicit resume', async () => {
+    110|     const { result } = await run([SAME_FINDING, SAME_FINDING, SAME_FIN…
+    111|     expect(result.resumeRequired).toBe(true)
+       |                                   ^
+    112|     // A released task, never a locked phase.
+    113|     expect(result.locked).toBe(false)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  tests/audit-progress.spec.ts > T20 — a NON-PROGRESSING audit stops and says why > it names the REPEATED instruction, so a human can see what was not fixed
+AssertionError: expected 'max rounds reached without an APPROVE' to contain 'leak'
+
+Expected: "leak"
+Received: "max rounds reached without an APPROVE"
+
+ ❯ tests/audit-progress.spec.ts:118:27
+    116|   it('it names the REPEATED instruction, so a human can see what was n…
+    117|     const { result } = await run([SAME_FINDING, SAME_FINDING, SAME_FIN…
+    118|     expect(result.reason).toContain('leak')
+       |                           ^
+    119|   })
+    120| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  tests/audit-progress.spec.ts > T20 — a NON-PROGRESSING audit stops and says why > surfaces the counters, because a bound nobody can see is a bound nobody trusts
+TypeError: actual value must be number or bigint, received "undefined"
+ ❯ tests/audit-progress.spec.ts:123:29
+    121|   it('surfaces the counters, because a bound nobody can see is a bound…
+    122|     const { result } = await run([SAME_FINDING, SAME_FINDING, SAME_FIN…
+    123|     expect(result.attempts).toBeGreaterThan(0)
+       |                             ^
+    124|     expect(result.consecutiveNoProgress).toBeGreaterThanOrEqual(2)
+    125|     expect(result.progressCursor).toBeTruthy()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  tests/audit-progress.spec.ts > T20 — a PROGRESSING audit is not cut short by a round count > DISTINCT findings keep going: the no-progress bound never fires
+AssertionError: expected undefined to be +0 // Object.is equality
+
+- Expected: 
+0
+
++ Received: 
+undefined
+
+ ❯ tests/audit-progress.spec.ts:143:42
+    141|     // Every round ran: progress was never mistaken for a loop.
+    142|     expect(result.rounds.length).toBeGreaterThanOrEqual(5)
+    143|     expect(result.consecutiveNoProgress).toBe(0)
+       |                                          ^
+    144|   })
+    145| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  tests/audit-progress.spec.ts > T20 — a PROGRESSING audit is not cut short by a round count > the ABSOLUTE cap survives as a backstop for a still-progressing loop
+AssertionError: expected undefined to be true // Object.is equality
+
+- Expected: 
+true
+
++ Received: 
+undefined
+
+ ❯ tests/audit-progress.spec.ts:181:35
+    179|     expect(result.ok).toBe(false)
+    180|     expect(result.reason).toContain('max rounds')
+    181|     expect(result.resumeRequired).toBe(true)
+       |                                   ^
+    182|   })
+    183| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  tests/audit-progress.spec.ts > T20 — the counters reach the board > renderTaskHistory shows the progress trail
+AssertionError: expected 'task task-a (pending, rev 13): Audit …' to match /no-progress|no progress/i
+
+- Expected: 
+/no-progress|no progress/i
+
++ Received: 
+"task task-a (pending, rev 13): Audit to pass: run-1 03
+round 0: REVISE (task rev 2)
+round 1: REVISE (task rev 3) — Address the findings: leak
+round 2: REVISE (task rev 4) — Address the findings: leak
+round 3: REVISE (task rev 5) — Address the findings: leak
+round 4: REVISE (task rev 6) — Address the findings: leak
+round 5: REVISE (task rev 7) — Address the findings: leak
+round 6: REVISE (task rev 8) — Address the findings: leak
+round 7: REVISE (task rev 9) — Address the findings: leak
+round 8: REVISE (task rev 10) — Address the findings: leak
+round 9: REVISE (task rev 11) — Address the findings: leak
+round 10: REVISE (task rev 12) — Address the findings: leak"
+
+ ❯ tests/audit-progress.spec.ts:190:21
+    188|     const history = renderTaskHistory(result.taskView, result.rounds)
+    189|     expect(history).toContain('round 1')
+    190|     expect(history).toMatch(/no-progress|no progress/i)
+       |                     ^
+    191|   })
+    192| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 3 passed (10)
+   Start at  11:27:16
+   Duration  2.55s (transform 254ms, setup 0ms, collect 235ms, tests 73ms, environment 1ms, prepare 756ms)
+
+

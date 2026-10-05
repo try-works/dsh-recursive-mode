@@ -23,7 +23,7 @@
  * Windows note: directory symlinks need elevation, junctions do not — so this uses
  * `junction` on win32, which is also what pnpm itself does.
  */
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, unlinkSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 
 /** The package name prefix every harness dependency shares. */
@@ -118,12 +118,38 @@ function alreadyLinked(path, target) {
 }
 
 /**
+ * Remove whatever currently occupies a link path.
+ *
+ * A LINK IS NOT A DIRECTORY. `rmSync(..., { recursive: true })` does not reliably
+ * remove a junction whose target is gone — which is exactly the state a clone at the
+ * wrong depth leaves behind, because pnpm created links to a relative path that does
+ * not exist. The removal then silently failed and every `symlinkSync` after it threw
+ * `EEXIST`. Links are therefore unlinked, not recursed into (which is also the SAFE
+ * choice: recursing through a live junction would delete the checkout's contents).
+ */
+function removeExisting(path) {
+  try {
+    const stat = lstatSync(path)
+    if (stat.isSymbolicLink()) {
+      unlinkSync(path)
+      return
+    }
+    rmSync(path, { recursive: true, force: true })
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return
+    throw err
+  }
+}
+
+/**
  * Create or repair every harness link under `<repoRoot>/node_modules`.
  *
  * Idempotent, and never throws for a missing checkout: the caller gets a report so
- * it can print an honest message instead of a stack trace.
+ * it can print an honest message instead of a stack trace. Failures are RETURNED in
+ * `errors` as well as logged, because a logger that defaults to silence once hid
+ * fifteen of them.
  * @param {{ repoRoot: string; devDependencies?: object; harnessRoot?: string | null; log?: (line: string) => void }} input
- * @returns {{ linked: string[]; repaired: string[]; missing: string[]; ok: boolean[] }}
+ * @returns {{ linked: string[]; repaired: string[]; missing: string[]; errors: Array<{ name: string; message: string }> }}
  */
 export function linkDsh(input) {
   const log = input.log ?? (() => {})
@@ -131,6 +157,7 @@ export function linkDsh(input) {
   const linked = []
   const repaired = []
   const missing = []
+  const errors = []
   for (const entry of plan) {
     if (!entry.exists) {
       missing.push(entry.name)
@@ -141,19 +168,21 @@ export function linkDsh(input) {
       repaired.push(entry.name)
       continue
     }
-    mkdirSync(dirname(path), { recursive: true })
     try {
-      rmSync(path, { recursive: true, force: true })
+      mkdirSync(dirname(path), { recursive: true })
+      removeExisting(path)
       symlinkSync(entry.target, path, process.platform === 'win32' ? 'junction' : 'dir')
       linked.push(entry.name)
     } catch (err) {
       // One un-linkable package must not abort the rest: the remaining links are
       // still worth having, and the caller reports what failed.
-      log('  ! ' + entry.name + ': ' + (err instanceof Error ? err.message : String(err)))
+      const message = err instanceof Error ? err.message : String(err)
+      errors.push({ name: entry.name, message })
       missing.push(entry.name)
+      log('  ! ' + entry.name + ': ' + message)
     }
   }
-  return { linked, repaired, missing, ok: plan.map((entry) => entry.exists) }
+  return { linked, repaired, missing, errors }
 }
 
 /** Read this repo's devDependencies (the absolute targets live there, not in the lockfile). */
@@ -185,10 +214,15 @@ function main() {
     return
   }
 
-  const report = linkDsh({ repoRoot, devDependencies, harnessRoot })
+  const report = linkDsh({ repoRoot, devDependencies, harnessRoot, log: (line) => console.log(line) })
   const placed = report.linked.length
   const kept = report.repaired.length
   console.log('[link-dsh] linked ' + placed + ', already correct ' + kept + ', unresolved ' + report.missing.length)
+  if (report.errors.length > 0) {
+    // Failures are printed unconditionally: a logger defaulting to silence once hid
+    // fifteen of them behind a cheerful "unresolved 15".
+    console.log('[link-dsh] FAILED to link ' + report.errors.length + ' package(s); first error: ' + report.errors[0].message)
+  }
   if (report.missing.length > 0) {
     console.log('[link-dsh] unresolved: ' + report.missing.join(', '))
   }

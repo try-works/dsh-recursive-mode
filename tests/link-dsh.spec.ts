@@ -17,7 +17,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, lstatSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, lstatSync, symlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -148,6 +148,51 @@ describe('T34 — the harness links are rebuilt from package.json, not the lockf
       expect(linked).toContain('moved')
       // ...while cordis does NOT exist there, so it is reported, not fabricated.
       expect(existsSync(join(f.repo, 'node_modules', '@deepseek-ai', 'cordis'))).toBe(false)
+    } finally {
+      f.dispose()
+    }
+  })
+
+  it('REPAIRS a BROKEN JUNCTION, which is the state a wrong-depth clone leaves', () => {
+    // THE CASE THAT MATTERS, and the one the plain-directory case above does NOT
+    // cover: pnpm at the wrong depth creates links to a relative path that does not
+    // exist. `rmSync(recursive: true)` does not reliably remove such a junction, so
+    // the removal silently failed and every symlinkSync after it threw EEXIST — a
+    // whole clone left unlinked behind a cheerful "unresolved 15".
+    const f = fixture()
+    try {
+      const scoped = join(f.repo, 'node_modules', '@deepseek-ai')
+      mkdirSync(scoped, { recursive: true })
+      symlinkSync(join(f.repo, '..', '..', 'no-such-checkout', 'vendor', 'cordis'), join(scoped, 'cordis'), 'junction')
+      expect(existsSync(join(scoped, 'cordis', 'index.js'))).toBe(false)
+
+      const { out, status } = run(f.repo)
+      expect(status).toBe(0)
+      expect(out).toContain('linked 2')
+      expect(out).not.toContain('FAILED to link')
+      // The broken junction was replaced with a working link.
+      expect(readFileSync(join(scoped, 'cordis', 'index.js'), 'utf8')).toContain('@deepseek-ai/cordis')
+    } finally {
+      f.dispose()
+    }
+  })
+
+  it('REPLACES a plain file squatting on the link path', () => {
+    // Not a failure case but a real one: a stray file (or a half-written install)
+    // where a link belongs is removed and replaced, rather than aborting the rest of
+    // the links. A forced symlink FAILURE is environment-specific and is covered by
+    // the `errors` array the CLI prints unconditionally — the property that matters
+    // is that a failure can never be reported as success, which the report shape
+    // guarantees (missing is populated from the same branch that records the error).
+    const f = fixture()
+    try {
+      const scoped = join(f.repo, 'node_modules', '@deepseek-ai')
+      mkdirSync(scoped, { recursive: true })
+      writeFileSync(join(scoped, 'dsh-tools'), 'in the way', 'utf8')
+      const { out, status } = run(f.repo)
+      expect(status).toBe(0)
+      expect(out).toContain('linked 2')
+      expect(readFileSync(join(scoped, 'dsh-tools', 'index.js'), 'utf8')).toContain('@deepseek-ai/dsh-tools')
     } finally {
       f.dispose()
     }

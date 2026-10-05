@@ -1042,8 +1042,8 @@ Sprint 4 — the original backlog, re-sequenced
 [x] T2  workflowEngine fan-out  ← DONE (plan + orchestration + engine request + `startAuditFanOut` wired at the composition; acceptance met against a SCRIPTED 3-reviewer engine — 3 `agent-end` frames + ONE verdict, and a failed reviewer yields INCOMPLETE, never APPROVE)
 
 Sprint 5 — close the temporal axis (the plugin currently has NO memory hooks)
-[ ] T30 learnings extraction at run close   ← FIRST: T29 has nothing to read until this has run twice
-[ ] T29 memory injection at run start
+[~] T30 learnings extraction at run close  ← the GATE, the GROUPING and the TRIGGER are DONE (zero writes asserted against the FILE TREE on every failure path; one locked run is an anecdote; a single-run group is dropped; extractor-unavailable is exit 2 vs exit 3); the extractor CALL, the memory/training shard and the closeout wiring remain
+[~] T29 memory injection at run start  ← the LOADER and the selection rules are DONE (retired entries excluded by their own text marker, paths weighted above wording, nothing fabricated when nothing matches, caps as a default); the run-entry injection and the reuse of the existing once-gate remain — the loader has NO CALLER in the workflow yet
 
 Done / settled (no action)
 [x] T0  packaged recursive-mode skill

@@ -41,7 +41,7 @@ import type { Session } from '@deepseek-ai/dsh-session'
 import { renderRecursivePolicy, type PolicyContext } from './policy.ts'
 import { snapshotWorkspace } from './snapshot.ts'
 import { createLinkedWorktree, promoteBranch, listWorktrees, defaultWorktreeBranch, type CreateWorktreeResult, type PromoteBranchResult } from './worktree.ts'
-import { gitFacts } from './git-context.ts'
+import { changedPaths, gitFacts } from './git-context.ts'
 import { syncRunGoal, blockRunGoal, resumeRunGoal, type GoalServiceLike } from './goals-projection.ts'
 import { auditToPass, renderTaskHistory, type TeamRuntimeLike, type AuditToPassResult, type TeamCallerHandle, type TeamTaskViewLike, type AuditRoundOutcome } from './teams-loop.ts'
 import type { ContinuableChildId, ContinuableMessageId } from './delegation.ts'
@@ -1037,7 +1037,10 @@ export class RecursiveRuntime extends Service {
     })()
     const selection = selectMemory(root, {
       query: requirements.slice(0, 4000),
-      ...(files === undefined ? {} : { files }),
+      // FU-4: the run's OWN changed paths, computed when the caller supplies none — so T29's path
+      // weighting is fed by a real run rather than only by tests. `[]` from a non-git root is fine: the
+      // query still ranks, and a memory hint must never be why a phase call fails.
+      files: files ?? changedPaths(root),
     })
     return {
       runId: resolved.runId,

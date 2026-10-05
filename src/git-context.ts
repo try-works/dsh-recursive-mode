@@ -49,8 +49,7 @@ export function gitRun(repoRoot: string, ...args: string[]): string | null {
 }
 
 /** True when a non-equal git-dir vs git-common-dir marks a linked worktree. */
-export function isLinkedWorktree(gitDir: string | null, commonDir: string | null): boolean {
-  if (!gitDir || !commonDir) return false
+export function isLinkedWorktree(gitDir: string | null, commonDir: string | null): boolean {  if (!gitDir || !commonDir) return false
   return gitDir !== commonDir
 }
 
@@ -129,4 +128,36 @@ export function verifyWorktreeBranch(repoRoot: string, recordedBranch: string | 
   if (!live) return { ok: false, reason: 'HEAD is detached; expected branch ' + recordedBranch }
   if (live !== recordedBranch) return { ok: false, reason: `checkout is on branch '${live}' but 00-worktree.md records '${recordedBranch}'` }
   return { ok: true, reason: null }
+}
+
+/**
+ * FU-4 — the paths this checkout has actually changed, for the memory loader's path weighting.
+ *
+ * WHY IT EXISTS. T29's selection weights a shard that names a path the run has changed **above** one that
+ * merely shares wording with the query — but nothing computed those paths, so the weighting was exercised
+ * by tests and never by a run. A weighting that is never fed is a rule that does not exist in production.
+ *
+ * ⚠ IT REUSES `gitRun` AND THE SAME TWO QUERIES `ts-lint.ts` ALREADY USES (`diff --name-only` for tracked
+ * changes, `ls-files --others` for new files). A second way of asking git the same question is a second
+ * thing to get subtly wrong — and the lint path is the one with a parity golden behind it.
+ *
+ * ⚠ IT IS CAPPED, AND IT IS BEST-EFFORT. Uncapped, a large checkout would let path matches swamp the
+ * query score entirely, so the list is capped; and a repo where git fails returns `[]` rather than
+ * throwing, because a memory hint must never be the reason a phase call fails.
+ */
+export const MAX_CHANGED_PATHS = 50
+
+export function changedPaths(repoRoot: string, limit: number = MAX_CHANGED_PATHS): string[] {
+  const tracked = gitRun(repoRoot, 'diff', '--name-only', 'HEAD')
+  const untracked = gitRun(repoRoot, 'ls-files', '--others', '--exclude-standard')
+  const paths: string[] = []
+  for (const blob of [tracked, untracked]) {
+    if (blob === null) continue
+    for (const line of blob.split('\n')) {
+      const path = line.trim().replace(/\\/g, '/')
+      if (path !== '' && !paths.includes(path)) paths.push(path)
+      if (paths.length >= limit) return paths
+    }
+  }
+  return paths
 }

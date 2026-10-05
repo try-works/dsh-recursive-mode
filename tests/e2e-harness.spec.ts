@@ -414,6 +414,64 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
     if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
     return { drained, payload: JSON.stringify(closeout) }
   }
+
+  /**
+   * FU-4 — THE CHANGED PATHS ARE ACTUALLY FED TO THE LOADER.
+   *
+   * T29 weights a shard that names a path the run has CHANGED above one that merely shares wording. That
+   * weighting was exercised only by unit tests, because nothing computed the paths. This drives the real
+   * `recursive_phase` tool against a repo with an ACTUAL uncommitted change and two shards: one naming
+   * that path, one matching the query text only. The one naming the changed path must come first.
+   */
+  it('FU-4: a shard naming a CHANGED path outranks one that only matches the wording', async () => {
+    const root = join(scratchRoot(), 'fu4-' + new Date().toISOString().replace(/[:.]/g, '-'))
+    mkdirSync(root, { recursive: true })
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' })
+    execFileSync('git', ['config', 'user.email', 'e2e@example.invalid'], { cwd: root, stdio: 'ignore' })
+    execFileSync('git', ['config', 'user.name', 'e2e'], { cwd: root, stdio: 'ignore' })
+
+    // A REAL uncommitted change: this is what `changedPaths` must find.
+    mkdirSync(join(root, 'src'), { recursive: true })
+    writeFileSync(join(root, 'src', 'fu4-touched.ts'), 'export const touched = true\n', 'utf8')
+    // Two shards, both matching the requirements text; only one names the changed path.
+    mkdirSync(join(root, 'memory', 'domains'), { recursive: true })
+    writeFileSync(join(root, 'memory', 'domains', 'by-path.md'),
+      '## Path evidence\n\nThe lock chain rejects an out-of-order artifact; see src/fu4-touched.ts for the change.\n', 'utf8')
+    writeFileSync(join(root, 'memory', 'domains', 'by-word.md'),
+      '## Wording evidence\n\nThe lock chain rejects an out-of-order artifact transition.\n', 'utf8')
+
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      const call = async (tool: string, args: Record<string, unknown>) => ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('fu4-' + tool),
+        name: tool,
+        arguments: args,
+        agent: { session: { header: { cwd: root } } },
+      } as never)
+
+      await call('recursive_init', { runId: 'fu4-run' })
+      const envelope = JSON.parse(JSON.stringify(await call('recursive_phase', { runId: 'fu4-run' }))) as {
+        content: Array<{ text: string }>
+      }
+      const value = JSON.parse(envelope.content[0].text) as { memory: string; memoryReason: string }
+
+      // Something was injected at all — otherwise the rest would be vacuous.
+      expect(value.memoryReason, 'nothing was injected: ' + value.memoryReason).toContain('injected')
+      // The changed-path shard comes FIRST, which is the weighting this item exists to feed.
+      const pathAt = value.memory.indexOf('Path evidence')
+      const wordAt = value.memory.indexOf('Wording evidence')
+      expect(pathAt, 'neither shard was injected:\n' + value.memory).toBeGreaterThanOrEqual(0)
+      expect(wordAt).toBeGreaterThanOrEqual(0)
+      expect(pathAt, 'the changed-path shard did not outrank the wording-only one:\n' + value.memory).toBeLessThan(wordAt)
+    } finally {
+      if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
+      await ctx.fiber.dispose()
+    }
+  }, 120_000)
 })
 
 /** The last few tool calls, for an assertion message that says what happened. */

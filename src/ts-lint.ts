@@ -135,7 +135,7 @@ export function hasHeading(content: string, headingText: string): boolean {
 
 /** get_heading_body: text under `## Heading` until next heading or end. */
 export function getHeadingBody(content: string, headingText: string): string {
-  const re = new RegExp(`^[ \\t]*##\\s+${escapeRegExp(headingText)}\\s*$\\n?(.*?)(?=^[ \\t]*##\\s+|\Z)`, 'ms')
+  const re = new RegExp(`^[ \\t]*##\\s+${escapeRegExp(headingText)}\\s*$\\n?(.*?)(?=^[ \\t]*##\\s+|(?![\\s\\S]))`, 'ms')
   const m = content.match(re)
   if (!m) return ''
   return (m[1] ?? '').trim()
@@ -144,7 +144,7 @@ export function getHeadingBody(content: string, headingText: string): string {
 /** get_subheading_body: text under `### Heading` (or level N) until next N-or-less heading. */
 export function getSubheadingBody(content: string, headingText: string, level = 3): string {
   const hashes = '#'.repeat(level)
-  const re = new RegExp(`^[ \\t]*${escapeRegExp(hashes)}\\s+${escapeRegExp(headingText)}\\s*$\\n?(.*?)(?=^[ \\t]*#{1,${level}}\\s+|\Z)`, 'ms')
+  const re = new RegExp(`^[ \\t]*${escapeRegExp(hashes)}\\s+${escapeRegExp(headingText)}\\s*$\\n?(.*?)(?=^[ \\t]*#{1,${level}}\\s+|(?![\\s\\S]))`, 'ms')
   const m = content.match(re)
   if (!m) return ''
   return (m[1] ?? '').trim()
@@ -284,7 +284,7 @@ export function extractPathsFromFieldValue(text: string): Set<string> {
 export function extractPathsFromNamedField(content: string, fieldName: string): Set<string> {
   const inlineValue = getMdFieldValue(content, fieldName)
   if (inlineValue !== null) return extractPathsFromFieldValue(inlineValue)
-  const re = new RegExp(`^[ \\t]*(?:[-*][ \\t]+)?${escapeRegExp(fieldName)}:[ \\t]*$\\n(.*?)(?=^[ \\t]*(?:[-*][ \\t]+)?[A-Za-z][^:\\n]*:[ \\t]*|\Z)`, 'ms')
+  const re = new RegExp(`^[ \\t]*(?:[-*][ \\t]+)?${escapeRegExp(fieldName)}:[ \\t]*$\\n(.*?)(?=^[ \\t]*(?:[-*][ \\t]+)?[A-Za-z][^:\\n]*:[ \\t]*|(?![\\s\\S]))`, 'ms')
   const m = content.match(re)
   if (!m) return new Set()
   const out = new Set<string>()
@@ -299,7 +299,7 @@ export function extractPathsFromNamedField(content: string, fieldName: string): 
 export function getNamedFieldText(content: string, fieldName: string): string | null {
   const inlineValue = getMdFieldValue(content, fieldName)
   if (inlineValue !== null) return inlineValue
-  const re = new RegExp(`^[ \\t]*(?:[-*][ \\t]+)?${escapeRegExp(fieldName)}:[ \\t]*$\\n(.*?)(?=^[ \\t]*(?:[-*][ \\t]+)?[A-Za-z][^:\\n]*:[ \\t]*|\Z)`, 'ms')
+  const re = new RegExp(`^[ \\t]*(?:[-*][ \\t]+)?${escapeRegExp(fieldName)}:[ \\t]*$\\n(.*?)(?=^[ \\t]*(?:[-*][ \\t]+)?[A-Za-z][^:\\n]*:[ \\t]*|(?![\\s\\S]))`, 'ms')
   const m = content.match(re)
   if (!m) return null
   return (m[1] ?? '').trim()

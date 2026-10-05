@@ -1,0 +1,155 @@
+
+ RUN  v2.1.9 D:/DEV/dsh-recursive-mode
+
+ ❯ tests/section-parser.spec.ts (14 tests | 7 failed) 52ms
+   × T33 — getHeadingBody > reads the FINAL heading of the document 18ms
+     → expected '' to be 'body two' // Object.is equality
+   × T33 — getHeadingBody > reads the final heading even with a trailing newline 2ms
+     → expected '' to be 'body two' // Object.is equality
+   × T33 — getHeadingBody > does NOT truncate a body at a literal Z — the ISO-timestamp case 7ms
+     → expected '- Timestamp: 2026-01-01T00:00:00' to be '- Timestamp: 2026-01-01T00:00:00Z\n- …' // Object.is equality
+   × T33 — getHeadingBody > does NOT truncate a FINAL body at a literal Z 2ms
+     → expected '- Timestamp: 2026-01-01T00:00:00' to be '- Timestamp: 2026-01-01T00:00:00Z\n- …' // Object.is equality
+   × T33 — getSubheadingBody > reads the FINAL sub-heading of a section 2ms
+     → expected '' to be '- `a/b.md`' // Object.is equality
+   × T33 — getSubheadingBody > reads a final sub-heading whose body holds a literal Z 4ms
+     → expected '- `2026-01-01T00:00:00' to be '- `2026-01-01T00:00:00Z.md`' // Object.is equality
+   × T33 — getSubheadingBody > reads a `- none` body as `- none` rather than empty 2ms
+     → expected '' to be '- none' // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/section-parser.spec.ts > T33 — getHeadingBody > reads the FINAL heading of the document
+AssertionError: expected '' to be 'body two' // Object.is equality
+
+- Expected
++ Received
+
+- body two
+
+ ❯ tests/section-parser.spec.ts:50:41
+     48|   it('reads the FINAL heading of the document', () => {
+     49|     const doc = ['## First', 'body one', '## Last', 'body two'].join('…
+     50|     expect(getHeadingBody(doc, 'Last')).toBe('body two')
+       |                                         ^
+     51|   })
+     52| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  tests/section-parser.spec.ts > T33 — getHeadingBody > reads the final heading even with a trailing newline
+AssertionError: expected '' to be 'body two' // Object.is equality
+
+- Expected
++ Received
+
+- body two
+
+ ❯ tests/section-parser.spec.ts:55:41
+     53|   it('reads the final heading even with a trailing newline', () => {
+     54|     const doc = ['## First', 'body one', '## Last', 'body two', ''].jo…
+     55|     expect(getHeadingBody(doc, 'Last')).toBe('body two')
+       |                                         ^
+     56|   })
+     57| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  tests/section-parser.spec.ts > T33 — getHeadingBody > does NOT truncate a body at a literal Z — the ISO-timestamp case
+AssertionError: expected '- Timestamp: 2026-01-01T00:00:00' to be '- Timestamp: 2026-01-01T00:00:00Z\n- …' // Object.is equality
+
+- Expected
++ Received
+
+- - Timestamp: 2026-01-01T00:00:00Z
+- - After: must survive
++ - Timestamp: 2026-01-01T00:00:00
+
+ ❯ tests/section-parser.spec.ts:66:45
+     64|       'x',
+     65|     ].join('\n')
+     66|     expect(getHeadingBody(doc, 'Metadata')).toBe('- Timestamp: 2026-01…
+       |                                             ^
+     67|   })
+     68| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  tests/section-parser.spec.ts > T33 — getHeadingBody > does NOT truncate a FINAL body at a literal Z
+AssertionError: expected '- Timestamp: 2026-01-01T00:00:00' to be '- Timestamp: 2026-01-01T00:00:00Z\n- …' // Object.is equality
+
+- Expected
++ Received
+
+- - Timestamp: 2026-01-01T00:00:00Z
+- - After: keep
++ - Timestamp: 2026-01-01T00:00:00
+
+ ❯ tests/section-parser.spec.ts:71:41
+     69|   it('does NOT truncate a FINAL body at a literal Z', () => {
+     70|     const doc = ['## First', 'x', '## Last', '- Timestamp: 2026-01-01T…
+     71|     expect(getHeadingBody(doc, 'Last')).toBe('- Timestamp: 2026-01-01T…
+       |                                         ^
+     72|   })
+     73| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  tests/section-parser.spec.ts > T33 — getSubheadingBody > reads the FINAL sub-heading of a section
+AssertionError: expected '' to be '- `a/b.md`' // Object.is equality
+
+- Expected
++ Received
+
+- - `a/b.md`
+
+ ❯ tests/section-parser.spec.ts:92:52
+     90|   it('reads the FINAL sub-heading of a section', () => {
+     91|     const section = ['### Created', '- none', '### Modified', '- none'…
+     92|     expect(getSubheadingBody(section, 'Reviewed')).toBe('- `a/b.md`')
+       |                                                    ^
+     93|   })
+     94| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  tests/section-parser.spec.ts > T33 — getSubheadingBody > reads a final sub-heading whose body holds a literal Z
+AssertionError: expected '- `2026-01-01T00:00:00' to be '- `2026-01-01T00:00:00Z.md`' // Object.is equality
+
+Expected: "- `2026-01-01T00:00:00Z.md`"
+Received: "- `2026-01-01T00:00:00"
+
+ ❯ tests/section-parser.spec.ts:97:51
+     95|   it('reads a final sub-heading whose body holds a literal Z', () => {
+     96|     const section = ['### Read', '- none', '### Touched', '- `2026-01-…
+     97|     expect(getSubheadingBody(section, 'Touched')).toBe('- `2026-01-01T…
+       |                                                   ^
+     98|   })
+     99| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  tests/section-parser.spec.ts > T33 — getSubheadingBody > reads a `- none` body as `- none` rather than empty
+AssertionError: expected '' to be '- none' // Object.is equality
+
+- Expected
++ Received
+
+- - none
+
+ ❯ tests/section-parser.spec.ts:102:52
+    100|   it('reads a `- none` body as `- none` rather than empty', () => {
+    101|     const section = ['### Created', '- none', '### Modified', '- none'…
+    102|     expect(getSubheadingBody(section, 'Modified')).toBe('- none')
+       |                                                    ^
+    103|   })
+    104| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 7 passed (14)
+   Start at  08:41:38
+   Duration  2.41s (transform 509ms, setup 0ms, collect 517ms, tests 52ms, environment 1ms, prepare 641ms)
+
+

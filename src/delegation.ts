@@ -626,10 +626,11 @@ export function writeActionRecord(input: ActionRecordInput): string {
     '- Execution Mode: ' + input.executionMode,
     '- Status: ' + (input.success ? 'accepted' : 'failed'),
     '- Stop Reason: ' + (input.stopReason ?? 'n/a'),
-    // Timestamp goes LAST in Metadata: the linter's section parser (getHeadingBody)
-    // has no end-of-input anchor in JS — its `\Z` is a literal `Z` — so a heading
-    // body is truncated at its first `Z`. Keeping the ISO timestamp last means that
-    // truncation can never hide a required field.
+    // Timestamp LAST in Metadata. This USED to be load-bearing: `getHeadingBody` ended
+    // its capture with a `\Z` that JavaScript reads as a literal `Z`, so a body was
+    // truncated at its first `Z` and an ISO timestamp could cut the section short. T33
+    // replaced that anchor with `(?![\s\S])`, so the hazard is gone and this ordering is
+    // now only conventional — kept because Timestamp is naturally the last metadata field.
     '- Timestamp: ' + new Date().toISOString(),
     '',
     '## Inputs Provided',
@@ -659,10 +660,12 @@ export function writeActionRecord(input: ActionRecordInput): string {
     '- Inspect first: ' + (artifactRel ? code(artifactRel) : 'n/a'),
     '- Notes: main agent must verify every claimed reference against actual files, actual recursive artifacts, and the actual diff before acceptance.',
     '',
-    // This trailing section is LOAD-BEARING, do not delete: the linter's section
-    // parser has no end-of-input anchor in JS, so a document's FINAL section reads
-    // as empty and `## Verification Handoff` would always be reported as
-    // "Missing or empty section".
+    // Provenance tail. This USED to be load-bearing: with the old `\Z` anchor a
+    // document's FINAL section always read as empty, so `## Verification Handoff` would
+    // have been reported as "Missing or empty section" unless something followed it. T33
+    // gave the section parsers a real end-of-input assertion, so the trailing heading is
+    // no longer needed to satisfy the linter — it is kept because the record genuinely
+    // wants to state who wrote it and how its hashes are computed.
     '## Record Provenance',
     '- Writer: dsh-recursive-mode ' + code('writeActionRecord') + ' (plugin-generated action record; hashes are LF-normalized sha256).',
     '- Contract: canonical Subagent Action Record sections, as read by recursive_lint.',

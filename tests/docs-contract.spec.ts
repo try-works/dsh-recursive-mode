@@ -476,10 +476,12 @@ describe('T25 (c) — the action-record writer emits what the linter requires', 
   // correct, can satisfy the linter for that case; the fix belongs in ts-lint.ts (T33:
   // the faithful JS translation of Python's absolute end-of-input `\Z` is `(?![\s\S])`).
   //
-  // `it.fails` PINS the hole instead of hiding it: it passes while the limitation
-  // exists and FAILS the moment T33 lands — which is the signal to delete the `.fails`
-  // and assert the record is accepted. Do not "fix" this by fabricating created files.
-  it.fails('T33: a read-only review record (reviewed files only) is accepted by the linter', () => {
+  // FIXED BY T33: `ts-lint.ts` now ends those captures with `(?![\s\S])`, the faithful
+  // JS translation of Python's absolute end-of-input `\Z`, so a section's final
+  // sub-heading is readable. This test was `it.fails` while the hole existed; it flipped
+  // to failing the moment T33 landed — which is exactly how the fix was detected — and is
+  // now a real assertion. If it ever regresses, do NOT "fix" it by fabricating created files.
+  it('a read-only review record (reviewed files only) is accepted by the linter (T33)', () => {
     const fixture = makeRecordFixture({ reviewedOnly: true })
     expect(lintSubagentActionRecordFile(fixture.recordPath, fixture.root, fixture.runDir, null)).toEqual([])
   })

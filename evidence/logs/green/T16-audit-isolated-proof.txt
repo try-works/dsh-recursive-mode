@@ -1,0 +1,16 @@
+npm warn Unknown env config "manage-package-manager-versions". This will stop working in the next major version of npm.
+PASS  ABSENT loader: out-of-order lock -> DENY -> deny
+      reason: monotonic lock-order: an earlier phase must be locked first 00-requirements.md (DRAFT)
+PASS  BINDING: [recursive_lock* deny] + unmet prerequisite -> DENY -> deny
+PASS  BINDING: [recursive_lock* deny] on phase-0 (nothing before it) -> abstains -> ask -> ask
+PASS  ABSENT loader: write to a LOCKED artifact -> DENY -> deny
+PASS  ABSENT loader: write to a CLEAN path -> ALLOW -> allow
+PASS  BINDING: [write deny] + locked target -> DENY -> deny
+PASS  BINDING: [write deny] + clean target -> abstains -> ask -> ask
+PASS  ABSENT loader: unrelated tool -> ALLOW -> allow
+PASS  PRECEDENCE: [* allow, writ* deny] -> DENY (specificity 2 > 0) -> deny
+PASS  PRECEDENCE: [writ* allow, writ* deny] -> ALLOW (tie -> file order) -> allow
+PASS  PRECEDENCE: [writ* deny, writ* allow] -> DENY (tie -> file order) -> deny
+
+ISOLATED AUDIT VERDICT: all checks passed
+

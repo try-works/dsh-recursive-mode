@@ -5,11 +5,26 @@
  * Layer 2 (tool guards) and Layer 8 (tamper) are the remaining enforcement
  * layers. Configurable strict|advisory per gate (default advisory).
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { join, isAbsolute, resolve, sep } from 'node:path'
-import { getLockStatus, getPrerequisiteBlockers } from './lock.ts'
-import { getMdFieldValue } from './status.ts'
+import { getLockStatus } from './lock.ts'
 import { validateTransition, type GateCheckResult } from './lifecycle.ts'
+import {
+  evaluateToolPolicy, loadToolPolicyFile,
+  builtInToolPolicyDefault, LOCK_TOOL_NAMES, WRITE_TOOL_NAMES,
+  type ToolPolicy, type ToolPolicyContext, type Decision as PolicyDecision,
+} from './policy-globs.ts'
+import { withPhaseBaseline, phaseNumberForArtifact, resolveFrom } from './phase-rules.ts'
+
+/**
+ * The BUILT-IN default rule list (T16) is defined in `src/policy-globs.ts`,
+ * beside the evaluator and the loader that use it as the ABSENT-file fallback,
+ * and re-exported here because it is part of the guard's documented behaviour.
+ * (It cannot live in a module of its own: the list needs the loader's predicate
+ * contract and the loader needs the list, which as two modules is a value-level
+ * import cycle — the very thing that made a top-level wiring call throw.)
+ */
+export const builtInToolPolicy = builtInToolPolicyDefault
 
 export type EnforcementMode = 'strict' | 'advisory'
 
@@ -35,12 +50,6 @@ export function resolveEnforcementConfig(config: unknown): EnforcementConfig {
 }
 
 export const DEFAULT_ENFORCEMENT: EnforcementConfig = { preStep: 'advisory', toolGuards: 'advisory', tamper: 'advisory' }
-
-/** Tool names the locked-artifact write guard treats as write operations. */
-const WRITE_TOOL_NAMES = new Set(['write', 'edit', 'fs_write', 'fs-write', 'pwsh', 'shell', 'bash', 'run_code'])
-
-/** Tool names the monotonic lock-order guard treats as lock operations. */
-const LOCK_TOOL_NAMES = new Set(['recursive_lock', 'recursive_lock_phase'])
 
 /**
  * T15: the rule that produced a guard decision (a machine-readable reason for
@@ -77,6 +86,61 @@ export interface ToolExecLike {
   agent?: unknown
 }
 
+/* -------------------------------------------------------------------------- */
+/* T16 — the policy the guard evaluates                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The BUILT-IN default rule list (T16) is defined in `src/policy-globs.ts`,
+ * beside the evaluator and the loader that use it as the ABSENT-file fallback,
+ * and re-exported here because it is part of the guard's documented behaviour.
+ * (It cannot live in a module of its own: the list needs the loader's predicate
+ * contract and the loader needs the list, which as two modules is a value-level
+ * import cycle — the very thing that made a top-level wiring call throw.)
+ */
+
+/**
+ * The policy in force for one guard call: the worktree's policy file when
+ * present (a broken file fails closed), the built-in list when absent, plus the
+ * current phase's narrowing baseline. Exported so a reviewer — and
+ * `recursive:policy` later — can read the effective rules instead of inferring
+ * them from a code path.
+ */
+export function resolveToolPolicyForGuard(worktreeRoot: string, runId: string): ToolPolicy {
+  const loaded = loadToolPolicyFile(worktreeRoot)
+  return withPhaseBaseline(loaded.policy, currentPhaseArtifact(worktreeRoot, runId))
+}
+
+/**
+ * The artifact whose phase baseline applies: the HIGHEST-numbered phase artifact
+ * present in the run (a run at phase 3 has `00`-`03` on disk). Read from the
+ * filesystem on every call — the same no-cache discipline the active run id
+ * needs, because a cached phase would apply yesterday's baseline to today's lock.
+ */
+export function currentPhaseArtifact(worktreeRoot: string, runId: string): string {
+  if (!worktreeRoot || !runId) return ''
+  const runDir = join(worktreeRoot, '.recursive', 'run', runId)
+  let names: string[]
+  try {
+    names = readdirSync(runDir)
+  } catch {
+    return ''
+  }
+  let best = ''
+  let bestPhase = -1
+  for (const name of names) {
+    if (!name.endsWith('.md')) continue
+    const phase = phaseNumberForArtifact(name)
+    if (!phase) continue
+    const value = Number(phase)
+    if (value > bestPhase) {
+      bestPhase = value
+      best = name
+    }
+  }
+  return best
+}
+
 export function evaluateToolGuard(
   exec: ToolExecLike,
   worktreeRoot: string,
@@ -92,52 +156,25 @@ export function evaluateToolGuard(
   // ride along on every lock-tool decision — including a refusal.
   const transition = consultTransitionGate(name, args, worktreeRoot, runId)
 
-  // Monotonic lock-order denial (recursive_lock out of order).
-  if (LOCK_TOOL_NAMES.has(name)) {
-    const artifact = String(args.artifact ?? '')
-    if (artifact) {
-      const blockers = getPrerequisiteBlockers(runDir, artifact)
-      if (blockers.length > 0) {
-        const reason = 'monotonic lock-order: ' + blockers.map((b) => b.artifact + ' (' + b.status + ')').join(', ')
-        return advisory(verdict(mode, reason, 'lock-order'), transition)
-      }
-      // TDD evidence gating on Phase 3 lock.
-      if (artifact === '03-implementation-summary.md') {
-        const artifactPath = join(runDir, artifact)
-        const content = existsSync(artifactPath) ? readFileSync(artifactPath, 'utf8') : ''
-        const tddMode = getMdFieldValue(content, 'TDD Mode') ?? ''
-        if (tddMode === 'strict') {
-          const hasRed = /RED|red evidence/i.test(content)
-          const hasGreen = /GREEN|green evidence/i.test(content)
-          if (!hasRed || !hasGreen) {
-            const reason = 'TDD Mode: strict requires RED + GREEN evidence before locking Phase 3'
-            return advisory(verdict(mode, reason, 'tdd-evidence'), transition)
-          }
-        }
-      }
-    }
-  }
-
-  // Locked-artifact write denial.
-  if (WRITE_TOOL_NAMES.has(name)) {
-    const target = firstTargetPath(args)
-    if (target) {
-      const normalized = target.replace(/\\/g, '/')
-      if (normalized.endsWith('.md') && normalized.includes('/.recursive/run/')) {
-        const abs = resolveTargetPath(normalized, worktreeRoot)
-        if (abs && getLockStatus(abs) === 'LOCKED') {
-          const reason = 'locked-artifact write denial: ' + normalized + ' carries Status: LOCKED (reopen explicitly to edit)'
-          return advisory(verdict(mode, reason, 'locked-write'), transition)
-        }
-      }
-    }
-  }
-
-  return advisory({ kind: 'allow', rule: 'none' }, transition)
+  // T16: the verdict comes from the ordered policy, not from branches here. The
+  // policy file is re-read per call on purpose: a policy a human just edited
+  // must take effect on the next tool call, not after a restart.
+  const policy = resolveToolPolicyForGuard(worktreeRoot, runId)
+  const context: ToolPolicyContext = { args, runDir, runId, worktreeRoot }
+  const decision = evaluateToolPolicy(policy, name, args, context)
+  return advisory(verdictFor(mode, decision), transition)
 }
 
-/** strict denies, advisory asks — the decision kind that carries the rule. */
-function verdict(mode: EnforcementMode, reason: string, rule: GuardRule): ToolGuardDecision {
+/**
+ * Map the policy's verdict onto the guard's decision kind: `strict` denies,
+ * `advisory` asks (the pre-T16 wording, unchanged), `allow` stays an allow. The
+ * decision's `rule` is the label of the rule that decided it, so a policy
+ * verdict is traceable to an auditable line in the policy file.
+ */
+function verdictFor(mode: EnforcementMode, decision: PolicyDecision): ToolGuardDecision {
+  const rule = (decision.rule ?? 'none') as GuardRule
+  if (decision.kind === 'allow') return { kind: 'allow', rule }
+  const reason = decision.reason ?? 'tool policy denied this call'
   return mode === 'strict' ? { kind: 'deny', reason, rule } : { kind: 'ask', reason, rule }
 }
 
@@ -209,26 +246,20 @@ export function coerceAskToDecision(decision: ToolGuardDecision, mode: Enforceme
   return { kind: 'allow', warn: decision.reason ?? 'ask under advisory enforcement allows' }
 }
 
-/** Resolve a tool-target path to an absolute path under the worktree root. */
+/**
+ * Resolve a tool-target path to an absolute path under the worktree root.
+ * T16: the path arithmetic moved to `phase-rules.ts` (shared with the phase
+ * baselines, so the guard and a baseline can never disagree about which path a
+ * call names); what stays here is this module's containment rule.
+ */
 function resolveTargetPath(target: string, worktreeRoot: string): string | null {
-  const normalized = target.replace(/\\/g, '/')
-  if (isAbsolute(normalized)) {
-    const abs = resolve(normalized)
-    const rootAbs = resolve(worktreeRoot)
-    const rootPrefix = rootAbs.endsWith(sep) ? rootAbs : rootAbs + sep
-    if (abs !== rootAbs && !abs.startsWith(rootPrefix)) return null
-    return abs
-  }
-  return resolve(worktreeRoot, normalized.replace(/^\.?\/?/, ''))
-}
-
-/** Extract the first candidate target path from a tool's arguments. */
-function firstTargetPath(args: Record<string, unknown>): string | null {
-  for (const key of ['file_path', 'path', 'command', 'target', 'filePath']) {
-    const value = args[key]
-    if (typeof value === 'string' && value.trim() !== '') return value.trim()
-  }
-  return null
+  const abs = resolveFrom(worktreeRoot, target)
+  if (!abs) return null
+  if (!isAbsolute(target.replace(/\\/g, '/'))) return abs
+  const rootAbs = resolve(worktreeRoot)
+  const rootPrefix = rootAbs.endsWith(sep) ? rootAbs : rootAbs + sep
+  if (abs !== rootAbs && !abs.startsWith(rootPrefix)) return null
+  return abs
 }
 
 /**

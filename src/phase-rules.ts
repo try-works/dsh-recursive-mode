@@ -6,6 +6,11 @@
  * injection. Values are byte-identical to the canonical linter (recursive-
  * mode-audit-v2).
  */
+import { join, resolve, sep } from 'node:path'
+import {
+  tddEvidenceVerdict as tddEvidenceMatch,
+  type ToolPolicy, type ToolPolicyRule, type ToolPolicyContext, type Verdict,
+} from './policy-globs.ts'
 
 export const CURRENT_WORKFLOW_PROFILE = 'recursive-mode-audit-v2'
 export const STRICT_WORKFLOW_PROFILE = 'recursive-mode-audit-v1'
@@ -302,4 +307,235 @@ export function phaseLintRulesMessage(fileName: string, workflowProfile: string 
     '</system-reminder>',
   ]
   return lines.join('\n')
+}
+
+/* -------------------------------------------------------------------------- */
+/* T16 — per-phase baseline tool policy (NARROWING ONLY)                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How restrictive a verdict is, lower = stricter. `deny` < `ask` < `allow`.
+ * This ordering IS the narrowing rule: a phase baseline may replace a global
+ * verdict with a lower-ranked one, and never with a higher-ranked one. It also
+ * explains the engine's "deny wins over allow" claim in rank terms — deny is
+ * the minimum, so nothing a phase adds can soften it.
+ */
+const VERDICT_RANK: Record<Verdict, number> = { deny: 0, ask: 1, allow: 2 }
+
+export function policyVerdictRank(verdict: Verdict): number {
+  return VERDICT_RANK[verdict]
+}
+
+/**
+ * The phase number an artifact belongs to: the leading digits of its canonical
+ * filename (`03-implementation-summary.md` -> `3`). Returns `''` when the
+ * filename carries no phase number, so a caller can skip the baseline rather
+ * than guess.
+ */
+export function phaseNumberForArtifact(fileName: string): string {
+  const match = /^(\d+)/.exec(fileName)
+  if (!match) return ''
+  return String(Number(match[1]))
+}
+
+function isUnder(root: string, target: string): boolean {
+  const rootAbs = resolve(root)
+  const targetAbs = resolve(target)
+  const prefix = rootAbs.endsWith(sep) ? rootAbs : rootAbs + sep
+  return targetAbs !== rootAbs && targetAbs.startsWith(prefix)
+}
+
+/** True when the path is inside the run tree this phase is writing. */
+function insideRunTree(path: string, runDir: string | undefined): boolean {
+  if (!runDir) return false
+  return isUnder(runDir, path)
+}
+
+/**
+ * The absolute target of a call, or `'unresolvable'` when it cannot be placed.
+ * An unresolvable target FAILS CLOSED in every baseline below: "we could not
+ * tell where this write lands" is not a reason to allow it. A caller with no
+ * worktree root can still place an ABSOLUTE target; a relative one it cannot.
+ */
+function baselineTarget(args: Record<string, unknown>, ctx: ToolPolicyContext): string | 'unresolvable' {
+  const target = policyTargetPath(args)
+  if (!target) return 'unresolvable'
+  const normalized = target.replace(/\\/g, '/')
+  if (!ctx.worktreeRoot && !isAbsolutePath(normalized)) return 'unresolvable'
+  const abs = resolveFrom(ctx.worktreeRoot ?? '/', target)
+  return abs ?? 'unresolvable'
+}
+
+function isAbsolutePath(normalized: string): boolean {
+  return /^[A-Za-z]:\//.test(normalized) || normalized.startsWith('/')
+}
+
+/**
+ * PER-PHASE BASELINE (plan §4 T16). Additive, phase-scoped rules that can only
+ * NARROW the global policy. Three honest limits, stated here rather than hidden:
+ *
+ *   1. The two structures the plan names — phase 6 "writes only under
+ *      `.recursive/DECISIONS.md`" and phase 8 "only under `.recursive/memory/**`"
+ *      — as ABSOLUTE path scopes would also forbid the normal artifact edits of
+ *      those phases, so they are implemented as the narrower rules that bite
+ *      without blocking the phase's own work: no source-tree writes in phases
+ *      6-8 (by then the repo changes are done and the run documents its
+ *      decisions/state/memory), and the memory planes are read-only in phases
+ *      1-2 and 6-7. `deny` on `write` in phase 6 is also deliberately absent,
+ *      because phase 6's own artifact is `<run>/06-decisions-update.md` and a
+ *      blanket write denial would make the phase uncompletable.
+ *   2. Narrowing is enforced MECHANICALLY in withPhaseBaseline, not by trusting
+ *      this table: a phase rule whose verdict is ranked above the strictest
+ *      global verdict for the same pattern — which would widen `ask` to `allow`,
+ *      or soften a global `deny` — is DROPPED before it can be evaluated.
+ *   3. No rule below uses the bare catch-all `*`. A phase rule of that shape
+ *      would outrank every specific global rule at once (precedence is
+ *      specificity-first), including `recursive_lock*`, and would deny the phase
+ *      its own tools. The write-tool family is spelled `write*`.
+ *
+ * Phase 3's TDD-evidence rule is the one the plan states verbatim: a phase-3
+ * lock is denied until RED + GREEN evidence exists. It is reached for the phase
+ * whose artifact is the current one, i.e. the phase-3 lock itself — before that
+ * point the earlier phases are still unlocked, so the global lock-order rule
+ * already refuses.
+ */
+export function phaseBaselineRules(fileName: string): ToolPolicyRule[] {
+  const phase = phaseNumberForArtifact(fileName)
+  const rules: ToolPolicyRule[] = []
+
+  if (phase === '3') {
+    // Narrowing: the global `recursive_lock` rule denies a lock whose
+    // prerequisites are unmet. This adds a SECOND, stronger condition on the
+    // SAME tool — TDD evidence before the phase-3 lock — which the tool itself
+    // does not check.
+    rules.push({
+      pattern: 'recursive_lock*',
+      verdict: 'deny',
+      reason: 'TDD Mode: strict requires RED + GREEN evidence before locking Phase 3',
+      label: 'tdd-evidence',
+      predicate: (_id, args, ctx) => tddEvidenceMatch(String(args.artifact ?? ''), ctx.runDir),
+    })
+  }
+
+  if (phase === '6' || phase === '7' || phase === '8') {
+    // Late phases document, they do not change the implementation. Scope: the
+    // write-tool family only (`write*`), so this narrowing cannot touch a
+    // read/status/lock tool — and so it outranks a catch-all `allow` in the
+    // global policy even when that allow is listed FIRST (T16 precedence is
+    // specificity-first).
+    rules.push({
+      pattern: 'write*',
+      verdict: 'deny',
+      reason: 'phase ' + phase + ' is a documentation phase: writes outside the run tree are denied (the implementation is frozen)',
+      predicate: (_id, args, ctx) => (writesOutsideRunTree(args, ctx) ? { verdict: 'deny' } : null),
+    })
+  }
+
+  if (phase === '6' || phase === '7') {
+    // `06-decisions-update.md` / `07-state-update.md` transcribe decisions and
+    // state into their memory planes; phase 8 is where those planes are shaped.
+    rules.push({
+      pattern: 'write*',
+      verdict: 'deny',
+      reason: 'phase ' + phase + ' writes no memory plane: .recursive/DECISIONS.md|STATE.md and .recursive/memory/** are written by their own phases',
+      predicate: (_id, args, ctx) => (writesMemoryPlane(args, ctx) ? { verdict: 'deny' } : null),
+    })
+  }
+
+  if (phase === '1' || phase === '2') {
+    // Phases 1-2 characterize and plan; they do not write the memory the run
+    // only earns later. Scope: the memory planes only, so no other write
+    // (including a repo source write a plan legitimately needs) is affected.
+    rules.push({
+      pattern: 'write*',
+      verdict: 'deny',
+      reason: 'phase ' + phase + ' writes no memory plane: .recursive/memory/** and .recursive/DECISIONS.md|STATE.md are earned at phases 6-8',
+      predicate: (_id, args, ctx) => (writesMemoryPlane(args, ctx) ? { verdict: 'deny' } : null),
+    })
+  }
+
+  return rules
+}
+
+/**
+ * True when the call writes OUTSIDE the run tree. A target that cannot be
+ * resolved counts as outside: the baseline cannot prove the write lands in the
+ * run tree, and "we could not tell" is not a reason to allow it.
+ */
+function writesOutsideRunTree(args: Record<string, unknown>, ctx: ToolPolicyContext): boolean {
+  const abs = baselineTarget(args, ctx)
+  if (abs === 'unresolvable') return true
+  return !insideRunTree(abs, ctx.runDir)
+}
+
+/** True when the call writes one of the run's memory planes. */
+function writesMemoryPlane(args: Record<string, unknown>, ctx: ToolPolicyContext): boolean {
+  const abs = baselineTarget(args, ctx)
+  if (abs === 'unresolvable') return true
+  return memoryPlanePath(abs)
+}
+
+/** True when the absolute path names one of the run's memory planes. */
+function memoryPlanePath(abs: string): boolean {
+  const normalized = abs.replace(/\\/g, '/')
+  return /\/(decisions|state)\.md$/i.test(normalized) || /\/\.recursive\/memory(\/|$)/.test(normalized)
+}
+
+/**
+ * Resolve a tool-target path to an absolute path. Mirrors enforcement.ts's
+ * resolution rules: an absolute path stays as it is; a relative path resolves
+ * against the worktree root. `null` when the value cannot be a path at all.
+ */
+export function resolveFrom(worktreeRoot: string, target: string): string | null {
+  const normalized = target.replace(/\\/g, '/').trim()
+  if (!normalized) return null
+  if (/^[A-Za-z]:\//.test(normalized) || normalized.startsWith('/')) return resolve(normalized)
+  return resolve(join(worktreeRoot, normalized.replace(/^\.?\/?/, '')))
+}
+
+/** The tool-target path of a call (same key order enforcement.ts uses). */
+export function policyTargetPath(args: Record<string, unknown>): string | null {
+  for (const key of ['file_path', 'path', 'command', 'target', 'filePath']) {
+    const value = args[key]
+    if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  }
+  return null
+}
+
+/**
+ * TDD evidence predicate for a phase-3 lock: `deny` when the artifact declares
+ * `TDD Mode: strict` without both RED and GREEN evidence, `null` otherwise
+ * (nothing to say — the global rules still apply). Lives in `policy-globs.ts`
+ * beside the built-in list, which carries the same `tdd-evidence` guard rule.
+ */
+export const tddEvidenceVerdict = tddEvidenceMatch
+
+/**
+ * Compose the effective policy for a phase: the phase baseline rules FIRST (so
+ * a narrowing rule is reached before the global rule it tightens), then the
+ * global rules.
+ *
+ * NARROWING IS MECHANICAL, not a convention this table is trusted to respect. A
+ * baseline rule whose verdict is ranked ABOVE the strictest global verdict for
+ * the same pattern is DROPPED before it can be evaluated, so no per-phase
+ * baseline can turn a global `deny` into an `allow` (or an `ask` into an
+ * `allow`). A baseline rule for a pattern the global policy does not mention is
+ * always kept: it can only add a restriction.
+ */
+export function withPhaseBaseline(policy: ToolPolicy, fileName: string, runDir?: string): ToolPolicy {
+  const baseline = phaseBaselineRules(fileName)
+  if (baseline.length === 0) return policy
+  const globalRank = new Map<string, number>()
+  for (const rule of policy.rules) {
+    const rank = VERDICT_RANK[rule.verdict]
+    const known = globalRank.get(rule.pattern)
+    if (known === undefined || rank < known) globalRank.set(rule.pattern, rank)
+  }
+  const kept = baseline.filter((rule) => {
+    const rank = VERDICT_RANK[rule.verdict]
+    const known = globalRank.get(rule.pattern)
+    return known === undefined || rank <= known
+  })
+  if (kept.length === 0) return policy
+  return { ...policy, rules: [...kept, ...policy.rules] }
 }

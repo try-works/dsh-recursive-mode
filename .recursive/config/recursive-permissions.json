@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "description": [
+    "recursive-mode tool policy (T16). THIS FILE IS THE SEMANTICS - read it to predict the verdict for any tool call without reading TypeScript.",
+    "",
+    "HOW A CALL IS DECIDED",
+    "  1. PRECEDENCE IS SPECIFICITY FIRST, THEN FILE ORDER. Among the rules whose pattern matches the tool id, the MOST SPECIFIC pattern decides; among equally specific rules the EARLIER one in this file decides. `*` is least specific, so a catch-all `allow` can never shield an id from a more specific `deny` even when the allow is written above it.",
+    "     Specificity tiers, most to least specific: an EXACT id (`write`); a PREFIX glob (`worker::*`, `recursive_*`, `write*`); a glob with a wildcard in the middle (`*_write`); the bare catch-all (`*`). Tiers are coarse on purpose - rules inside a tier are 'equally specific' and are settled by file order.",
+    "  2. A rule may carry a condition the code attaches to it (a locked artifact, an unmet prerequisite). When that condition does not apply, the rule ABSTAINS and does not participate at all, so the next rule in precedence order decides instead of a pattern match alone denying the call. JSON cannot carry a function, so the CONDITION IS SELECTED BY PATTERN: `recursive_lock*` gets the monotonic lock-order condition, and each write-tool id gets the locked-artifact condition. A pattern the code knows nothing about keeps NO condition, so its verdict is ABSOLUTE - which is the honest reading of a rule you write with no condition behind it.",
+    "  3. DENY WINS OVER ALLOW because of rule 1, not because of where the rules sit. This file still lists every `deny` above every `allow` - that is a READABILITY convention (a reader sees the refusals first), not the mechanism. Moving the catch-all to the top would change nothing.",
+    "  4. NO MATCH YIELDS `ask` - never `deny`, never `allow`. `ask` is coerced by the enforcement mode: `strict` denies it, `advisory` allows it and logs a warning. An unlisted tool is therefore never silently permitted and never bricked.",
+    "  5. AN INVALID PATTERN FAILS THE WHOLE POLICY CLOSED: every tool call is denied and the reason names the offending pattern. One typo must not leave a silent hole.",
+    "  6. A POLICY FILE THAT IS PRESENT BUT EMPTY also fails closed. An empty allow-list is NOT an allow-all list. Only an ABSENT file falls back to the built-in default list in src/policy-globs.ts.",
+    "",
+    "PATTERN GRAMMAR",
+    "  `*`          any run of characters, including the empty run (catch-all)",
+    "  `<literal>`  an exact tool id",
+    "  `worker::*`  every id starting with the literal `worker::` (the id-glob form)",
+    "  A literal may contain letters, digits, `_`, `-`, `.` and `:`. Anything else - a space, a path separator, a regex metacharacter - is INVALID and fails the policy closed. So is a pattern that begins or ends with a separator (`worker::`): it names nothing, and a rule that looks live while matching no id is worse than no rule.",
+    "",
+    "PER-PHASE BASELINES (src/phase-rules.ts) are added ABOVE these rules and may only NARROW them. Phase 3 denies `recursive_lock` until RED + GREEN TDD evidence exists; phases 1-2 write no memory plane; phases 6-8 are documentation phases and deny writes outside the run tree. A phase rule whose verdict is LESS specific than, or would WIDEN, a global verdict is dropped before it can be evaluated. No baseline rule is the bare catch-all, so a phase rule can never outrank every id at once.",
+    "",
+    "WHY EACH RULE EXISTS (the harness documents why an id is denied; so does this file)",
+    "  `recursive_lock*` -> lock-order: phases lock monotonically. Locking 02 before 01 is locked silently skips the work 01 certifies, so the guard refuses before dispatch and names the blocking artifact and its status.",
+    "  `write` / `edit` / `fs_write` / `fs-write` -> locked-write: a LOCKED artifact is the run's evidence. Editing one - even by a character - invalidates every later phase that cited it, and the fold can no longer tell an approved document from a rewritten one. Reopen the artifact explicitly first.",
+    "  `pwsh` / `shell` / `bash` / `run_code` -> locked-write: a shell or code runner can redirect into a locked artifact. The guard inspects the call's first path-like argument, so a command that names a locked run artifact is refused.",
+    "  each write id is listed SEPARATELY because the guard matches tool ids exactly, not by family: a tool rename can never silently lose the protection.",
+    "  `*` allow -> the catch-all ALLOW. It keeps this policy at parity with pre-T16 behaviour: an ordinary tool (recursive_status, read, grep, a delegation) is allowed with rule `none` rather than becoming an `ask` on every call. It is the least specific rule, so it decides only ids that no specific rule names or governs - which is exactly rule 4's case.",
+    "",
+    "The rules below reproduce the built-in defaults in src/policy-globs.ts, in the same order and with the same reasons, so deleting this file changes no verdict."
+  ],
+  "defaults": {
+    "no_match_verdict": "ask"
+  },
+  "rules": [
+    {
+      "pattern": "recursive_lock*",
+      "verdict": "deny",
+      "reason": "monotonic lock-order: an earlier phase must be locked first",
+      "label": "lock-order"
+    },
+    {
+      "pattern": "write",
+      "verdict": "deny",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "label": "locked-write"
+    },
+    {
+      "pattern": "edit",
+      "verdict": "deny",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "label": "locked-write"
+    },
+    {
+      "pattern": "fs_write",
+      "verdict": "deny",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "label": "locked-write"
+    },
+    {
+      "pattern": "fs-write",
+      "verdict": "deny",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "label": "locked-write"
+    },
+    {
+      "pattern": "pwsh",
+      "verdict": "deny",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "label": "locked-write"
+    },
+    {
+      "pattern": "shell",
+      "verdict": "deny",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "label": "locked-write"
+    },
+    {
+      "pattern": "bash",
+      "verdict": "deny",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "label": "locked-write"
+    },
+    {
+      "pattern": "run_code",
+      "verdict": "deny",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "label": "locked-write"
+    },
+    {
+      "pattern": "*",
+      "verdict": "allow",
+      "reason": "no deny rule matches this tool"
+    }
+  ]
+}

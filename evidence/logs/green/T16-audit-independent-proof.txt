@@ -1,0 +1,20 @@
+npm warn Unknown env config "manage-package-manager-versions". This will stop working in the next major version of npm.
+PASS  ABSENT: ordinary write to a clean path is ALLOWED (not deny-everything) -> allow
+PASS  ABSENT: out-of-order lock is DENIED -> deny
+      lock-order reason: monotonic lock-order: an earlier phase must be locked first 00-requirements.md (DRAFT)
+PASS  ABSENT: unrelated tool is ALLOWED -> allow
+PASS  PRESENT-BUT-EMPTY: denies everything -> deny
+      empty reason: tool policy failed closed - policy at .recursive/config/recursive-permissions.json is PRESENT but declares no rules - every tool call is denied (an empty policy is not an allow-all policy)
+PASS  INVALID PATTERN: denies -> deny
+PASS  INVALID PATTERN: names the offending pattern -> true
+FAIL  [* allow, write deny] -> DENY (specificity beats a catch-all allow) -> allow   (expected deny)
+FAIL  [write allow, write deny] -> ALLOW (equal specificity: file order decides) -> ask   (expected allow)
+PASS  NO MATCH -> ask -> ask
+PASS  PHASE 3 + TDD Mode: strict without evidence -> DENIED -> deny
+      tdd reason: TDD Mode: strict requires RED + GREEN evidence before locking Phase 3
+PASS  SHIPPED JSON: parses with no defect -> null
+PASS  SHIPPED JSON: same rule count as the built-in list -> 10
+PASS  SHIPPED JSON: same patterns+verdicts in the same order -> true
+
+AUDIT VERDICT: 2 FAILURES
+

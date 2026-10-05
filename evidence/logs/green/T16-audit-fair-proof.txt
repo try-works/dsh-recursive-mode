@@ -1,0 +1,17 @@
+npm warn Unknown env config "manage-package-manager-versions". This will stop working in the next major version of npm.
+PASS  PRECEDENCE: [* allow, writ* deny] -> DENY (specificity 2 beats catch-all 0) -> deny
+PASS  PRECEDENCE: [writ* allow, writ* deny] -> ALLOW (tie, file order) -> allow
+PASS  PRECEDENCE: [writ* deny, writ* allow] -> DENY (tie, file order) -> deny
+PASS  BINDING: [write deny] with nothing locked -> abstains, so NO MATCH -> ask -> ask
+PASS  BINDING: [write deny] WITH a locked target -> DENY (condition met) -> deny
+FAIL  BINDING: [recursive_lock* deny] with an unlocked prerequisite -> DENY -> ask   (expected deny)
+PASS  BINDING: [recursive_lock* deny] on the phase-0 artifact (nothing before it) -> abstains -> ask -> ask
+PASS  ABSENT loader: clean write -> allow -> allow
+PASS  ABSENT loader: locked write -> deny -> deny
+FAIL  ABSENT loader: out-of-order lock -> deny -> allow   (expected deny)
+PASS  ABSENT loader: unrelated tool -> allow -> allow
+PASS  BINDING: a known tool id gets a condition -> function
+PASS  BINDING: an unknown pattern keeps NO condition (absolute verdict) -> undefined
+
+FAIR AUDIT VERDICT: 2 FAILURES
+

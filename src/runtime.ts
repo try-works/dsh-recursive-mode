@@ -29,7 +29,7 @@ import { closeoutPhase } from './closeout.ts'
 import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './scratch.ts'
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
 import { readMemoryEntries, retrieveMemory, renderMemorySection, selectMemory } from './memory.ts'
-import { runPhase8Trigger, resolveExtractor } from './training.ts'
+import { runPhase8Trigger, resolveExtractor, spawnExtractorRunner } from './training.ts'
 import { contractDigest } from './policy.ts'
 import type { WorkflowEngineLike } from './workflow-audit.ts'
 import { createHandoff, createChildBrief, replyPath, childScratchPath, buildDelegationPrompt, type HandoffInput, type ChildBriefInput } from './handoff.ts'
@@ -357,6 +357,10 @@ export class RecursiveRuntime extends Service {
             // The extractor is resolved but NOT spawned here: this plugin never embeds one, and an
             // unset command must surface as exit 2 rather than as a silent success.
             extractorAvailable: resolveExtractor(process.env) !== null,
+            // FU-5: the PRODUCTION runner — spawn the command with `stdio: 'ignore'` and read the file it
+            // was asked to write. `stdio: 'ignore'` is deliberate: this sandbox denies a child the piped
+            // stdio a capture needs, and the response file is the parent's own interface anyway.
+            runner: spawnExtractorRunner({ cwd: root, responseFile: join(runDir, 'training-response.json') }),
             write: (relativePath, content) => {
               const target = join(root, relativePath)
               mkdirSync(dirname(target), { recursive: true })

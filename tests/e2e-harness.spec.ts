@@ -31,6 +31,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import * as plugin from '../src/index.ts'
+import { runPhase8Trigger, spawnExtractorRunner, TRAINING_EXTRACTOR_ENV } from '../src/training.ts'
 
 /** The scratch root: `E:` by default, overridable, with a tmpdir fallback for a machine without it. */
 function scratchRoot(): string {
@@ -470,6 +471,72 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
     } finally {
       if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
       await ctx.fiber.dispose()
+    }
+  }, 120_000)
+
+  /**
+   * FU-5 — THE PRODUCTION SPAWN, RUN FOR REAL THROUGH THE RESPONSE FILE.
+   *
+   * ⚠ THE SPAWN IS REAL AND THE EXTRACTOR IS A REAL PROCESS: a `.mjs` script in the temp repo that writes
+   * JSON to the path it is handed in `RECURSIVE_TRAINING_RESPONSE_FILE`. That interface is the parent's
+   * own (`--response-file`), and it is also the only one that works here — this sandbox denies a child the
+   * PIPED stdio a stdout capture needs, so a runner that read a pipe would fail with EPERM in the
+   * environment it runs in. `stdio: 'ignore'` is what makes the spawn legal, and the file is the channel.
+   *
+   * ⚠ THE GATE IS SATISFIED HONESTLY: two runs have `08` LOCKED (one locked run is an anecdote), and the
+   * second has a receipt, which is what makes this the RE-RUN the parent asks for.
+   */
+  it('FU-5: the production runner SPAWNS the extractor and consumes its response file', async () => {
+    const root = join(scratchRoot(), 'fu5-' + new Date().toISOString().replace(/[:.]/g, '-'))
+    const runRoot = join(root, '.recursive', 'run')
+    try {
+      // Two completed runs, so the evidence gate passes.
+      for (const runId of ['run-1', 'run-2']) {
+        mkdirSync(join(runRoot, runId, 'locks'), { recursive: true })
+        writeFileSync(join(runRoot, runId, '08-memory-impact.md'), '# Memory impact\n\nStatus: `LOCKED`\n', 'utf8')
+      }
+      writeFileSync(join(runRoot, 'run-2', 'locks', '08-memory-impact.receipt.json'), '{}\n', 'utf8')
+
+      // The extractor: a real script, which leaves a marker so we can prove it RAN.
+      const script = join(root, 'extractor.mjs')
+      const marker = join(root, 'extractor-ran.txt')
+      writeFileSync(script, [
+        "import { writeFileSync } from 'node:fs'",
+        'const out = process.env.RECURSIVE_TRAINING_RESPONSE_FILE',
+        "writeFileSync(" + JSON.stringify(marker) + ", 'ran')",
+        "writeFileSync(out, JSON.stringify({ items: [",
+        "  { runId: 'run-1', paths: ['src/lock.ts'], text: 'the lock chain rejects an out-of-order transition' },",
+        "  { runId: 'run-2', paths: ['src/lock.ts'], text: 'the same rule held on the second run' },",
+        '] }))',
+      ].join('\n') + '\n', 'utf8')
+
+      const previous = process.env[TRAINING_EXTRACTOR_ENV]
+      process.env[TRAINING_EXTRACTOR_ENV] = 'node ' + JSON.stringify(script)
+      const written = new Map<string, string>()
+      try {
+        const result = runPhase8Trigger(root, 'run-2', {
+          rerun: true,
+          runner: spawnExtractorRunner({ cwd: root, responseFile: join(root, 'response.json') }),
+          write: (relativePath, content) => { written.set(relativePath, content); return relativePath },
+          readText: (relativePath) => written.get(relativePath) ?? null,
+        })
+
+        // (1) The extractor PROCESS ran.
+        expect(existsSync(marker), 'the extractor never ran; result: ' + JSON.stringify(result)).toBe(true)
+        // (2) Its answer was consumed and GROUPED across two runs.
+        expect(result.code, 'result: ' + JSON.stringify(result)).toBe('OK')
+        expect(result.reason).toContain('lock')
+        // (3) The writes are the two shard kinds plus the refreshed registry.
+        expect(result.writes).toContain('memory/domains/lock.md')
+        expect(result.writes).toContain('memory/MEMORY.md')
+        expect(written.get('memory/domains/lock.md')).toContain('run-1')
+        expect(written.get('memory/domains/lock.md')).toContain('run-2')
+      } finally {
+        if (previous === undefined) delete process.env[TRAINING_EXTRACTOR_ENV]
+        else process.env[TRAINING_EXTRACTOR_ENV] = previous
+      }
+    } finally {
+      if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
     }
   }, 120_000)
 })

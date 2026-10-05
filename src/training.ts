@@ -23,6 +23,7 @@
  * history of a learning stays readable; and a PINNED entry is untouchable by every automatic path.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 
 /** The artifact whose lock marks a run as complete enough to learn from. */
@@ -183,6 +184,12 @@ export function runPhase8Trigger(
      * a silent half-write would leave `MEMORY.md` describing a plane that has changed underneath it.
      */
     readText?: (relativePath: string) => string | null
+    /**
+     * FU-5: THE PRODUCTION SPAWN, injected. When the caller supplies no `items`, the trigger RUNS the
+     * extractor through this runner — which is the link that was missing entirely: `extractAndGroup` was
+     * referenced only by its own definition, so the round trip existed and nothing invoked it.
+     */
+    runner?: (cmd: string) => ExtractorRun
   } = {},
 ): TrainingResult {
   const locked = countPhase8LockedRuns(root)
@@ -199,7 +206,12 @@ export function runPhase8Trigger(
   }
 
   // An unavailable extractor is exit 2, distinct from insufficient evidence — and still zero writes.
-  if (options.extractorAvailable !== true) {
+  //
+  // ⚠ THE FLAG FALLS BACK TO THE ENVIRONMENT, because defaulting to "not available" while
+  // `RECURSIVE_TRAINING_EXTRACTOR_CMD` IS set is a footgun the e2e run walked straight into: the command
+  // was configured, the spawn was wired, and the trigger still reported no extractor. An explicit
+  // `false` is still honoured (it is how a test forces the failure), so the fallback only fills a gap.
+  if ((options.extractorAvailable ?? resolveExtractor(process.env) !== null) !== true) {
     return {
       code: 'EXTRACTOR_UNAVAILABLE',
       exit: TRAINING_EXIT.EXTRACTOR_UNAVAILABLE,
@@ -208,7 +220,35 @@ export function runPhase8Trigger(
     }
   }
 
-  const groups = groupLearnings(options.items ?? [], options.isWinner ?? (() => true))
+  // ⚠ THE EXTRACTOR IS FINALLY INVOKED HERE — this is the link that was missing: `extractAndGroup` was
+  // referenced only by its own definition, so the whole round trip existed and nothing called it.
+  // Its failures keep their own meaning: a broken transport or malformed output is exit 2 (returned
+  // here), while an answer with nothing usable in it falls through to the empty-items path and becomes
+  // exit 3 — the distinction the round trip was built around.
+  let items: TrainingItem[]
+  if (options.items !== undefined) items = [...options.items]
+  else if (options.runner === undefined) {
+    // A configured command with no runner is reported rather than silently treated as "no items":
+    // the two look identical downstream, and only one of them is a misconfiguration.
+    return {
+      code: 'EXTRACTOR_UNAVAILABLE',
+      exit: TRAINING_EXIT.EXTRACTOR_UNAVAILABLE,
+      reason: 'an extractor is configured but no runner was supplied, so it was NOT invoked. Do not claim memory updates',
+      writes: [],
+    }
+  } else {
+    const round = extractAndGroup(options.runner, process.env, options.isWinner === undefined ? {} : { isWinner: options.isWinner })
+    if (!round.outcome.ok) {
+      return {
+        code: 'EXTRACTOR_UNAVAILABLE',
+        exit: TRAINING_EXIT.EXTRACTOR_UNAVAILABLE,
+        reason: round.outcome.reason,
+        writes: [],
+      }
+    }
+    items = round.items
+  }
+  const groups = groupLearnings(items, options.isWinner ?? (() => true))
   if (groups.length === 0) {
     return {
       code: 'INSUFFICIENT_EVIDENCE',
@@ -296,6 +336,65 @@ export function renderGroupShard(group: TrainingGroup): string {
  * here and is asserted with a fake runner; the SPAWN lives at the caller.
  */
 export const TRAINING_EXTRACTOR_ENV = 'RECURSIVE_TRAINING_EXTRACTOR_CMD'
+
+/**
+ * FU-5 — the RESPONSE FILE, which is what makes the spawn possible in a confined sandbox.
+ *
+ * ⚠ WHY A FILE AND NOT A PIPE. This harness's sandbox denies a child process the piped stdio a capture
+ * needs, so a spawn that read the extractor's stdout would fail with EPERM **in the environment it runs
+ * in**. The parent's own interface already solves this: it delegates through `--response-file`, i.e. the
+ * extractor WRITES ITS ANSWER TO A PATH. The plugin spawns with `stdio: 'ignore'` (which the sandbox
+ * allows), hands the path over in an environment variable, and reads the file afterwards.
+ */
+export const TRAINING_RESPONSE_FILE_ENV = 'RECURSIVE_TRAINING_RESPONSE_FILE'
+
+/**
+ * Build the production runner: spawn the command, then read the file it was asked to write.
+ *
+ * ⚠ IT NEVER THROWS. A missing binary, a non-zero exit and a missing response file all come back as a
+ * non-zero `status` with an explanatory `stdout`, so `runExtractor` maps them to a TYPED failure — the
+ * closeout must not die because an extractor is misconfigured.
+ */
+export function spawnExtractorRunner(options: {
+  cwd: string
+  responseFile: string
+  /** Injected for tests; defaults to `node:child_process.spawnSync`. */
+  spawn?: (cmd: string, args: string[], opts: Record<string, unknown>) => { status: number | null; error?: Error }
+}): (cmd: string) => ExtractorRun {
+  return (cmd: string): ExtractorRun => {
+    const spawn = options.spawn ?? ((c, a, o) => {
+      const result = spawnSync(c, a, o as never)
+      return { status: result.status, ...(result.error === undefined ? {} : { error: result.error }) }
+    })
+    let outcome: { status: number | null; error?: Error }
+    try {
+      outcome = spawn(cmd, [], {
+        cwd: options.cwd,
+        // ⚠ `ignore`, NOT `pipe`: the sandbox permits the first and denies the second.
+        stdio: 'ignore',
+        // The command is a shell line (the env var is documented as a COMMAND), so it needs a shell —
+        // the same reason `pnpm.cmd` needed one in the harness runner.
+        shell: true,
+        env: { ...process.env, [TRAINING_RESPONSE_FILE_ENV]: options.responseFile },
+      })
+    } catch (err) {
+      return { status: 1, stdout: 'spawn failed: ' + (err instanceof Error ? err.message : String(err)) }
+    }
+    if (outcome.error !== undefined) {
+      return { status: typeof outcome.status === 'number' ? outcome.status : 1, stdout: 'spawn error: ' + outcome.error.message }
+    }
+    try {
+      return { status: outcome.status ?? 1, stdout: readFileSync(options.responseFile, 'utf8') }
+    } catch {
+      // A successful exit with no file is reported as a FAILURE with the reason, never as an empty answer:
+      // "the extractor produced nothing" and "the extractor never wrote anything" are different facts.
+      return {
+        status: 1,
+        stdout: 'the extractor exited ' + String(outcome.status) + ' without writing ' + options.responseFile,
+      }
+    }
+  }
+}
 
 export function resolveExtractor(env: Record<string, string | undefined>): string | null {
   const cmd = env[TRAINING_EXTRACTOR_ENV]

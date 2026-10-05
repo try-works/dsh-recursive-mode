@@ -85,6 +85,8 @@
     "bundle": "tsdown",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "link:dsh": "node scripts/link-dsh.mjs",
+    "postinstall": "node scripts/link-dsh.mjs",
     "prepare": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && tsdown"
   },
   "peerDependenciesMeta": {

@@ -1,6 +1,6 @@
 /**
  * Closeout receipt scaffolding (R2) — TS port of recursive-closeout.py.
- * Creates/updates Phase 4/5/6/7/8 delta-receipt stubs with canonical headers
+ * Creates/updates Phase 0-8 receipt stubs with canonical headers
  * and required sections, gated on prerequisite phases being LOCKED.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -16,6 +16,48 @@ export interface CloseoutPhaseConfig {
 }
 
 export const PHASE_CONFIG: Record<string, CloseoutPhaseConfig> = {
+  // ⚠ 00–03 WERE ADDED ON REQUEST. They are the phases the closeout deliberately did NOT cover when this was
+  // ported (`recursive-closeout.py` scaffolded 4–8 only), which left the EARLY artifacts — the ones every
+  // later receipt leans on — as the only phases with no receipt stub. The KEYS are the ones `status.ts`
+  // already publishes in its phase table (`00R`/`00W` for the two artifacts sharing the `00-` prefix), so the
+  // vocabulary a model reads in `recursive_status` and the vocabulary accepted here are the same. That table
+  // is pinned byte-for-byte by `status.parity.spec.ts` against the Python golden, so it is NOT touched.
+  '00R': {
+    file: '00-requirements.md',
+    label: 'Phase 0 (Requirements)',
+    scopeNote: 'Scaffolds the requirements receipt: the problem, the acceptance criteria and the scope boundary this run is judged against.',
+    todoItems: ['State the problem in one sentence', 'List acceptance criteria as checkable items', 'Name what is out of scope'],
+  },
+  '00W': {
+    file: '00-worktree.md',
+    label: 'Phase 0 (Worktree)',
+    scopeNote: 'Scaffolds the worktree ground receipt: what the tree held, and what was already in flight, before the run touched it.',
+    todoItems: ['Record the tree state before the run', 'Name in-flight work that must not be disturbed'],
+  },
+  '01': {
+    file: '01-as-is.md',
+    label: 'Phase 1 (AS-IS)',
+    scopeNote: 'Scaffolds the as-is receipt: the behaviour observed before the change, with the evidence that established it.',
+    todoItems: ['Describe observed behaviour only', 'Cite the evidence for each observation'],
+  },
+  '01.5': {
+    file: '01.5-root-cause.md',
+    label: 'Phase 1.5 (Root Cause)',
+    scopeNote: 'Scaffolds the root-cause receipt: the mechanism behind the observed behaviour, and why the competing explanations were rejected.',
+    todoItems: ['Name the mechanism', 'Say why the competing explanations were rejected'],
+  },
+  '02': {
+    file: '02-to-be-plan.md',
+    label: 'Phase 2 (TO-BE Plan)',
+    scopeNote: 'Scaffolds the to-be plan receipt: the intended change, its slices, and the verification each slice will need.',
+    todoItems: ['List slices in delivery order', 'Give each slice its verification'],
+  },
+  '03': {
+    file: '03-implementation-summary.md',
+    label: 'Phase 3 (Implementation)',
+    scopeNote: 'Scaffolds the implementation receipt: what was actually built, against what was planned, with its declared TDD mode.',
+    todoItems: ['Declare the TDD mode', 'List the files changed', 'Record any deviation from the plan'],
+  },
   '04': {
     file: '04-test-summary.md',
     label: '04 Test Summary',
@@ -69,6 +111,14 @@ export const PHASE_CONFIG: Record<string, CloseoutPhaseConfig> = {
 }
 
 const REQUIRED_SECTIONS: Record<string, string[]> = {
+  // The early phases keep the artifact's own canonical headings, which `recursive_init` templates and
+  // `recursive_lint` both know; these are the stub's minimum, not a replacement for them.
+  '00R': ['TODO', 'Problem Statement', 'Acceptance Criteria', 'Scope Boundary', 'Out of Scope'],
+  '00W': ['TODO', 'Worktree State', 'In-Flight Work', 'Baseline Expectations'],
+  '01': ['TODO', 'Observed Behaviour', 'Evidence', 'Surprises'],
+  '01.5': ['TODO', 'Root Cause', 'Rejected Explanations', 'Confidence'],
+  '02': ['TODO', 'Intended Change', 'Slices', 'Verification Plan', 'Risks'],
+  '03': ['TODO', 'TDD Mode', 'Files Changed', 'Deviations From Plan'],
   '04': ['TODO', 'Pre-Test Implementation Audit', 'Environment', 'Execution Mode', 'Commands Executed (Exact)', 'Results Summary', 'Evidence and Artifacts', 'Failures and Diagnostics (if any)', 'Flake/Rerun Notes', 'Requirement Completion Status', 'Traceability', 'Coverage Gate', 'Approval Gate'],
   '05': ['TODO', 'Execution Mode', 'QA Execution Record', 'QA Scenarios and Results', 'User Sign-Off', 'Requirement Completion Status', 'Traceability', 'Coverage Gate', 'Approval Gate'],
   '06': ['TODO', 'Decisions Changes Applied', 'Rationale', 'Resulting Decision Entry', 'Traceability', 'Coverage Gate', 'Approval Gate'],

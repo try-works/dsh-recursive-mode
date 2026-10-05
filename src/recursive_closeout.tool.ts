@@ -4,7 +4,7 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RecursiveRuntime } from './runtime.ts'
 
 /**
- * `recursive_closeout` — scaffold a Phase 4/5/6/7/8 closeout receipt under the
+ * `recursive_closeout` — scaffold a Phase 0-8 closeout receipt under the
  * SESSION's workspace only (R1 workspace-scoping invariant). The run is resolved
  * via the session agent's cwd -> workspace registry; a runId outside the current
  * workspace is rejected.
@@ -12,9 +12,9 @@ import type { RecursiveRuntime } from './runtime.ts'
 export function createRecursiveCloseoutTool(recursive: RecursiveRuntime) {
   return defineTool({
     name: 'recursive_closeout',
-    description: 'Scaffold a closeout receipt stub (Phase 4/5/6/7/8 delta receipt) for a run in the CURRENT session workspace only. Workspace-scoped: refuses runIds outside the session\'s workspace. Delegates to the RecursiveRuntime service.',
+    description: 'Scaffold a closeout receipt stub (Phase 0-8 delta receipt) for a run in the CURRENT session workspace only. Workspace-scoped: refuses runIds outside the session\'s workspace. Delegates to the RecursiveRuntime service.',
     parameters: {
-      phase: { type: 'string', description: 'Closeout phase to scaffold: 04, 05, 06, 07, or 08 (e.g. \'06\' for 06-decisions-update.md). Required.' },
+    phase: { type: 'string', description: 'Closeout phase to scaffold: 00R, 00W, 01, 01.5, 02, 03, 04, 05, 06, 07, or 08 - the same keys recursive_status prints (00R = requirements, 00W = worktree)' },
       runId: { type: 'string', description: 'Run id (e.g. 03-something). Required. Must resolve inside the current workspace.' },
     },
     output: {

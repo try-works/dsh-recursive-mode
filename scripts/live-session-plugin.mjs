@@ -109,6 +109,63 @@ console.log('[plugin] stdout: ' + stdout.length + ' bytes | stderr: ' + stderr.l
 if (stdout.trim() !== '') console.log('--- stdout tail ---\n' + stdout.trim().split('\n').slice(-14).join('\n'))
 if (stderr.trim() !== '') console.log('--- stderr tail ---\n' + stderr.trim().split('\n').slice(-14).join('\n'))
 
+/**
+ * FU-9 — THE SECOND, RESUMED INVOCATION.
+ *
+ * ⚠ WHY IT IS NEEDED, MEASURED: the review PARKS (T36's turn-shaped driver treats waiting as not-an-error)
+ * and a ONE-SHOT session exits before the child's first turn is ever scheduled — a run left no child
+ * session, no settlement and no reply. The headless app supports `--session-id`, documented as *"resumes a
+ * conversation that already exists"* (`packages/bundle/headless/src/index.ts`, via
+ * `agents.resume({ resumeSessionId })`), so the parked round gets a later turn in the SAME conversation —
+ * which is the shape this plugin was built for.
+ */
+function sessionIdUnder(root) {
+  if (!existsSync(root)) return null
+  for (const scoped of readdirSync(root, { withFileTypes: true })) {
+    if (!scoped.isDirectory()) continue
+    for (const inner of readdirSync(join(root, scoped.name), { withFileTypes: true })) {
+      // ⚠ THE PREFIX STAYS. Measured: passing the bare uuid gives
+      // `dsh: session "<uuid>" does not exist; omit --session-id to start a new Session` — the session id
+      // the CLI knows is the whole `session-<uuid>`, which is also what the log's first record carries.
+      if (inner.isDirectory() && inner.name.startsWith('session-')) return inner.name
+    }
+  }
+  return null
+}
+
+const sessionId = sessionIdUnder(sessions)
+if (sessionId !== null) {
+  const outFile2 = join(base, 'stdout-resume.txt')
+  const errFile2 = join(base, 'stderr-resume.txt')
+  const outFd2 = openSync(outFile2, 'w')
+  const errFd2 = openSync(errFile2, 'w')
+  console.log('[plugin] resuming session: ' + sessionId)
+  const resumed = spawnSync(process.execPath, [
+    '--import', TSX_LOADER,
+    SRC_BIN,
+    '--profile', 'headless',
+    '--session-id', sessionId,
+    'The reviewer has replied. Continue the review round and report the verdict.',
+  ], {
+    cwd: repo,
+    stdio: ['ignore', outFd2, errFd2],
+    env: {
+      ...env,
+      DSH_HOME: home,
+      DSH_AGENTS_HOME: join(base, '.agents'),
+      DSH_TELEMETRY_DISABLED: '1',
+      DEEPSEEK_API_KEY: '',
+      TSX_TSCONFIG_PATH: TSCONFIG,
+    },
+  })
+  closeSync(outFd2)
+  closeSync(errFd2)
+  const out2 = existsSync(outFile2) ? readFileSync(outFile2, 'utf8') : ''
+  console.log('[plugin] resume exit: ' + resumed.status + ' | stdout: ' + out2.trim().split('\n').slice(-4).join(' / '))
+} else {
+  console.log('[plugin] resume SKIPPED: no session id found to resume')
+}
+
 // The evidence a run happened: OUR plugin's run directory, written by its own tools in a real session.
 const runDir = join(repo, '.recursive', 'run', 'live-run')
 console.log('[plugin] run directory exists: ' + existsSync(runDir))

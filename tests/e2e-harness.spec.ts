@@ -605,6 +605,52 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
       await ctx.fiber.dispose()
     }
   }, 120_000)
+
+  /**
+   * FU-7 (the third call point) — A REFUSED LOCK ASKS HOW TO UNBLOCK, instead of returning prose.
+   *
+   * The gate-block gate belongs to the moment a run is BLOCKED, and that moment is a refused lock. This
+   * attempts an out-of-order lock on a fresh run — `02-to-be-plan.md` while `00-requirements.md` is still
+   * DRAFT — and asserts the refusal carries a structured choice rather than only a sentence.
+   */
+  it('FU-7: a refused lock carries the gate-block ask with its options', async () => {
+    const root = join(scratchRoot(), 'fu7b-' + new Date().toISOString().replace(/[:.]/g, '-'))
+    mkdirSync(root, { recursive: true })
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' })
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      const call = async (tool: string, args: Record<string, unknown>) => ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('fu7b-' + tool),
+        name: tool,
+        arguments: args,
+        agent: { session: { header: { cwd: root } } },
+      } as never)
+
+      await call('recursive_init', { runId: 'fu7b-run' })
+      const envelope = JSON.parse(JSON.stringify(await call('recursive_lock', {
+        runId: 'fu7b-run', artifact: '02-to-be-plan.md',
+      }))) as { content: Array<{ text: string }> }
+      const payload = JSON.parse(envelope.content[0].text) as {
+        error?: { code?: string; problem?: string }
+        ask?: { gate: string; artifact: string; options: Array<{ label: string }> }
+      }
+
+      // The refusal still carries the typed error — the ask is ADDED, not a replacement.
+      expect(payload.error, 'the lock was not refused: ' + JSON.stringify(payload).slice(0, 300)).toBeDefined()
+      // And it now carries the decision a person has to make.
+      expect(payload.ask, 'no gate-block ask on the refusal: ' + JSON.stringify(payload).slice(0, 400)).toBeDefined()
+      expect(payload.ask?.gate).toBe('gate-block')
+      expect(payload.ask?.artifact).toBe('02-to-be-plan.md')
+      expect(payload.ask?.options.map((option) => option.label)).toEqual(['fix', 'reopen', 'abandon'])
+    } finally {
+      if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
+      await ctx.fiber.dispose()
+    }
+  }, 120_000)
 })
 
 /** The last few tool calls, for an assertion message that says what happened. */

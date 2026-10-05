@@ -1,5 +1,6 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { codeRuntimeRefusal, toolError } from './errors.ts'
+import { buildAskQuestion } from './recursive_ask.tool.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RecursiveRuntime } from './runtime.ts'
 
@@ -27,7 +28,22 @@ export function createRecursiveLockTool(recursive: RecursiveRuntime) {
         const result = await recursive.lockArtifact(args.runId.trim(), args.artifact.trim(), args.reopen === true, exec.agent as { session?: { header?: { cwd?: string } } } | null)
         return result as unknown as JsonValue
       } catch (err) {
-        return { error: codeRuntimeRefusal(err instanceof Error ? err.message : String(err)) } as const
+        const message = err instanceof Error ? err.message : String(err)
+        const refusal = codeRuntimeRefusal(message)
+        // FU-7 — THE GATE-BLOCK CALL POINT, and this is the moment it belongs to: a lock was REFUSED, so
+        // the run is blocked and a person has to choose how to unblock it. Returning only the sentence
+        // makes the caller parse prose to find the decision; the options are what turn it into a choice.
+        //
+        // ⚠ IT IS ATTACHED TO THE ORDERING REFUSAL SPECIFICALLY (`Prerequisite blockers:`), because that
+        // is the one a human resolves. A missing run id or an already-locked artifact is a caller mistake
+        // with a mechanical fix, and offering "reopen / abandon the run" for those would be noise.
+        if (message.startsWith('Prerequisite blockers:')) {
+          return {
+            error: refusal,
+            ask: { gate: 'gate-block', ...buildAskQuestion('gate-block'), artifact: args.artifact ?? '', blocked: message },
+          } as unknown as JsonValue
+        }
+        return { error: refusal } as const
       }
     },
   })

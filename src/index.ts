@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { RecursiveRuntime } from './runtime.ts'
 import type { JobsRegistryLike } from './jobs-runner.ts'
 import { planGateForExit } from './plan-gate.ts'
+import { registerPhaseSkills, type SkillRegistryLike } from './skills-phase.ts'
 import type { RecursiveModeConfig } from './config.ts'
 import { createRecursiveStatusTool } from './recursive_status.tool.ts'
 import { createRecursiveInitTool } from './recursive_init.tool.ts'
@@ -29,7 +30,7 @@ import { snapshotWorkspace } from './snapshot.ts'
 import { mountRecursiveRoutesOnce, makeRecursiveRoutes, type RecursiveRouteHost } from './live-route.ts'
 import { registerRecursiveSkill } from './skills.ts'
 import { enumerateRuns, stageBWorkflowInit } from './bootstrap.ts'
-import { getNextLegalPhase, getLockStatus } from './lock.ts'
+import { getNextLegalPhase, getLockStatus, PHASE_SEQUENCE } from './lock.ts'
 import { resolveRunDir } from './run.ts'
 import { phaseLintRulesMessage, ReminderOnceGate } from './phase-rules.ts'
 import { settlementFromEvent, runDirForChild, recordSettlement } from './settlement.ts'
@@ -225,6 +226,14 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     // Validation stays in `resolveEnforcementConfig` (strict, fail-loud), so a bad value
     // from any source is refused rather than coerced.
     if (config?.enforcement !== undefined) recursive.setEnforcementConfig(config.enforcement)
+
+    // T12 — publish each phase's rules to the native SKILL catalogue, so the agent and its
+    // children can ASK what a phase requires instead of grepping this checkout. The catalogue is
+    // optional; with none mounted this registers nothing and says so, because a composition
+    // without skills should still run the workflow.
+    const phaseSkills = registerPhaseSkills(ctx.get('skills') as SkillRegistryLike | undefined, PHASE_SEQUENCE)
+    // Tied to this plugin's effects: the contribution is withdrawn with the fiber that made it.
+    yield () => { for (const dispose of phaseSkills.disposers) dispose() }
 
     // T7 part 2 — the ROUTER overrides, on the same terms: present means override, absent
     // means defer to the workspace's declarative `recursive-router.json`. ONE PATH, NOT

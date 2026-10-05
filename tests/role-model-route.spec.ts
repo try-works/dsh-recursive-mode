@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { roleKindOf, routeForRole, modelForRole } from '../src/role-route.ts'
-import type { RouterPolicy } from '../src/router.ts'
+import { resolveRole, type RouterPolicy } from '../src/router.ts'
 
 function policy(routes: Record<string, { model?: string | null }>): RouterPolicy {
   return {
@@ -87,5 +87,32 @@ describe('T9 — the model comes from the policy, and an unset one is REPORTED',
     expect(() => routeForRole('code-reviewer', broken)).not.toThrow()
     expect(() => routeForRole('', broken)).not.toThrow()
     expect(roleKindOf('')).toBe('unknown')
+  })
+})
+
+/**
+ * T9 — the model reaches the DECISION, on every path.
+ *
+ * `resolveRoleInner` has six return sites, so the model is attached by a WRAPPER rather than per
+ * return: a decision shape that carried it on some paths and not others would be a trap, and this
+ * asserts the present-on-every-path property rather than one path's behaviour.
+ */
+describe('T9 — the route decision carries the role’s model', () => {
+  it('attaches the policy’s model whichever tier the decision takes', () => {
+    const providers = { spawn: { name: 'spawn' } } as never
+    const withModel = resolveRole('code-reviewer', policy({ 'code-reviewer': { model: 'rigorous' } }), providers)
+    expect(withModel.model).toBe('rigorous')
+    // The tier is whatever the router chose; the model is present regardless of it.
+    expect(typeof withModel.tier).toBe('string')
+
+    const unset = resolveRole('code-reviewer', policy({ 'code-reviewer': { model: null } }), providers)
+    expect(unset.model).toBeNull()
+  })
+
+  it('carries null — not undefined — when the policy names nothing', () => {
+    // Null says "the policy names no model"; undefined would say "this field was not set on
+    // this path", which is the inconsistency the wrapper exists to prevent.
+    const decision = resolveRole('implementer', policy({}), {} as never)
+    expect(decision.model).toBeNull()
   })
 })

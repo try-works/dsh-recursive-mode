@@ -11,6 +11,10 @@
  */
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+// T9: the per-role model lookup, so there is ONE definition of "which model does this role use".
+// `role-route.ts` imports only the `RouterPolicy` TYPE from here, which erases at runtime — so
+// this is a one-way runtime dependency, not the cycle that bit `policy-globs` earlier.
+import { modelForRole } from './role-route.ts'
 
 export interface RouterDefaults {
   when_role_unconfigured: string
@@ -43,6 +47,15 @@ export interface RouteDecision {
   tier: RouteTier
   provider?: string
   reason: string
+  /**
+   * T9: the model the policy names for this role, or null when it names none.
+   *
+   * Present on EVERY decision because it is attached by the wrapper, never per-return-site.
+   * ⚠ The plugin does not apply it to a child — that is the host's
+   * `subagent-model-selection` concern — so this is the value a caller can HONOUR, not a
+   * promise that the child ran on it.
+   */
+  model?: string | null
 }
 
 export interface SubagentProviderLike {
@@ -136,12 +149,30 @@ export function routerPolicyPath(root: string): string {
 }
 
 /**
+ * T9 — attach the role's model to the decision.
+ *
+ * ⚠ WHY A WRAPPER AND NOT SIX EDITS. `resolveRoleInner` has six return sites, and adding the
+ * model to each would leave a decision shape that carries it on some paths and not others — a
+ * trap for the next reader, and exactly the kind of quiet inconsistency this plan keeps
+ * refusing to ship. Attaching it ONCE, at the seam where the decision leaves, makes the field
+ * present on EVERY path by construction. The policy lookup itself lives in `role-route.ts`
+ * (`routeForRole`), so there is one definition of "which model does this role use", not two.
+ */
+export function resolveRole(
+  role: string,
+  policy: RouterPolicy,
+  providers: Record<string, SubagentProviderLike>,
+): RouteDecision {
+  return { ...resolveRoleInner(role, policy, providers), model: modelForRole(role, policy) }
+}
+
+/**
  * Resolve a role to a tier, preferring a native provider whose name maps to
  * the role (e.g. role 'code-reviewer' -> provider 'code-reviewer' or the
  * generic spawn/fork provider). External CLIs ride their provider rows; else
  * the policy fallback.
  */
-export function resolveRole(
+function resolveRoleInner(
   role: string,
   policy: RouterPolicy,
   providers: Record<string, SubagentProviderLike>,

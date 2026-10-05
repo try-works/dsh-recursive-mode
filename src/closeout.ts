@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getLockStatus, getPrerequisiteBlockers } from './lock.ts'
+import { getRunTreeAddenda } from './ts-lint.ts'
 
 export interface CloseoutPhaseConfig {
   file: string
@@ -126,6 +127,12 @@ export interface CloseoutResult {
   file: string
   created: string[]
   existing: string[]
+  /**
+   * Every addendum found anywhere in the run tree, as run-relative paths — and cited in the scaffolded
+   * receipt. Optional on the TYPE so a caller that builds its own result literal still compiles; the
+   * closeout itself always populates it.
+   */
+  addenda?: string[]
 }
 
 export interface CloseoutOptions {
@@ -137,6 +144,12 @@ export interface CloseoutOptions {
  * Create or update a closeout receipt stub for the given phase.
  * Returns the file + created/existing lists. When strict, refuses phases whose
  * prerequisite artifacts are not all LOCKED (reuses lock.ts chain validation).
+ *
+ * ⚠ ADDENDA ARE PART OF THE CLOSEOUT WORK, and they are CITED, never written. An addendum closes a gap in
+ * an artifact that is already locked, which is precisely the kind of thing a receipt must account for — and
+ * they are not always in `addenda/`: the real ones sit beside the artifact they close, in the run ROOT. So
+ * the receipt lists every addendum in the run tree (see {@link getRunTreeAddenda}), and says so explicitly
+ * when there are none, because "we looked and found none" and "we never looked" must not read alike.
  */
 export function closeoutPhase(runDir: string, phase: string, opts: CloseoutOptions = {}): CloseoutResult {
   const config = PHASE_CONFIG[phase]
@@ -174,6 +187,7 @@ export function closeoutPhase(runDir: string, phase: string, opts: CloseoutOptio
   }
 
   const runId = runDir.split(/[\\/]/).filter(Boolean).pop() ?? 'unknown-run'
+  const addenda = getRunTreeAddenda(runDir)
   const lines: string[] = [
     'Run: `/.recursive/run/' + runId + '/`',
     'Phase: `' + config.label + '`',
@@ -184,6 +198,10 @@ export function closeoutPhase(runDir: string, phase: string, opts: CloseoutOptio
     'Outputs:',
     '- `/.recursive/run/' + runId + '/' + config.file + '`',
     'Scope note: ' + config.scopeNote,
+    'Addenda:',
+    ...(addenda.length > 0
+      ? addenda.map(a => '- `/.recursive/run/' + runId + '/' + a + '`')
+      : ['- none found in the run tree']),
     '',
   ]
   for (const heading of REQUIRED_SECTIONS[phase]) {
@@ -196,5 +214,6 @@ export function closeoutPhase(runDir: string, phase: string, opts: CloseoutOptio
     file: config.file,
     created: existed ? [] : [config.file],
     existing: existed ? [config.file] : [],
+    addenda,
   }
 }

@@ -600,6 +600,40 @@ export function getStageLocalAddendaPaths(runDir: string, artifactName: string):
   catch { return [] }
 }
 
+/**
+ * get_run_tree_addenda: EVERY addendum in the run, wherever it was filed.
+ *
+ * ⚠ WHY THIS EXISTS BESIDE THE TWO ABOVE: both scan `run_dir/addenda/` and nothing else, and flatly. But an
+ * addendum is written BESIDE THE ARTIFACT IT CLOSES — the run ROOT is where the real ones live, e.g.
+ * `02-to-be-plan.addendum-r4-r2-mount-resolution.md`, which the comments elsewhere in this file cite by name
+ * — and a stage may file one in a subfolder. A reader that consults only `addenda/` therefore misses
+ * exactly the addenda that closed an upstream gap, which are the ones a closeout most needs to see.
+ *
+ * Returns run-relative POSIX paths, sorted, so a caller can join them onto the run directory and cite them
+ * verbatim. Matching uses {@link isAddendumArtifact} — the SAME predicate the rest of the plugin uses — so a
+ * name can never count as an addendum in one place and not another. `upstream-gap` names are matched too:
+ * they are the back-edge form of an addendum, and {@link getRelatedAddendaPaths} already treats them as one.
+ */
+export function getRunTreeAddenda(runDir: string): string[] {
+  const found: string[] = []
+  const walk = (dir: string, prefix: string): void => {
+    // ⚠ ANNOTATED STRUCTURALLY, NOT AS `Dirent`: `readdirSync(..., { withFileTypes: true })` infers
+    // `Dirent<NonSharedBuffer>[]` on this Node typing, which will not assign to a bare `Dirent[]`. Only the
+    // two members used below are named, which keeps the `try` around the READ alone.
+    let entries: { name: string; isDirectory(): boolean }[]
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      const name = String(entry.name)
+      const rel = prefix === '' ? name : prefix + '/' + name
+      if (entry.isDirectory()) { walk(join(dir, name), rel); continue }
+      if (!name.endsWith('.md')) continue
+      if (isAddendumArtifact(name) || name.includes('.upstream-gap.')) found.push(rel)
+    }
+  }
+  walk(runDir, '')
+  return found.sort()
+}
+
 /** get_current_phase_upstream_gap_addenda_paths: run_dir/addenda/<base>.upstream-gap.*.addendum-*.md. */
 export function getCurrentPhaseUpstreamGapAddendaPaths(runDir: string, artifactName: string): string[] {
   const addendaDir = join(runDir, 'addenda')

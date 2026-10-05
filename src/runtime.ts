@@ -11,7 +11,9 @@ import {
   getStaleDownstreamPhases,
   invalidateReceipt,
   lockHashFromContent,
+  validateReceiptChain,
   writeReceipt,
+  type ReceiptChainResult,
 } from './lock.ts'
 import type { PendingWorkItem, RecursiveStatusResult } from './types.ts'
 import { toolError } from './errors.ts'
@@ -72,6 +74,13 @@ export type RecursiveStatusWithGuardDecisions = RecursiveStatusResult & {
    * check, and non-empty explains a `RM4403` lock refusal.
    */
   pendingWork?: PendingWorkItem[]
+  /**
+   * T32: the receipt-chain verdict, derived read-only on every call. Always present
+   * so a caller can read `ok` without a null check; non-empty `breaks` names the
+   * first broken link. This is what makes a spliced or edited chain VISIBLE rather
+   * than merely detectable in a test.
+   */
+  receiptChain?: ReceiptChainResult
 }
 
 /** How many recent decisions to read from the log before scoping to one run. */
@@ -539,7 +548,17 @@ export class RecursiveRuntime extends Service {
     // shape is parity-asserted. Always present (empty when nothing is in flight)
     // so a consumer needs no null dance, and DERIVED on every call rather than
     // stored, so it cannot go stale.
-    return { ...foldRun(resolved.runDir, resolved.runId), guardDecisions, pendingWork: pendingWork(resolved.runDir) }
+    //
+    // T32: the receipt-chain verdict rides here too. A chain that has been edited or
+    // spliced must be VISIBLE on the status a caller actually reads, not only inside
+    // a test — that was the whole finding: the mechanism was written and read by
+    // nothing. Read-only, so asking cannot change the answer.
+    return {
+      ...foldRun(resolved.runDir, resolved.runId),
+      guardDecisions,
+      pendingWork: pendingWork(resolved.runDir),
+      receiptChain: validateReceiptChain(resolved.runDir, resolved.runId),
+    }
   }
 
   /**

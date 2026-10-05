@@ -310,6 +310,141 @@ export function validateChain(runDir: string, runId: string): LockChainResult {
   return { runId, phases, breakPhase, nextLegalPhase, complete, staleReceipts }
 }
 
+/** Why a receipt chain failed verification. */
+export type ReceiptChainBreakKind =
+  | 'receipt-hash-mismatch'
+  | 'prerequisite-hash-mismatch'
+  | 'missing-prerequisite-receipt'
+  | 'malformed-previous-hash'
+
+/** One broken link, naming the phase at fault and both values involved. */
+export interface ReceiptChainBreak {
+  /** The artifact whose receipt is at fault. */
+  phase: string
+  kind: ReceiptChainBreakKind
+  /** A sentence naming both values, so the break is diagnosable without a debugger. */
+  detail: string
+}
+
+export interface ReceiptChainResult {
+  runId: string
+  ok: boolean
+  /** How many receipts were examined (absent phases are skipped, not counted). */
+  checked: number
+  breaks: ReceiptChainBreak[]
+}
+
+const RECEIPT_HASH_RE = /^[a-fA-F0-9]{64}$/
+
+/**
+ * T32 — verify a run's receipts against each other and against the artifacts they
+ * cite. Closes review finding E: the receipt hash was COMPUTED on every lock and
+ * never re-derived, so `previous_receipt_hash` was written and read by nothing.
+ *
+ * READ-ONLY, deliberately. The chain is evidence, and a verification that rewrites
+ * what it verifies is worthless — so this never repairs, re-hashes or touches a
+ * receipt, and a caller can run it as often as it likes.
+ *
+ * WHAT IT CHECKS, and what it refuses to claim. `previous_receipt_hash` chains to the
+ * SAME artifact's previous receipt, and there is exactly one receipt file per
+ * artifact, so the receipt it names has been overwritten and its LINKAGE cannot be
+ * verified from disk. Rather than assert a linkage it cannot prove, this checks:
+ *   1. receipt integrity — the stored `receipt_hash` must equal the hash recomputed
+ *      from the receipt's own fields (catches an edit after the fact);
+ *   2. prerequisite agreement — each recorded `prerequisite_hashes[p]` must equal
+ *      p's CURRENT artifact hash (catches an upstream changed after locking);
+ *   3. gaps — a receipt citing a prerequisite that has no receipt at all;
+ *   4. a well-formedness check on `previous_receipt_hash`, which the writer could
+ *      only ever produce as a sha256 hex digest or null.
+ *
+ * Never throws: an unreadable receipt is skipped, and a missing run directory is an
+ * empty result rather than an error.
+ */
+export function validateReceiptChain(runDir: string, runId: string): ReceiptChainResult {
+  const breaks: ReceiptChainBreak[] = []
+  let checked = 0
+
+  for (const phase of PHASE_SEQUENCE) {
+    const receipt = readReceipt(runDir, phase)
+    if (receipt === null) continue
+    checked += 1
+
+    // 1. INTEGRITY. Recompute the hash from every field the writer covered.
+    const { receipt_hash: storedHash, ...base } = receipt
+    const expectedHash = createHash('sha256').update(pythonJsonDumps(base), 'utf8').digest('hex')
+    if (storedHash !== expectedHash) {
+      // Two hashes alone say "something changed" but not WHAT, so the detail also
+      // compares the receipt's recorded artifact hash against the artifact on disk.
+      // That single comparison separates the two causes a reader cares about: the
+      // ARTIFACT was edited after locking, or the RECEIPT was edited after writing.
+      let onDisk: string | null = null
+      try {
+        onDisk = lockHashFromContent(readFileSync(join(runDir, phase), 'utf8'))
+      } catch {
+        onDisk = null
+      }
+      const recorded = String(receipt.artifact_hash)
+      const which = onDisk === null
+        ? 'the artifact cannot be read now'
+        : onDisk === recorded
+          ? 'the artifact still matches its recorded hash ' + recorded + ', so the RECEIPT was edited'
+          : 'the artifact now hashes ' + onDisk + ' but the receipt records ' + recorded + ', so the ARTIFACT changed after locking'
+      breaks.push({
+        phase,
+        kind: 'receipt-hash-mismatch',
+        detail: 'receipt_hash ' + String(storedHash) + ' does not match the recomputed ' + expectedHash + '; ' + which,
+      })
+    }
+
+    // 4. WELL-FORMEDNESS first among the cheap checks, and NOT skipped when the
+    // integrity check already failed: a tampered field is exactly when a malformed
+    // one is worth naming too.
+    const previous = receipt.previous_receipt_hash
+    if (previous !== null && previous !== undefined && !RECEIPT_HASH_RE.test(String(previous))) {
+      breaks.push({
+        phase,
+        kind: 'malformed-previous-hash',
+        detail: 'previous_receipt_hash ' + JSON.stringify(previous) + ' is not a sha256 hex digest or null',
+      })
+    }
+
+    // 2 + 3. The cited prerequisites must still agree with what is on disk.
+    const cited = receipt.prerequisite_hashes ?? {}
+    for (const prereq of Object.keys(cited)) {
+      const recorded = cited[prereq]
+      if (readReceipt(runDir, prereq) === null) {
+        breaks.push({
+          phase,
+          kind: 'missing-prerequisite-receipt',
+          detail: 'cites ' + prereq + ' as a locked prerequisite, but no receipt exists for it',
+        })
+        continue
+      }
+      let currentHash: string | null = null
+      try {
+        currentHash = lockHashFromContent(readFileSync(join(runDir, prereq), 'utf8'))
+      } catch {
+        currentHash = null
+      }
+      if (currentHash === null) {
+        breaks.push({
+          phase,
+          kind: 'prerequisite-hash-mismatch',
+          detail: 'cites ' + prereq + ' at ' + String(recorded) + ', but its artifact cannot be read now',
+        })
+      } else if (currentHash !== recorded) {
+        breaks.push({
+          phase,
+          kind: 'prerequisite-hash-mismatch',
+          detail: 'recorded ' + String(recorded) + ' for ' + prereq + ', which now hashes ' + currentHash,
+        })
+      }
+    }
+  }
+
+  return { runId, ok: breaks.length === 0, checked, breaks }
+}
+
 /**
  * Python json.dumps(obj, sort_keys=True, separators=(', ', ': '), ensure_ascii=True)
  * compact serialization. Exported for parity testing against the Python oracle.

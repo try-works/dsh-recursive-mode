@@ -1,0 +1,175 @@
+
+ RUN  v2.1.9 D:/DEV/dsh-recursive-mode
+
+ ❯ tests/receipt-chain.spec.ts (11 tests | 11 failed) 1214ms
+   × T32 — the common case must not regress > an untouched two-phase chain validates 166ms
+     → Prerequisite blockers: 00-worktree.md (DRAFT)
+   × T32 — the common case must not regress > a SINGLE receipt validates 107ms
+     → validateReceiptChain is not a function
+   × T32 — the common case must not regress > a run with NO receipts validates vacuously and checks nothing 109ms
+     → validateReceiptChain is not a function
+   × T32 — a receipt edited after the fact is CAUGHT > a changed artifact_hash no longer matches its own receipt_hash 113ms
+     → validateReceiptChain is not a function
+   × T32 — a receipt edited after the fact is CAUGHT > a changed locked_at is caught too (every field is covered by the hash) 116ms
+     → validateReceiptChain is not a function
+   × T32 — a SPLICED or GAPPED chain is reported, never silently healthy > an upstream artifact changed after locking is a prerequisite mismatch 101ms
+     → Prerequisite blockers: 00-worktree.md (DRAFT)
+   × T32 — a SPLICED or GAPPED chain is reported, never silently healthy > a downstream receipt whose prerequisite has NO receipt is a GAP 128ms
+     → Prerequisite blockers: 00-worktree.md (DRAFT)
+   × T32 — a SPLICED or GAPPED chain is reported, never silently healthy > a malformed previous_receipt_hash is reported rather than trusted 162ms
+     → validateReceiptChain is not a function
+   × T32 — a SPLICED or GAPPED chain is reported, never silently healthy > claims NO linkage it cannot prove: a plausible null previous_receipt_hash passes 108ms
+     → validateReceiptChain is not a function
+   × T32 — verification is READ-ONLY > does not rewrite, repair or touch a single receipt 96ms
+     → Prerequisite blockers: 00-worktree.md (DRAFT)
+   × T32 — a missing locks directory is empty, not an error > never throws on a run directory with no locks at all 2ms
+     → validateReceiptChain is not a function
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 11 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/receipt-chain.spec.ts > T32 — the common case must not regress > an untouched two-phase chain validates
+Error: Prerequisite blockers: 00-worktree.md (DRAFT)
+ ❯ Proxy.lockArtifact src/runtime.ts:699:13
+    697|       const message = 'monotonic lock-order: ' + blockers.map(b => b.a…
+    698|       try { this.blockRunToGoal(agent, runId, { code: 'prerequisite-bl…
+    699|       throw new Error('Prerequisite blockers: ' + blockers.map(b => b.…
+       |             ^
+    700|     }
+    701|     // T18 — QUIESCENCE. A lock is only sound at a point where nothing…
+ ❯ mount tests/receipt-chain.spec.ts:64:31
+ ❯ tests/receipt-chain.spec.ts:87:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/11]⎯
+
+ FAIL  tests/receipt-chain.spec.ts > T32 — the common case must not regress > a SINGLE receipt validates
+TypeError: validateReceiptChain is not a function
+ ❯ tests/receipt-chain.spec.ts:101:22
+     99|     const m = await mount(['00-requirements.md'])
+    100|     try {
+    101|       const result = validateReceiptChain(m.runDir, RUN)
+       |                      ^
+    102|       expect(result.ok).toBe(true)
+    103|       expect(result.checked).toBe(1)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/11]⎯
+
+ FAIL  tests/receipt-chain.spec.ts > T32 — the common case must not regress > a run with NO receipts validates vacuously and checks nothing
+TypeError: validateReceiptChain is not a function
+ ❯ tests/receipt-chain.spec.ts:112:22
+    110|     const m = await mount([])
+    111|     try {
+    112|       const result = validateReceiptChain(m.runDir, RUN)
+       |                      ^
+    113|       expect(result.ok).toBe(true)
+    114|       expect(result.checked).toBe(0)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/11]⎯
+
+ FAIL  tests/receipt-chain.spec.ts > T32 — a receipt edited after the fact is CAUGHT > a changed artifact_hash no longer matches its own receipt_hash
+TypeError: validateReceiptChain is not a function
+ ❯ tests/receipt-chain.spec.ts:129:22
+    127|       // what an edit-after-the-fact looks like.
+    128|       writeRawReceipt(m.runDir, '00-requirements.md', { ...receipt, ar…
+    129|       const result = validateReceiptChain(m.runDir, RUN)
+       |                      ^
+    130|       expect(result.ok).toBe(false)
+    131|       expect(result.breaks).toHaveLength(1)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/11]⎯
+
+ FAIL  tests/receipt-chain.spec.ts > T32 — a receipt edited after the fact is CAUGHT > a changed locked_at is caught too (every field is covered by the hash)
+TypeError: validateReceiptChain is not a function
+ ❯ tests/receipt-chain.spec.ts:147:22
+    145|       const receipt = rawReceipt(m.runDir, '00-requirements.md')
+    146|       writeRawReceipt(m.runDir, '00-requirements.md', { ...receipt, lo…
+    147|       const result = validateReceiptChain(m.runDir, RUN)
+       |                      ^
+    148|       expect(result.ok).toBe(false)
+    149|       expect(result.breaks[0].kind).toBe('receipt-hash-mismatch')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/11]⎯
+
+ FAIL  tests/receipt-chain.spec.ts > T32 — a SPLICED or GAPPED chain is reported, never silently healthy > an upstream artifact changed after locking is a prerequisite mismatch
+Error: Prerequisite blockers: 00-worktree.md (DRAFT)
+ ❯ Proxy.lockArtifact src/runtime.ts:699:13
+    697|       const message = 'monotonic lock-order: ' + blockers.map(b => b.a…
+    698|       try { this.blockRunToGoal(agent, runId, { code: 'prerequisite-bl…
+    699|       throw new Error('Prerequisite blockers: ' + blockers.map(b => b.…
+       |             ^
+    700|     }
+    701|     // T18 — QUIESCENCE. A lock is only sound at a point where nothing…
+ ❯ mount tests/receipt-chain.spec.ts:64:31
+ ❯ tests/receipt-chain.spec.ts:158:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/11]⎯
+
+ FAIL  tests/receipt-chain.spec.ts > T32 — a SPLICED or GAPPED chain is reported, never silently healthy > a downstream receipt whose prerequisite has NO receipt is a GAP
+Error: Prerequisite blockers: 00-worktree.md (DRAFT)
+ ❯ Proxy.lockArtifact src/runtime.ts:699:13
+    697|       const message = 'monotonic lock-order: ' + blockers.map(b => b.a…
+    698|       try { this.blockRunToGoal(agent, runId, { code: 'prerequisite-bl…
+    699|       throw new Error('Prerequisite blockers: ' + blockers.map(b => b.…
+       |             ^
+    700|     }
+    701|     // T18 — QUIESCENCE. A lock is only sound at a point where nothing…
+ ❯ mount tests/receipt-chain.spec.ts:64:31
+ ❯ tests/receipt-chain.spec.ts:179:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/11]⎯
+
+ FAIL  tests/receipt-chain.spec.ts > T32 — a SPLICED or GAPPED chain is reported, never silently healthy > a malformed previous_receipt_hash is reported rather than trusted
+TypeError: validateReceiptChain is not a function
+ ❯ tests/receipt-chain.spec.ts:198:22
+    196|       const receipt = rawReceipt(m.runDir, '00-requirements.md')
+    197|       writeRawReceipt(m.runDir, '00-requirements.md', { ...receipt, pr…
+    198|       const result = validateReceiptChain(m.runDir, RUN)
+       |                      ^
+    199|       expect(result.ok).toBe(false)
+    200|       expect(result.breaks.map((b) => b.kind)).toContain('malformed-pr…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/11]⎯
+
+ FAIL  tests/receipt-chain.spec.ts > T32 — a SPLICED or GAPPED chain is reported, never silently healthy > claims NO linkage it cannot prove: a plausible null previous_receipt_hash passes
+TypeError: validateReceiptChain is not a function
+ ❯ tests/receipt-chain.spec.ts:212:14
+    210|     try {
+    211|       expect(readReceipt(m.runDir, '00-requirements.md')!.previous_rec…
+    212|       expect(validateReceiptChain(m.runDir, RUN).ok).toBe(true)
+       |              ^
+    213|     } finally {
+    214|       await m.dispose()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/11]⎯
+
+ FAIL  tests/receipt-chain.spec.ts > T32 — verification is READ-ONLY > does not rewrite, repair or touch a single receipt
+Error: Prerequisite blockers: 00-worktree.md (DRAFT)
+ ❯ Proxy.lockArtifact src/runtime.ts:699:13
+    697|       const message = 'monotonic lock-order: ' + blockers.map(b => b.a…
+    698|       try { this.blockRunToGoal(agent, runId, { code: 'prerequisite-bl…
+    699|       throw new Error('Prerequisite blockers: ' + blockers.map(b => b.…
+       |             ^
+    700|     }
+    701|     // T18 — QUIESCENCE. A lock is only sound at a point where nothing…
+ ❯ mount tests/receipt-chain.spec.ts:64:31
+ ❯ tests/receipt-chain.spec.ts:221:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/11]⎯
+
+ FAIL  tests/receipt-chain.spec.ts > T32 — a missing locks directory is empty, not an error > never throws on a run directory with no locks at all
+TypeError: validateReceiptChain is not a function
+ ❯ tests/receipt-chain.spec.ts:244:14
+    242|     try {
+    243|       mkdirSync(join(bare, 'locks'), { recursive: true })
+    244|       expect(validateReceiptChain(bare, 'no-such-run').ok).toBe(true)
+       |              ^
+    245|       expect(validateReceiptChain(join(bare, 'nope'), 'x').ok).toBe(tr…
+    246|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/11]⎯
+
+ Test Files  1 failed (1)
+      Tests  11 failed (11)
+   Start at  10:31:54
+   Duration  3.63s (transform 726ms, setup 0ms, collect 947ms, tests 1.21s, environment 1ms, prepare 436ms)
+
+

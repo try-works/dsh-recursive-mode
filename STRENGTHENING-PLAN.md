@@ -1041,6 +1041,45 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 
 ---
 
+### Follow-up backlog (FU-1…FU-7) — post-backlog work, with a REAL end-to-end harness
+
+**Why this exists.** Every item above closed with its acceptance met and its gaps **named on the item**.
+Those gaps are now the work. Two of them are not cosmetic, and the first was found by measurement rather
+than by a failing test:
+
+- **`delegateReview` HAS NO CALLERS** (§4/L967, found by T35): the delegated, always-continuable review
+  path is **unreachable in production**, so the rule holds only in the default rather than in the workflow.
+- **The `recursive_review` closeout drain** was left unchecked on the item itself (L1082).
+
+**The vehicle is FU-1, and it is deliberately first.** Nothing below can be called "verified as working"
+on unit tests alone: each one is about a path a *tool call* reaches in a *real* context. So FU-1 builds a
+repeatable harness that mounts the plugin in a real Cordis `Context` + SystemPrompt + ToolRuntime inside a
+**temp repo on `E:`** (measured: exists, 451 GB free, writable, git 2.51.2) and drives a whole workflow
+**through the tools** — init, phase entry, locks, review, closeout — printing every enforcement decision
+it observes. Every later item is proven by running it.
+
+**⚠ THE HARNESS IS A TEST OF THE ARTIFACT THE CONSUMER READS, not of the plugin's internals:** it asserts
+on the run directory the workflow produced (`Status: \`LOCKED\``, receipts, the memory plane), exactly as
+a person would inspect it. A harness that asserted on its own in-memory expectations would verify nothing.
+
+| id | item | mode | status | spec | evidence | notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| FU-1 | `E:` end-to-end harness: mount the real plugin in a real context and drive a full run through the tools | strict | **backlog** | `tests/e2e-harness.spec.ts` + `scripts/e2e-run.mjs` | (planned) one command → a completed run on `E:` with 08 LOCKED | the vehicle for FU-2…FU-7; asserts on the RUN DIRECTORY, and names the first tool refusal when a run fails |
+| FU-2 | wire `delegateReview` so the always-continuable rule is true IN PRODUCTION, not only in the default | strict | **backlog** | `src/recursive_review.tool.ts`, `src/runtime.ts` | (planned) e2e run where a review is delegated and the verdict read back | found by T35: no callers in `src/`, `tests/` or anywhere |
+| FU-3 | drain the child at closeout with the live parent Agent | strict | **backlog** | `src/runtime.ts` (closeout path) | (planned) child settled/stopped at closeout in an e2e run | the unchecked follow-up on the `recursive_review` item (L1082) |
+| FU-4 | compute the worktree's CHANGED PATHS and pass them to `selectMemory` | strict | **backlog** | `src/runtime.ts` (`phaseRules`), a changed-path helper | (planned) e2e run where a shard naming a changed path outranks one that does not | without it the +3 path weighting (T29) is test-exercised only |
+| FU-5 | the production extractor SPAWN behind the injected runner, plus the response-file path | pragmatic | **backlog** | `src/training.ts` (a spawn adapter), `src/runtime.ts` | (planned) live exit 2 with no command; live exit 3 when it returns nothing | the runner is injected because this sandbox denies piped stdio; the adapter is where the spawn lives |
+| FU-6 | prove T2's audit fan-out against the **live** `ctx.workflow` engine | pragmatic | **backlog** | `scripts/e2e-run.mjs` (an audit step) | (planned) N `workflow/agent-end` frames + ONE verdict, live | T2's acceptance was met against a SCRIPTED engine; its own TDD mode defers this to manual verification |
+| FU-7 | the three `recursive_ask` call points at phase-3 entry, QA sign-off and a gate block | strict | **backlog** | `src/phase-rules.ts`, `src/recursive_ask.tool.ts` | (planned) e2e run where each gate is asked once and the answer lands in the artifact | named as not done on T23; `createAskLedger` still has no caller |
+
+**Sequencing, and why:** FU-1 → FU-2 → FU-3 (the delegation chain: reachable, then drained) → FU-4 → FU-5
+(the two seams the loader/extractor leave open) → FU-6 → FU-7. FU-1 is first because it is the instrument;
+FU-2 and FU-3 are together because a review that cannot be reached cannot be drained either.
+
+**Definition of done for this follow-up round:** each FU item is done only when an `E:` harness run
+**demonstrates the behaviour it claims**, and the whole suite, typecheck, build and the three parity specs
+stay green. Anything that cannot be demonstrated live is reported as *not verified*, not as done.
+
 ## 5. To-do checklist (ordered)
 
 Ordered by value-to-risk, not by T-number. **T-1 is first because the tree is red**, and every item's acceptance test is "the suite stays green". T15 follows because it is a bug that invalidates a stated success criterion.
@@ -1052,6 +1091,16 @@ Sprint -1 — get back to green (nothing below is measurable otherwise)
 Sprint 0 — rebase onto the pinned baseline
 [x] T31a rebase peer deps onto dsh-v0.2.0-rc.2 (+ file:→link: protocol)  ← DONE
 [x] T31a-tail re-derive §2's gap map against dsh-v0.2.0-rc.2  ← DONE (re-measured at backlog close: the memory rows moved from 0 readers/0 writers to 6 sites and both shard kinds, `validateTransition` 0→1, `detectTamper` 0→3, guard sites 1→3, tools 10→12, tests 279→804, and the parity specs green UNCHANGED. Two rows are explicitly NOT restated as gains because their counts include comments, and `ctx.storageDomain` is still 0 by decision)
+
+## 5b. Follow-up checklist (FU-1…FU-7) — the instrument first
+
+[ ] FU-1 `E:` end-to-end harness — mount the real plugin in a real Cordis context in a temp repo on `E:` and drive a full run THROUGH THE TOOLS, asserting on the RUN DIRECTORY  ← FIRST: it is the instrument every later item is proven with
+[ ] FU-2 wire `delegateReview` so the always-continuable rule is true IN PRODUCTION (T35 found it has no callers)
+[ ] FU-3 drain the child at closeout with the live parent Agent (the unchecked follow-up on the `recursive_review` item)
+[ ] FU-4 compute the worktree's CHANGED PATHS and pass them to `selectMemory`, so T29's path weighting is live
+[ ] FU-5 the production extractor SPAWN behind the injected runner, plus the response-file path
+[ ] FU-6 prove T2's audit fan-out against the LIVE `ctx.workflow` engine (its acceptance used a scripted one)
+[ ] FU-7 the three `recursive_ask` call points at phase-3 entry, QA sign-off and a gate block
 [#] T31b tracking 0.2.1-alpha.1                        DEFERRED — not a gate (see §9.3)
 
 Sprint 1 — make enforcement real (no new infrastructure)

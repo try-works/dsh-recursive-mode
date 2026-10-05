@@ -19,12 +19,14 @@
  * array cannot express the edge at all.
  */
 
-/** One node: an artifact present on disk. */
+/** One node: an artifact on disk, or one being asked about before it exists. */
 export interface PhaseNode {
   /** Artifact file name, the node's identity. */
   id: string
   /** Position in the canonical sequence — used for ordering, NOT as the dependency model. */
   index: number
+  /** Whether the artifact is on disk. A queried, absent node emits no prerequisite edge. */
+  present?: boolean
   /** Whether the artifact is locked, when the caller knows. */
   locked?: boolean
 }
@@ -55,22 +57,42 @@ export function buildPhaseGraph(input: {
   locked?: readonly string[]
   /** Declared dependencies: `from` must be settled before `to`. Order is irrelevant. */
   citations?: ReadonlyArray<{ from: string; to: string }>
+  /**
+   * Artifacts to answer ABOUT, whether or not they exist yet.
+   *
+   * ⚠ THIS EXISTS BECAUSE OF A MEASURED PARITY FAILURE, and it is the item's central modelling gap:
+   * with nodes limited to what is present, a query about an artifact **that does not exist yet**
+   * found no in-edges and answered `[]` — but checking prerequisites **before creating** the artifact
+   * is the NORMAL case, so that made every pre-write check silently vacuous. A queried node is
+   * therefore a node for EDGE TARGETS ONLY: it emits no outgoing prerequisite edge, because an
+   * artifact that does not exist cannot block anything.
+   */
+  queried?: readonly string[]
 }): PhaseGraph {
   const presentSet = new Set(input.present)
   const lockedSet = new Set(input.locked ?? [])
+  const queriedSet = new Set(input.queried ?? [])
   const nodes: PhaseNode[] = input.sequence
     .map((id, index) => ({ id, index }))
-    .filter((node) => presentSet.has(node.id))
-    .map((node) => ({ ...node, locked: lockedSet.has(node.id) }))
+    .filter((node) => presentSet.has(node.id) || queriedSet.has(node.id))
+    .map((node) => ({
+      ...node,
+      // `present` is what makes the source rule below possible: a queried-but-absent node is a
+      // question, not a dependency.
+      present: presentSet.has(node.id),
+      locked: lockedSet.has(node.id),
+    }))
 
   const indexOf = new Map(input.sequence.map((id, index) => [id, index]))
-  const ids = new Set(nodes.map((node) => node.id))
+  const ids = new Set(nodes.filter((node) => node.present === true).map((node) => node.id))
   const edges: PhaseEdge[] = []
 
-  // PREREQUISITE edges: every EARLIER PRESENT artifact blocks this one. Restricted to what exists so a
-  // missing phase cannot hold a run hostage.
+  // PREREQUISITE edges: every earlier PRESENT artifact blocks this one. Restricted to what exists so a
+  // missing phase cannot hold a run hostage, and emitted only FROM present nodes so a queried one
+  // cannot appear as anybody's prerequisite.
   for (const node of nodes) {
     for (const other of nodes) {
+      if (other.present !== true) continue
       if (other.index < node.index) edges.push({ from: other.id, to: node.id, kind: 'prerequisite' })
     }
   }

@@ -113,3 +113,46 @@ describe('T17 — reachability, and the back-edge the ARRAY MODEL gets wrong', (
     expect(backEdges(linear())).toEqual([])
   })
 })
+
+/**
+ * T17 — answering about an artifact that does NOT exist yet.
+ *
+ * ⚠ THIS CASE COMES FROM A MEASURED PARITY FAILURE, not from imagination: delegating
+ * `getPrerequisites` to this graph made `lock.parity.spec.ts` fail, because nodes limited to what is
+ * present cannot answer for a file about to be created — and checking prerequisites BEFORE creating
+ * it is the normal case. A queried node is a node for edge TARGETS only.
+ */
+describe('T17 — the graph can be asked about an artifact that is not on disk', () => {
+  it('answers the in-edge query for a file that does not exist yet', () => {
+    const graph = buildPhaseGraph({
+      sequence: SEQUENCE,
+      present: ['00-requirements.md', '01-as-is.md'],
+      queried: ['02-to-be-plan.md'],
+    })
+    // Exactly what the shipped `getPrerequisites` answers, which is the point of the whole case.
+    expect(prerequisitesOf(graph, '02-to-be-plan.md')).toEqual(['00-requirements.md', '01-as-is.md'])
+  })
+
+  it('does NOT let a queried, absent node become anybody’s prerequisite', () => {
+    // An artifact that does not exist cannot block anything: it is a question, not a dependency.
+    const graph = buildPhaseGraph({
+      sequence: SEQUENCE,
+      present: ['00-requirements.md', '01-as-is.md'],
+      queried: ['02-to-be-plan.md'],
+    })
+    expect(dependentsOf(graph, '02-to-be-plan.md')).toEqual([])
+    for (const id of ['00-requirements.md', '01-as-is.md']) {
+      expect(prerequisitesOf(graph, id)).not.toContain('02-to-be-plan.md')
+    }
+  })
+
+  it('still ignores a citation naming an absent artifact even when it is queried', () => {
+    const graph = buildPhaseGraph({
+      sequence: SEQUENCE,
+      present: ['00-requirements.md'],
+      queried: ['02-to-be-plan.md'],
+      citations: [{ from: '03-implementation-summary.md', to: '02-to-be-plan.md' }],
+    })
+    expect(prerequisitesOf(graph, '02-to-be-plan.md')).toEqual(['00-requirements.md'])
+  })
+})

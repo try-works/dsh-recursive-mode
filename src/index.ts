@@ -27,6 +27,7 @@ import { enumerateRuns, stageBWorkflowInit } from './bootstrap.ts'
 import { getNextLegalPhase, getLockStatus } from './lock.ts'
 import { resolveRunDir } from './run.ts'
 import { phaseLintRulesMessage, ReminderOnceGate } from './phase-rules.ts'
+import { settlementFromEvent, runDirForChild, recordSettlement } from './settlement.ts'
 
 /**
  * rc.2 rebase (T31a) — the message-source vocabulary changed under us.
@@ -316,6 +317,48 @@ export function apply(ctx: Context, config?: { shellOnly?: boolean; repoRoot?: s
           })
         } catch {
           // Observe-only: the fs/observed contract forbids throwing.
+        }
+      }))
+    }
+
+    // T36: capture a delegated child's SETTLEMENT at delivery time.
+    //
+    // WHY DELIVERY AND NOT HISTORY. The obvious implementation of a parent-side
+    // settlement observer is to scan the session log for the `subagent-settled`
+    // notice. That is prohibited: DSH deprecates synchronous reads of arbitrary
+    // session history (`eventAt`/`snapshotEvents`/`ownEvents`) and states that new
+    // production calls are prohibited, enforced by an executable lint check. The
+    // sanctioned replacement is to process the DELIVERED event, which is this
+    // listener — the same `session/event` seam the projection registry subscribes
+    // to. The durable fact then lands in the run's own FILE state, which is where
+    // every other plugin fact lands and keeps the plugin zero-emission.
+    //
+    // The loop needs this because there is NO parent-side promise to await: a
+    // continuable child's settlement arrives as a durable user message on a later
+    // turn, so the round observer must find a recorded settlement or honestly
+    // report that none has landed yet.
+    const sessionRuntime = ctx as unknown as { on?: (event: string, listener: (session: unknown, event: unknown) => void) => () => void }
+    if (sessionRuntime.on) {
+      disposers.push(sessionRuntime.on('session/event', (session, event) => {
+        try {
+          // Cheap shape test FIRST: session/event fires for EVERY committed event
+          // in every session, so a non-settlement must be rejected before any
+          // filesystem work. This is the same ordering the fs/observed listener
+          // uses, for the same reason.
+          const notice = settlementFromEvent(event as never)
+          if (notice === null) return
+          // B3: the session cwd is the authoritative control-plane root per call.
+          const cwd = (session as { header?: { cwd?: string } } | null)?.header?.cwd ?? ''
+          if (cwd === '') return
+          const runDir = runDirForChild(cwd, notice.childId)
+          // No run (or an ambiguous one) means the settlement is not filed rather
+          // than filed wrongly: the loop will report "no settlement yet", which is
+          // recoverable, whereas attaching evidence to the wrong run is not.
+          if (runDir === null) return
+          recordSettlement(runDir, notice)
+        } catch {
+          // Observe-only. This rides the hot path of every session event and must
+          // never break the session it observes.
         }
       }))
     }

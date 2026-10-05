@@ -21,6 +21,7 @@ import {
   settlementRoundObserver,
   settlementLogPath,
   captureSettlement,
+  runDirForChild,
   type SessionEventLike,
 } from '../src/settlement.ts'
 
@@ -187,5 +188,92 @@ describe('T36 — the observer parks instead of blocking, and never fabricates a
   it('leaves structured undefined for prose, so the verdict reader sees no fake verdict', () => {
     const result = settlementResult({ childId: CHILD, summary: 'done', closingText: 'I could not finish this.' })
     expect((result as { structured?: unknown }).structured).toBeUndefined()
+  })
+})
+
+/**
+ * T36 — placing a settlement needs the run, and the delivered event does not name
+ * it. Placement is derived from the FILESYSTEM (the `child-<id>` directory a
+ * delegation wrote), never from a registry that could go stale.
+ */
+describe('T36 — the run that owns a child is resolved from the disk', () => {
+  /** A workspace with runs and delegations, as the delegation path writes them. */
+  function workspace(structure: Record<string, string[]>): string {
+    const root = mkdtempSync(join(tmpdir(), 'rm-childrun-'))
+    for (const [runId, children] of Object.entries(structure)) {
+      for (const childId of children) {
+        const delegation = childId.startsWith('d') ? 'd1' : 'd-other'
+        mkdirSync(join(root, '.recursive', 'run', runId, 'subagents', delegation, 'child-' + childId), { recursive: true })
+      }
+    }
+    return root
+  }
+
+  it('finds the run holding the child', () => {
+    const root = workspace({ 'run-a': ['abc'], 'run-b': ['xyz'] })
+    try {
+      expect(runDirForChild(root, 'abc')).toBe(join(root, '.recursive', 'run', 'run-a'))
+      expect(runDirForChild(root, 'xyz')).toBe(join(root, '.recursive', 'run', 'run-b'))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('returns null for a child no run claims, and never throws', () => {
+    const root = workspace({ 'run-a': ['abc'] })
+    try {
+      expect(runDirForChild(root, 'not-ours')).toBeNull()
+      expect(runDirForChild(root, '')).toBeNull()
+      expect(runDirForChild(join(root, 'no', 'such', 'root'), 'abc')).toBeNull()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('AMBIGUITY files nothing rather than mis-filing evidence into the wrong run', () => {
+    // Two runs claiming one child means a copied tree. Attaching one run's
+    // settlement to another run's chain is worse than not attaching it at all:
+    // the loop reports "no settlement yet" (recoverable) instead.
+    const root = workspace({ 'run-a': ['abc'], 'run-b': ['abc'] })
+    try {
+      expect(runDirForChild(root, 'abc')).toBeNull()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('ignores a delegation directory that has no such child', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rm-childrun-'))
+    try {
+      mkdirSync(join(root, '.recursive', 'run', 'run-a', 'subagents', 'd1', 'child-other'), { recursive: true })
+      expect(runDirForChild(root, 'abc')).toBeNull()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('END TO END: a delivered event lands in the right run and its observer sees it', async () => {
+    const root = workspace({ 'run-a': ['abc'] })
+    try {
+      const runDir = join(root, '.recursive', 'run', 'run-a')
+      // 1. The listener's work: recognise the delivered event, then place it.
+      const notice = settlementFromEvent(settlementEvent({ childId: 'abc' }))!
+      const target = runDirForChild(root, notice.childId)
+      expect(target).toBe(runDir)
+      recordSettlement(target!, notice)
+
+      // 2. The loop's work: the observer for that run now reports a settlement,
+      //    while another run's observer correctly reports none.
+      const observed = await settlementRoundObserver(runDir)('abc', 'm1')
+      expect(observed).not.toBeNull()
+      const elsewhere = mkdtempSync(join(tmpdir(), 'rm-other-'))
+      try {
+        expect(await settlementRoundObserver(elsewhere)('abc', 'm1')).toBeNull()
+      } finally {
+        rmSync(elsewhere, { recursive: true, force: true })
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

@@ -22,7 +22,7 @@
  * — the parent-side settlement seam. There is no promise to await, which is why
  * `delegateContinuable` takes an injected observer instead of awaiting one.
  */
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { SubagentResultLike, ContinuableChildId, ContinuableMessageId } from './delegation.ts'
 
@@ -88,6 +88,55 @@ export function settlementFromEvent(event: SessionEventLike): SettlementNotice |
 /** The run-scoped append-only settlement log. */
 export function settlementLogPath(runDir: string): string {
   return join(runDir, 'subagents', 'settlements.jsonl')
+}
+
+/**
+ * Which run owns this child, resolved from the FILESYSTEM alone.
+ *
+ * The delivered event names the child (`source.senderSessionId`) but not the run,
+ * and the plugin's whole design is to derive placement from what is on disk rather
+ * than to keep a registry that could go stale. A delegation writes its child
+ * directories as `subagents/<delegationId>/child-<childId>/`, so the run holding
+ * that child is the run the settlement belongs to.
+ *
+ * AMBIGUITY RETURNS NULL rather than guessing. Two runs claiming the same child
+ * would mean a copied tree, and filing a settlement into the wrong run is worse
+ * than not filing it: it would attach one run's evidence to another run's chain.
+ * A miss costs a settlement the loop will report as "no settlement yet", which is
+ * recoverable; mis-filing is not.
+ */
+export function runDirForChild(root: string, childId: string): string | null {
+  if (childId === '' || root === '') return null
+  const runsRoot = join(root, '.recursive', 'run')
+  let runs: string[]
+  try {
+    runs = readdirSync(runsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()
+  } catch {
+    return null
+  }
+
+  const matches: string[] = []
+  for (const runName of runs) {
+    const runDir = join(runsRoot, runName)
+    let delegations: string[]
+    try {
+      delegations = readdirSync(join(runDir, 'subagents'), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+    } catch {
+      continue
+    }
+    for (const delegationId of delegations) {
+      if (existsSync(join(runDir, 'subagents', delegationId, 'child-' + childId))) {
+        matches.push(runDir)
+        break
+      }
+    }
+  }
+  return matches.length === 1 ? matches[0]! : null
 }
 
 /**

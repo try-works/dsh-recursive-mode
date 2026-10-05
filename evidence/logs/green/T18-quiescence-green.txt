@@ -1,0 +1,11 @@
+
+ RUN  v2.1.9 D:/DEV/dsh-recursive-mode
+
+ ✓ tests/quiescence.spec.ts (14 tests) 962ms
+
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
+   Start at  09:16:48
+   Duration  2.25s (transform 435ms, setup 0ms, collect 562ms, tests 962ms, environment 0ms, prepare 259ms)
+
+

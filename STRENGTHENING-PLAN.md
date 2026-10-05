@@ -309,7 +309,7 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 - **Note:** Effect ships a stable, runtime-free `Graph` doing exactly this. **Do not adopt it** — a few hundred lines of local TS keeps the zero-dependency posture and the parity goldens intact. The *model* is what is wrong, not the implementation.
 - **Evidence:** audit 2 §3.10; this session's reading of `src/lock.ts`.
 
-### T18 — Quiescence rule for `recursive_lock`, and derive in-flight work by folding · **backlog**
+### T18 — Quiescence rule for `recursive_lock`, and derive in-flight work by folding · **done**
 
 - **Why:** A lock is only sound at a point where nothing is in flight. Tardigrade enforces this literally: a checkpoint *may not contain pending work* — capture returns nothing while any request lacks a settlement, the manual path **fails** with `Cannot checkpoint while work is pending or initialised atoms are unread`, and decoding throws `Effect checkpoint contains pending work`. The plugin has no equivalent check, so a phase can lock while a delegation or a repair is unresolved.
 - **The second half is what makes the first cheap:** Tardigrade has **no separate queue**. Pending work *is* `EffectRequested` without `EffectSettled`, derived from the same log on replay.
@@ -320,6 +320,14 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 - **Substrate:** **none needed.** Per §4.0 this is derived on read, not stored — which is precisely what makes the quiescence rule cheap. Do not put it in `ctx.storageDomain`.
 - **Acceptance:** no phase can lock with unresolved delegated or repair work; the refusal names the specific unresolved item.
 - **Evidence:** audit 2 §4 and items (a) and (b).
+
+- **RESULT — done, but only ONE of the item's three bullets survived contact with the code.** Shipped `pendingWork(runDir)` in `src/status.ts` (the derived projection), the refusal in `lockArtifact`, and the set surfaced on `recursive_status` **and** the run card.
+  - **What is enforced, and why it is the right case.** A delegation writes `subagents/<delegationId>/handoff.md` BEFORE the bundle and before the child starts, and the child's submission is `subagents/<delegationId>/child-<childId>/reply.md`. So the exposure is exactly the window between the two — the window a crash or a hang leaves residue in — and a phase locked inside it certifies work no reply ever supported. A reply that exists but is **empty** is also pending: a child that created the file and wrote nothing has not answered.
+  - **The other two bullets do not correspond to anything on disk, and enforcing either would break locking.** `reopenArtifact` does not write a plan: it reverts the artifact to DRAFT in place and invalidates its downstream receipts, and the reopened artifact then legitimately re-locks — so "a reopen plan without a completion marker" has no representation to test. And "a closeout phase scaffolded without a receipt" describes the normal pre-lock state of *every* phase, so requiring it would make locking impossible. Both are recorded here rather than silently dropped. This is the third item whose literal wording proved unimplementable (after T16's phase-6/8 scopes and T25's path criterion) — a pattern worth noting about the plan's own prose.
+  - **Placement is deliberate:** the quiescence check runs AFTER the prerequisite gate, because monotonic lock-order is the canonical rule the parity goldens and every existing test know; a run that is both out of order and has a delegation open still reports ordering first, exactly as before this item. **Parity held**: no fixture contains any `subagents/` directory, so the new refusal cannot fire against a golden (verified by the full suite, not assumed).
+  - **No substrate.** Derived on read, never stored (§4.0): there is no ledger to lose, and a cold resume shows the same set because it is recomputed from the same files.
+  - **A new registry code, `RM4403`**, and the route had to name a real call — the registry's own self-check rejected the first wording ("answer or cancel the pending delegation") for naming no tool call, and the fix (`call recursive_status to see the pending delegation …`) is a genuinely better route. The three tool wrapping sites now use `codeRuntimeRefusal`, so an already-coded runtime refusal like `RM4403` passes through instead of being buried inside `RM5501`'s detail.
+  - **Evidence:** `tests/quiescence.spec.ts` (14 tests, RED at 12 failing), full suite **53 files / 390 tests**, typecheck 0, build 0, smoke PASS.
 
 ### T19 — Deterministic operation identity from canonical inputs · **backlog**
 
@@ -620,7 +628,7 @@ Sprint 1 — make enforcement real (no new infrastructure)
 [x] T24 result caps, elision markers, stable error codes  ← DONE (registry over all 9 tools, statically enforced)
 
 Sprint 2 — make the workflow legible
-[ ] T18 quiescence rule for recursive_lock + derive in-flight work by folding
+[x] T18 quiescence rule for recursive_lock + derive in-flight work by folding  ← DONE (1 of the item's 3 cases exists on disk)
 [ ] T21 incremental fold + one named position per phase
 [ ] T22 stable prompt prefix + preloaded contracts   ← VERIFY PREMISE FIRST (no DSH cache seam)
 [ ] T23 recursive_ask for the three human gates
@@ -686,7 +694,7 @@ Evidence paths marked `(planned)` do **not** exist yet — they are the spec tha
 | T33 | lint section parsers: final section unreadable | strict | **done** | `tests/section-parser.spec.ts` (14, RED 7) | full suite green; **no golden moved** | `\Z` in FOUR regexes (`getHeadingBody`, `getSubheadingBody`, `extractPathsFromNamedField`, `getNamedFieldText`) is a **literal `Z`** in JS — and it truncates a body at its first `Z` *anywhere*, not only at the end of a document. Fixed to `(?![\s\S])`. The T25 `it.fails` pin flipped to failing on the fix, then became a real assertion |
 | T16 | declarative tool policy | strict | **done** | `tests/policy-globs.spec.ts` (31, RED first) | full suite 52 files/371 tests + typecheck 0 | `src/policy-globs.ts` (engine + built-in list). **Two bricking bugs found:** an ESM cycle that left the absent-file default unwired, and JSON rules denying unconditionally because JSON cannot carry a predicate — now bound **by pattern**. Precedence = specificity then file order. Phase-6/8 literal scopes are unimplementable (they would forbid the phase's own artifact); implemented as the narrowing that bites but does not brick |
 | T17 | phase dependency as a DAG | strict | backlog | (planned) `tests/phase-graph.spec.ts` | parity specs must stay green | changes the data model; back-edges from `upstream-gap` addenda are the motivating case |
-| T18 | quiescence rule + in-flight by folding | strict | backlog | (planned) `tests/quiescence.spec.ts` | (planned) same | a lock may not happen with pending work; pending work is derived, not tracked |
+| T18 | quiescence rule + in-flight by folding | strict | **done** | `tests/quiescence.spec.ts` (14, RED 12) | full suite 53 files/390 tests + typecheck 0 | `pendingWork` derives `handoff.md` with no (or an empty) `reply.md`; `lockArtifact` refuses with `RM4403` naming the delegation, checked AFTER the prerequisite gate so ordering precedence is unchanged; surfaced on `recursive_status` and the card. The item's other two cases (reopen plan, closeout stub) have no on-disk representation |
 | T19 | deterministic operation identity | strict | backlog | (planned) `tests/identity.spec.ts` | (planned) same | canonical JSON then SHA-256 + byte length; two independent systems converged on this |
 | T20 | no-progress recovery bound | strict | backlog | (planned) `tests/audit-progress.spec.ts` | (planned) same | cap on `consecutiveNoProgress`; terminal state needs an explicit resume |
 | T21 | incremental fold + named position | strict | backlog | (planned) `tests/fold-incremental.spec.ts` | (planned) same | `{source, position, state}` frame; append-only assertion; one `position` per phase |

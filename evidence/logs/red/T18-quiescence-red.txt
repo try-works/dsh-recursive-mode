@@ -1,0 +1,241 @@
+
+ RUN  v2.1.9 D:/DEV/dsh-recursive-mode
+
+ ❯ tests/quiescence.spec.ts (14 tests | 12 failed) 969ms
+   × T18 — pendingWork derives in-flight work from the run directory > a run with nothing in flight reports nothing (the common case must not regress) 89ms
+     → pendingWork is not a function
+   × T18 — pendingWork derives in-flight work from the run directory > an unanswered delegation is pending, and names the delegation 73ms
+     → pendingWork is not a function
+   × T18 — pendingWork derives in-flight work from the run directory > a landed reply clears it 67ms
+     → pendingWork is not a function
+   × T18 — pendingWork derives in-flight work from the run directory > a ZERO-BYTE reply is not a submission — still pending 66ms
+     → pendingWork is not a function
+   × T18 — pendingWork derives in-flight work from the run directory > reports every unresolved delegation, not just the first 67ms
+     → pendingWork is not a function
+   × T18 — pendingWork derives in-flight work from the run directory > is a pure read: it creates nothing 66ms
+     → pendingWork is not a function
+   × T18 — pendingWork derives in-flight work from the run directory > a missing run directory is an empty set, never a throw 1ms
+     → pendingWork is not a function
+   × T18 — lockArtifact refuses to lock with work in flight > refuses and names the unresolved delegation 85ms
+     → promise resolved "{ artifact: '00-requirements.md', …(6) }" instead of rejecting
+   × T18 — lockArtifact refuses to lock with work in flight > the refusal is a CODED, routed sentence (T24 registry) 78ms
+     → Cannot read properties of undefined (reading 'code')
+   × T18 — lockArtifact refuses to lock with work in flight > an empty reply still refuses — a 0-byte submission is not a reply 72ms
+     → promise resolved "{ artifact: '00-requirements.md', …(6) }" instead of rejecting
+   × T18 — the pending set is visible, not just enforced > recursive_status carries pendingWork so a human sees why a lock is refused 82ms
+     → expected [] to have a length of 1 but got +0
+   × T18 — the pending set is visible, not just enforced > an empty pending set is still present and empty, so consumers need no null dance 79ms
+     → expected undefined to deeply equal []
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/quiescence.spec.ts > T18 — pendingWork derives in-flight work from the run directory > a run with nothing in flight reports nothing (the common case must not regress)
+TypeError: pendingWork is not a function
+ ❯ tests/quiescence.spec.ts:87:14
+     85|     const m = await mount()
+     86|     try {
+     87|       expect(pendingWork(m.runDir)).toEqual([])
+       |              ^
+     88|     } finally {
+     89|       await m.dispose()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/12]⎯
+
+ FAIL  tests/quiescence.spec.ts > T18 — pendingWork derives in-flight work from the run directory > an unanswered delegation is pending, and names the delegation
+TypeError: pendingWork is not a function
+ ❯ tests/quiescence.spec.ts:97:23
+     95|     try {
+     96|       startDelegation(m)
+     97|       const pending = pendingWork(m.runDir)
+       |                       ^
+     98|       expect(pending).toHaveLength(1)
+     99|       expect(pending[0].kind).toBe('unanswered-delegation')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/12]⎯
+
+ FAIL  tests/quiescence.spec.ts > T18 — pendingWork derives in-flight work from the run directory > a landed reply clears it
+TypeError: pendingWork is not a function
+ ❯ tests/quiescence.spec.ts:112:14
+    110|       startDelegation(m)
+    111|       writeReply(m, '# Verdict: APPROVE\n')
+    112|       expect(pendingWork(m.runDir)).toEqual([])
+       |              ^
+    113|     } finally {
+    114|       await m.dispose()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/12]⎯
+
+ FAIL  tests/quiescence.spec.ts > T18 — pendingWork derives in-flight work from the run directory > a ZERO-BYTE reply is not a submission — still pending
+TypeError: pendingWork is not a function
+ ❯ tests/quiescence.spec.ts:123:23
+    121|       startDelegation(m)
+    122|       writeReply(m, '')
+    123|       const pending = pendingWork(m.runDir)
+       |                       ^
+    124|       expect(pending).toHaveLength(1)
+    125|       expect(pending[0].kind).toBe('empty-reply')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/12]⎯
+
+ FAIL  tests/quiescence.spec.ts > T18 — pendingWork derives in-flight work from the run directory > reports every unresolved delegation, not just the first
+TypeError: pendingWork is not a function
+ ❯ tests/quiescence.spec.ts:137:23
+    135|       startDelegation(m, 'd2')
+    136|       writeReply(m, 'ok', 'c1', 'd1')
+    137|       const pending = pendingWork(m.runDir)
+       |                       ^
+    138|       expect(pending).toHaveLength(1)
+    139|       expect(pending[0].delegationId).toBe('d2')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/12]⎯
+
+ FAIL  tests/quiescence.spec.ts > T18 — pendingWork derives in-flight work from the run directory > is a pure read: it creates nothing
+TypeError: pendingWork is not a function
+ ❯ tests/quiescence.spec.ts:150:7
+    148|       startDelegation(m)
+    149|       const before = existsSync(join(m.runDir, 'subagents'))
+    150|       pendingWork(m.runDir)
+       |       ^
+    151|       pendingWork(m.runDir)
+    152|       expect(existsSync(join(m.runDir, 'subagents'))).toBe(before)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/12]⎯
+
+ FAIL  tests/quiescence.spec.ts > T18 — pendingWork derives in-flight work from the run directory > a missing run directory is an empty set, never a throw
+TypeError: pendingWork is not a function
+ ❯ tests/quiescence.spec.ts:159:12
+    157| 
+    158|   it('a missing run directory is an empty set, never a throw', () => {
+    159|     expect(pendingWork(join(tmpdir(), 'definitely-not-a-run-9f3a'))).t…
+       |            ^
+    160|   })
+    161| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/12]⎯
+
+ FAIL  tests/quiescence.spec.ts > T18 — lockArtifact refuses to lock with work in flight > refuses and names the unresolved delegation
+AssertionError: promise resolved "{ artifact: '00-requirements.md', …(6) }" instead of rejecting
+
+- Expected
++ Received
+
+- [Error: rejected promise]
++ Object {
++   "artifact": "00-requirements.md",
++   "blockers": Array [],
++   "lockHash": "1399b98af763dca1882fc77a4afab25d438fa632889e200f6f9eb25ee4e0c162",
++   "lockedAt": "2026-10-05T01:14:32Z",
++   "receipt": Object {
++     "artifact": "00-requirements.md",
++     "artifact_hash": "1399b98af763dca1882fc77a4afab25d438fa632889e200f6f9eb25ee4e0c162",
++     "artifact_path": "E:\\tmp\\rm-quiesce-ady2Lb\\.recursive\\run\\q-run\\00-requirements.md",
++     "locked_at": "2026-10-05T01:14:32Z",
++     "prerequisite_hashes": Object {},
++     "previous_receipt_hash": null,
++     "receipt_hash": "f5988d182708fb60d259ac135964df758036c32ce04da7cc3f6c437593d6f056",
++   },
++   "runId": "q-run",
++   "status": "LOCKED",
++ }
+
+ ❯ tests/quiescence.spec.ts:168:75
+    166|     try {
+    167|       startDelegation(m)
+    168|       await expect(m.ctx.recursive.lockArtifact(RUN, '00-requirements.…
+       |                                                                           ^
+    169|     } finally {
+    170|       await m.dispose()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/12]⎯
+
+ FAIL  tests/quiescence.spec.ts > T18 — lockArtifact refuses to lock with work in flight > the refusal is a CODED, routed sentence (T24 registry)
+TypeError: Cannot read properties of undefined (reading 'code')
+ ❯ tests/quiescence.spec.ts:179:51
+    177|       startDelegation(m)
+    178|       await expect(m.ctx.recursive.lockArtifact(RUN, '00-requirements.…
+    179|         new RegExp('^' + TOOL_ERRORS.PENDING_WORK.code),
+       |                                                   ^
+    180|       )
+    181|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/12]⎯
+
+ FAIL  tests/quiescence.spec.ts > T18 — lockArtifact refuses to lock with work in flight > an empty reply still refuses — a 0-byte submission is not a reply
+AssertionError: promise resolved "{ artifact: '00-requirements.md', …(6) }" instead of rejecting
+
+- Expected
++ Received
+
+- [Error: rejected promise]
++ Object {
++   "artifact": "00-requirements.md",
++   "blockers": Array [],
++   "lockHash": "1399b98af763dca1882fc77a4afab25d438fa632889e200f6f9eb25ee4e0c162",
++   "lockedAt": "2026-10-05T01:14:32Z",
++   "receipt": Object {
++     "artifact": "00-requirements.md",
++     "artifact_hash": "1399b98af763dca1882fc77a4afab25d438fa632889e200f6f9eb25ee4e0c162",
++     "artifact_path": "E:\\tmp\\rm-quiesce-veMX9N\\.recursive\\run\\q-run\\00-requirements.md",
++     "locked_at": "2026-10-05T01:14:32Z",
++     "prerequisite_hashes": Object {},
++     "previous_receipt_hash": null,
++     "receipt_hash": "ed72716d230782c68114dae2e301b0c7692d024f6bbb23c6886f72e7d4f6e03e",
++   },
++   "runId": "q-run",
++   "status": "LOCKED",
++ }
+
+ ❯ tests/quiescence.spec.ts:213:75
+    211|       startDelegation(m)
+    212|       writeReply(m, '')
+    213|       await expect(m.ctx.recursive.lockArtifact(RUN, '00-requirements.…
+       |                                                                           ^
+    214|     } finally {
+    215|       await m.dispose()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/12]⎯
+
+ FAIL  tests/quiescence.spec.ts > T18 — the pending set is visible, not just enforced > recursive_status carries pendingWork so a human sees why a lock is refused
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ tests/quiescence.spec.ts:228:23
+    226|       expect(status).not.toBeNull()
+    227|       const pending = (status as { pendingWork?: Array<{ delegationId:…
+    228|       expect(pending).toHaveLength(1)
+       |                       ^
+    229|       expect(pending[0].delegationId).toBe('d1')
+    230|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/12]⎯
+
+ FAIL  tests/quiescence.spec.ts > T18 — the pending set is visible, not just enforced > an empty pending set is still present and empty, so consumers need no null dance
+AssertionError: expected undefined to deeply equal []
+
+- Expected: 
+Array []
+
++ Received: 
+undefined
+
+ ❯ tests/quiescence.spec.ts:239:67
+    237|     try {
+    238|       const status = await m.ctx.recursive.status(RUN)
+    239|       expect((status as { pendingWork?: unknown[] }).pendingWork).toEq…
+       |                                                                   ^
+    240|     } finally {
+    241|       await m.dispose()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/12]⎯
+
+ Test Files  1 failed (1)
+      Tests  12 failed | 2 passed (14)
+   Start at  09:14:30
+   Duration  2.26s (transform 457ms, setup 0ms, collect 576ms, tests 969ms, environment 0ms, prepare 223ms)
+
+

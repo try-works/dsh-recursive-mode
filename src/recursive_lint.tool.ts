@@ -19,7 +19,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RecursiveRuntime } from './runtime.ts'
-import { toolError } from './errors.ts'
+import { codeRuntimeRefusal, toolError } from './errors.ts'
 import { MAX_FINDINGS_FULL, MAX_FINDINGS_SUMMARY, elideFindings, type ElisionMeta } from './result-cap.ts'
 
 type LintMode = 'summary' | 'full'
@@ -82,7 +82,7 @@ export function createRecursiveLintTool(recursive: RecursiveRuntime) {
         }
         return bounded as unknown as JsonValue
       } catch (err) {
-        return { error: toolError('RUNTIME_REFUSED', err instanceof Error ? err.message : String(err)) } as const
+        return { error: codeRuntimeRefusal(err instanceof Error ? err.message : String(err)) } as const
       }
     },
   })

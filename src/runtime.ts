@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { lintRun } from './ts-lint.ts'
 import { requirementsContent, worktreeContent, laterPhaseContent, detectGitContext, RUN_SCAFFOLD_DIRS, type GitContext } from './init-templates.ts'
-import { foldRun, resolveRunDir } from './status.ts'
+import { foldRun, pendingWork, resolveRunDir } from './status.ts'
 import {
   getLockStatus,
   getNextLegalPhase,
@@ -13,7 +13,8 @@ import {
   lockHashFromContent,
   writeReceipt,
 } from './lock.ts'
-import type { RecursiveStatusResult } from './types.ts'
+import type { PendingWorkItem, RecursiveStatusResult } from './types.ts'
+import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
 import { resolveControlPlaneRoot, type WorkspaceRegistryLike } from './workspace.ts'
 import { phaseRulesFor, type PhaseRules } from './phase-rules.ts'
@@ -63,7 +64,15 @@ export interface LintArtifactResult {
  * as an intersection rather than by editing RecursiveStatusResult/foldRun — the
  * fold's own shape is parity-asserted and stays exactly as it was.
  */
-export type RecursiveStatusWithGuardDecisions = RecursiveStatusResult & { guardDecisions?: GuardDecisionRecord[] }
+export type RecursiveStatusWithGuardDecisions = RecursiveStatusResult & {
+  guardDecisions?: GuardDecisionRecord[]
+  /**
+   * T18: unresolved in-flight work, derived from the run directory on every call.
+   * Always present (empty when nothing is in flight) so consumers need no null
+   * check, and non-empty explains a `RM4403` lock refusal.
+   */
+  pendingWork?: PendingWorkItem[]
+}
 
 /** How many recent decisions to read from the log before scoping to one run. */
 const GUARD_DECISION_READ_LIMIT = 200
@@ -476,7 +485,11 @@ export class RecursiveRuntime extends Service {
     const guardDecisions = readGuardDecisions(root, GUARD_DECISION_READ_LIMIT)
       .filter((d) => d.runId === resolved.runId)
       .slice(0, GUARD_DECISION_SURFACE_LIMIT)
-    return { ...foldRun(resolved.runDir, resolved.runId), guardDecisions }
+    // T18: the pending set rides beside the fold for the same reason — foldRun's
+    // shape is parity-asserted. Always present (empty when nothing is in flight)
+    // so a consumer needs no null dance, and DERIVED on every call rather than
+    // stored, so it cannot go stale.
+    return { ...foldRun(resolved.runDir, resolved.runId), guardDecisions, pendingWork: pendingWork(resolved.runDir) }
   }
 
   /**
@@ -634,6 +647,16 @@ export class RecursiveRuntime extends Service {
       const message = 'monotonic lock-order: ' + blockers.map(b => b.artifact + ' (' + b.status + ')').join(', ')
       try { this.blockRunToGoal(agent, runId, { code: 'prerequisite-blockers', message }) } catch { /* best-effort */ }
       throw new Error('Prerequisite blockers: ' + blockers.map(b => b.artifact + ' (' + b.status + ')').join(', '))
+    }
+    // T18 — QUIESCENCE. A lock is only sound at a point where nothing is in
+    // flight, so a run with an unresolved delegation refuses to lock and names
+    // what is blocking. Checked AFTER the prerequisite gate deliberately: the
+    // monotonic lock-order rule is the canonical one that the parity goldens and
+    // every existing test know, and a run that is both out of order AND has a
+    // delegation open still reports ordering first, exactly as before this item.
+    const inFlight = pendingWork(runDir)
+    if (inFlight.length > 0) {
+      throw new Error(toolError('PENDING_WORK', inFlight.map((p) => p.detail).join('; ')))
     }
     let content = readFileSync(artifactPath, 'utf8')
     const lockedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')

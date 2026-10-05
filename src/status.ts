@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
-import { readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ArtifactState, PhaseDef, PhaseState, RecursiveStatusResult } from './types.ts'
+import type { ArtifactState, PendingWorkItem, PhaseDef, PhaseState, RecursiveStatusResult } from './types.ts'
 
 export const RUN_ARTIFACT_SEQUENCE = [
   '00-requirements.md',
@@ -117,6 +117,87 @@ export function getWorkflowProfile(runDir: string): string {
 
 export { getLatestRunDirectory, discoverRuns, resolveRunDir } from './run.ts'
 export type { RunDiscoveryResult } from './run.ts'
+
+/**
+ * T18 — unresolved in-flight work, DERIVED from the run directory.
+ *
+ * There is no ledger, no queue and no stored flag: this reads what is already on
+ * disk, which is what makes the quiescence rule in `lockArtifact` cheap enough to
+ * run on every lock. Plan §4.0: derived beats stored wherever derivation is
+ * cheap, and losing a derived fact costs nothing because it cannot be lost.
+ *
+ * WHY THIS IS THE ONLY CASE IMPLEMENTED. The pairing is created early in the
+ * happy path — `runtime.ts` writes `subagents/<id>/handoff.md` BEFORE the bundle
+ * and before the child starts — so the exposure is exactly the window between
+ * the handoff and the reply. The plan also names "a reopen plan without a
+ * completion marker" and "a closeout phase scaffolded without a receipt"; neither
+ * exists on disk (`reopenArtifact` reverts the artifact in place and invalidates
+ * receipts; a scaffolded-but-unlocked closeout artifact is the normal pre-lock
+ * state of every phase), and enforcing either would make locking impossible.
+ * That omission is deliberate and recorded on the item.
+ *
+ * A reply that exists but is empty is NOT a submission, so it stays pending —
+ * a child that created the file and wrote nothing has not answered.
+ *
+ * Total: a missing or unreadable run directory yields an empty set, never a throw.
+ */
+export function pendingWork(runDir: string): PendingWorkItem[] {
+  const subagents = join(runDir, 'subagents')
+  let delegations: string[] = []
+  try {
+    delegations = readdirSync(subagents, { withFileTypes: true })
+      .filter((d) => {
+        if (d.isDirectory()) return true
+        if (!d.isSymbolicLink()) return false
+        try { return statSync(join(subagents, d.name)).isDirectory() } catch { return false }
+      })
+      .map((d) => d.name)
+      .sort()
+  } catch {
+    return []
+  }
+
+  const out: PendingWorkItem[] = []
+  for (const delegationId of delegations) {
+    const dir = join(subagents, delegationId)
+    // Only a delegation directory counts: a stray directory with no handoff is
+    // not evidence that work was started.
+    if (!existsSync(join(dir, 'handoff.md'))) continue
+    const handoffRel = 'subagents/' + delegationId + '/handoff.md'
+
+    let children: string[] = []
+    try {
+      children = readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && d.name.startsWith('child-'))
+        .map((d) => d.name)
+        .sort()
+    } catch { /* an unreadable delegation dir is treated as unanswered below */ }
+
+    const replies = children.map((child) => 'subagents/' + delegationId + '/' + child + '/reply.md')
+    const present = replies.filter((rel) => existsSync(join(runDir, rel)))
+    if (present.length === 0) {
+      out.push({
+        kind: 'unanswered-delegation',
+        delegationId,
+        path: handoffRel,
+        detail: 'delegation ' + delegationId + ' wrote ' + handoffRel + ' but no child has written a reply.md yet',
+      })
+      continue
+    }
+    const nonEmpty = present.filter((rel) => {
+      try { return readFileSync(join(runDir, rel), 'utf8').trim() !== '' } catch { return false }
+    })
+    if (nonEmpty.length === 0) {
+      out.push({
+        kind: 'empty-reply',
+        delegationId,
+        path: present[0]!,
+        detail: 'delegation ' + delegationId + ' has only empty reply file(s) - an empty file is not a submission',
+      })
+    }
+  }
+  return out
+}
 
 export function getArtifactState(artifactPath: string, workflowProfile: string): ArtifactState {
   let content: string | null = null

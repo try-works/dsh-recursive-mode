@@ -12,7 +12,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { discoverRuns } from './run.ts'
-import { foldRun } from './status.ts'
+import { foldRun, pendingWork } from './status.ts'
 import { getLockStatus, receiptPath, readReceipt } from './lock.ts'
 import type { RecursiveProjection, RecursiveRunCard, RecursivePhaseRow, RecursiveRunState, RecursiveTamper } from './types.ts'
 
@@ -73,6 +73,10 @@ export function foldRunCard(runDir: string, runId: string, worktreeRoot: string)
     state,
     tampers: tampersOf(status),
     subagents: {},
+    // T18: the card carries the same DERIVED pending set the lock gate enforces,
+    // so the board explains a refusal instead of only recording it. Derived on
+    // every fold, so a cold resume shows it and no store is involved (§4.0).
+    pendingWork: pendingWork(runDir),
   }
 }
 

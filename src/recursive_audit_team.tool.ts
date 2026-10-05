@@ -1,5 +1,5 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { hasToolErrorCode, toolError } from './errors.ts'
+import { codeRuntimeRefusal } from './errors.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type {
   TeamRuntimeLike,
@@ -44,9 +44,9 @@ function taskViewToJson(view: TeamTaskViewLike): JsonValue {
 /** Wrap a non-JSON-pure value in the standard error envelope, coded for greppability. */
 function errorJson(message: string): JsonValue {
   // T24: every refusal must begin with a stable code so a consumer can branch on
-  // it. The teams loop's own messages carry no code, so wrap them; one that
-  // already has a code is passed through rather than double-wrapped.
-  return { error: hasToolErrorCode(message) ? message : toolError('RUNTIME_REFUSED', message) }
+  // it. `codeRuntimeRefusal` wraps the teams loop's own uncoded messages and
+  // passes an already-coded one through rather than nesting it.
+  return { error: codeRuntimeRefusal(message) }
 }
 
 export function createRecursiveAuditTeamTool(teams: TeamRuntimeLike | null) {

@@ -114,7 +114,15 @@ export const TOOL_ERRORS = {
     next: 'call recursive_init to scaffold the run, or recursive_status to inspect why every phase is locked',
   },
 
+  PENDING_WORK: {
+    code: 'RM4403',
+    klass: 'state',
+    problem: 'the run has unresolved delegated work, so this phase cannot lock yet',
+    next: 'call recursive_status to see the pending delegation, have the child write its reply.md, then lock again',
+  },
+
   /* 5xxx — the runtime refused an operation it understands. */
+
   RUNTIME_REFUSED: {
     code: 'RM5501',
     klass: 'runtime',
@@ -147,4 +155,19 @@ export function toolError(name: ToolErrorName, detail?: string): string {
 /** True when a string already carries a registry code — used to avoid double-wrapping. */
 export function hasToolErrorCode(message: string): boolean {
   return /^RM\d{4}\b/.test(message.trim())
+}
+
+/**
+ * Give a thrown runtime message a stable code WITHOUT nesting one that is
+ * already there.
+ *
+ * A refusal the runtime already expressed in this registry's vocabulary (for
+ * example `RM4403` pending work) is passed through untouched: wrapping it would
+ * bury the real code inside `RM5501`'s detail and make the greppable handle
+ * useless, which is the whole reason the registry exists. A bare thrown message
+ * has no code to branch on, so it is wrapped and its sentence survives as the
+ * detail.
+ */
+export function codeRuntimeRefusal(message: string): string {
+  return hasToolErrorCode(message) ? message : toolError('RUNTIME_REFUSED', message)
 }

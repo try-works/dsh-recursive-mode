@@ -64,6 +64,22 @@ export interface RecursiveTamper {
   reason: string
 }
 
+/**
+ * T18 — one piece of unresolved in-flight work, DERIVED from the run directory
+ * (there is no ledger). `unanswered-delegation` is a `handoff.md` with no reply
+ * yet; `empty-reply` is a reply file that exists but carries nothing, which is
+ * not a submission.
+ */
+export interface PendingWorkItem {
+  kind: 'unanswered-delegation' | 'empty-reply'
+  /** The delegation directory name, so a refusal can name what is blocking. */
+  delegationId: string
+  /** Repo-relative path of the file that would settle it, or of the handoff. */
+  path: string
+  /** One sentence for a human, naming the delegation and what is missing. */
+  detail: string
+}
+
 /** One subagent activity fact (start or end). */
 export interface RecursiveSubagent {
   childId: string
@@ -100,6 +116,12 @@ export interface RecursiveRunCard {
   tampers: Record<string, RecursiveTamper>
   /** Subagent activity (latest status wins per childId). */
   subagents: Record<string, RecursiveSubagent>
+  /**
+   * T18: unresolved in-flight work, DERIVED from the run directory on every fold
+   * (never stored). Optional so an older producer's card stays readable; the
+   * folder always sets it. A non-empty array explains why a lock will be refused.
+   */
+  pendingWork?: PendingWorkItem[]
   /** Set on recursive/run-merged; the run re-keys to this root. */
   mergedToRepoRoot?: string
 }

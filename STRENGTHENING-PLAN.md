@@ -155,7 +155,7 @@ Shipped: `src/skills.ts` registers a bundled provider via `ctx.skills.registerPr
 
 Shipped: `src/goals-projection.ts`; wired into `initRun` (arm), `lockArtifact` (block on gate failure), reopen (resume). Safety rule retained: a goal whose objective is not a `recursive-run:<id>` marker is never clobbered. RED: `tests/goals-projection.spec.ts` (11 tests).
 
-### T2 — Route fan-out audit/verification through the native **workflowEngine** · **backlog**
+### T2 — Route fan-out audit/verification through the native **workflowEngine** · **IN PROGRESS — the pure contract is DONE (`src/workflow-audit.ts`); the live engine wiring is not**
 
 - **Why:** Phase 3.5 and cross-cutting verification are natural multi-agent fan-out; the plugin reimplements the loop. `workflowEngine` gives `phase()` / `agent()` / `pipeline()` / `parallel`, built-in caps, and `workflow/*` events for board observability.
 - **What:** Adapter `orchestrateAudit(workflowEngine, run, reviewers)` mapping the audit contract to `phase(title)` + `agent(prompt, opts)` + `parallel(thunks)`, returning the aggregated verdict.
@@ -163,6 +163,14 @@ Shipped: `src/goals-projection.ts`; wired into `initRun` (arm), `lockArtifact` (
 - **RED/compensating:** `tests/workflow-contract.spec.ts` tests the pure mapping and asserts no cross-item null-dropping; manual verification runs a scripted audit and checks `workflow/phase|agent-start|agent-end` frames.
 - **GREEN:** `src/workflow-audit.ts` (new), wired into the delegate path.
 - **Acceptance:** a scripted 3-reviewer audit produces 3 `workflow/agent-end` frames + a single verified verdict.
+
+- **RESULT (part 1) — the pure contract is done, including the property this item's own rescope named.** `src/workflow-audit.ts` (the GREEN's path, matched deliberately rather than renamed by convenience) builds a fan-out plan from the plugin's audit inputs — one titled phase per role, one labelled item per reviewer, with the artifact, the reviewer's own focus and the audit questions carried into each prompt — and runs it through the engine's hook shape: `phase(title)`, `agent(prompt, opts)`, `parallel(thunks)`.
+  - **⚠⚠ NO CROSS-ITEM NULL-DROPPING — the defect the item's RED names, and it is the worst outcome this plugin can produce.** The engine resolves **`null`** for a child that FAILED, so the obvious `results.filter(Boolean)` turns a failed reviewer into a fan-out that merely **looks smaller**. An audit that quietly lost its dissenting reviewer would then report a **clean pass**. Every planned item therefore yields an entry, with `ok: false` and a reason where a child produced nothing — and `describeAuditFanOut` states the count and calls the audit **INCOMPLETE, not smaller**. Pinned with a fixture where one of two reviewers returns nothing: the result has **two** rows, not one.
+  - **Deterministic and unique-labelled by construction:** the same inputs produce the same plan (asserted by comparing serialised plans), and repeated roles get distinct labels (`run-1/code-reviewer/1`, `…/2`, `…/3`), so the engine's progress and the board can tell three same-role reviewers apart.
+  - **A blank role is SKIPPED rather than turned into an anonymous reviewer**, and no reviewers plans nothing — which the summary states as *"planned no reviewers"* rather than an empty success.
+  - **The hook shape is a STRUCTURAL seam, not an import**, because the engine runs against a live host context (the item calls it integration-grade). Modelling the three hooks used keeps the CONTRACT testable without a host, which is where the risk lives.
+  - **REMAINING, and the acceptance is NOT met:** *"a scripted 3-reviewer audit produces 3 `workflow/agent-end` frames + a single verified verdict"* — that is a LIVE-engine assertion, and it needs the adapter wired into the delegate path. The pure contract and its null-dropping guarantee are covered; the wiring is not.
+  - **Evidence:** `tests/workflow-contract.spec.ts` (11 tests), full suite **75 files / 714 tests** green on 3 consecutive runs, typecheck 0, build 0.
 - **Open question (from audit 1):** the harness's own lesson is that fan-out belongs behind a *hook*, not a bespoke loop, and that "the loop guard is the consumer's". Confirm the cap semantics before building this.
 
 ### T3 — Model the **audit→repair→re-audit loop** as `agentTeams` Tasks · **done**
@@ -950,7 +958,7 @@ Sprint 4 — the original backlog, re-sequenced
 [x] T12 phase rules as skills  ← DONE (the rules are IN the native catalogue, keyed by a name that keeps 01.5 distinct from 01, with the BODY carrying the rules; `skills/change` surfacing is named as not done) (+ preloaded contracts)
 [x] T14 memory retrieval into the review bundle  ← DONE (the bundle the reviewer READS carries the retrieved memory, with its source; a dead `memoryRefs` slot is filled; an unrelated note is asserted ABSENT) (narrower than T29 — land after it)
 [x] T13 planMode for phases 0-2  ← DONE (the mapping handles all three phase forms; the gate is LIVE as a `pre_trigger` hook on `exit_plan_mode`, reading the phase the run already waits on)
-[ ] T2  workflowEngine fan-out — confirm cap semantics before building
+[~] T2  workflowEngine fan-out  ← the pure contract is DONE (`src/workflow-audit.ts`: plan + orchestration + NO cross-item null-dropping); the live 3-`agent-end`-frames wiring is OPEN
 
 Sprint 5 — close the temporal axis (the plugin currently has NO memory hooks)
 [ ] T30 learnings extraction at run close   ← FIRST: T29 has nothing to read until this has run twice
@@ -976,7 +984,7 @@ Evidence paths marked `(planned)` do **not** exist yet — they are the spec tha
 |---|---|---|---|---|---|---|
 | T0 | packaged `recursive-mode` skill | strict | **done** | `tests/skills.spec.ts` | full suite + smoke | bundled provider via `ctx.skills.registerProvider`, rank 600, body from shipped `SKILL.md` |
 | T1 | goals as run/phase substrate | strict | **done** | `tests/goals-projection.spec.ts` (11) | full suite + smoke | `src/goals-projection.ts`; arm on init, block on gate, resume on reopen; never clobbers a foreign goal |
-| T2 | workflowEngine fan-out | pragmatic | backlog | (planned) `tests/workflow-contract.spec.ts` | manual integration | integration-grade; contract mapping unit-tested. **Confirm cap semantics first** (audit 1) |
+| T2 | workflowEngine fan-out | pragmatic | **IN PROGRESS** — the pure contract DONE (no null-dropping); live wiring open | `tests/workflow-contract.spec.ts` (11) | full suite 75 files/714 tests on 3 consecutive runs + typecheck 0 | integration-grade; contract mapping unit-tested. **Confirm cap semantics first** (audit 1) |
 | T3 | agentTeams task loop | strict | **done** | `tests/teams-task-loop.spec.ts` (7) | full suite + smoke | pure `auditToPass`; lock never precedes APPROVE. **Amended by T20** (round count is the wrong budget) |
 | T4 | continuable subagents | strict | **done (library) — UNWIRED** | `tests/continuable-delegate.spec.ts` (12) | full suite + smoke | one durable child; exact live-Agent authority; repair text synthesized from `findings[].title`. **⚠ No caller exists** — see T36. The unit coverage is real; the behaviour is not yet reachable |
 | T5 | sessionProjections | — | **SETTLED** | — | — | Not adopted. Zero-emission + per-workspace is the design; confirmed by Tardigrade's per-thread store. T21 takes the one useful idea (incremental fold) |

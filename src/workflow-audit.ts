@@ -212,3 +212,36 @@ export function auditWorkflowRequest(
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   }
 }
+
+/**
+ * T2 — the engine, as a structural seam.
+ *
+ * ⚠ START AND AWAIT ONLY. The engine's `workflow/*` lifecycle events are documented as
+ * **"observe-only … never expose run control"**, so a caller starts a run and awaits the script's
+ * `result`; it must not try to steer the run through the event stream.
+ */
+export interface WorkflowEngineLike {
+  start(request: AuditWorkflowRequest): { result: Promise<unknown> }
+}
+
+/**
+ * Start an audit fan-out and await the script's result.
+ *
+ * ⚠ NO ENGINE IS A STATED OUTCOME, not a silent empty audit: a fan-out that could not be
+ * orchestrated must never read as a fan-out that found nothing wrong. The caller gets
+ * `orchestrated: false` and a reason, in the same spirit as every other optional seam here.
+ */
+export async function startAuditFanOut(
+  workflow: WorkflowEngineLike | null | undefined,
+  plan: AuditFanOutPlan,
+  options: { parent: unknown; signal?: unknown },
+): Promise<{ orchestrated: boolean; reason?: string; result?: unknown }> {
+  if (workflow === null || workflow === undefined || typeof workflow.start !== 'function') {
+    return {
+      orchestrated: false,
+      reason: 'no workflow engine is mounted, so the ' + plan.phases.length + '-phase audit fan-out was NOT orchestrated',
+    }
+  }
+  const run = workflow.start(auditWorkflowRequest(plan, options))
+  return { orchestrated: true, result: await run.result }
+}

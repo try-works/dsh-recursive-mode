@@ -29,6 +29,7 @@ import { closeoutPhase } from './closeout.ts'
 import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './scratch.ts'
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
 import { readMemoryEntries, retrieveMemory, renderMemorySection } from './memory.ts'
+import type { WorkflowEngineLike } from './workflow-audit.ts'
 import { createHandoff, createChildBrief, replyPath, childScratchPath, buildDelegationPrompt, type HandoffInput, type ChildBriefInput } from './handoff.ts'
 import { loadRouterPolicy, routerPolicyPath, resolveRole, capabilityProbe, delegationDecisionBasis, type RouterPolicy, type RouterPolicyOverrides, type SubagentProviderLike, type RouteDecision, type CapabilityProbe } from './router.ts'
 import { delegate, delegateContinuable, remainingDepthFor, validateReferences, referencesFromResult, writeActionRecord, evaluateDelegationResult, reviewOutputSchema, defaultReviewToolFilter, type SubagentsRuntimeLike, type SubagentStartRequestLike, type SubagentResultLike, type Reference, type ActionRecordInput, type ContinuableDelegationLike, type SubagentParentHandle } from './delegation.ts'
@@ -122,7 +123,7 @@ const ARTIFACT_STUB = {
 export class RecursiveRuntime extends Service {
   /** Recursive-mode runtime service. Owns run-state reads + lock/init/lint operations. */
 
-  constructor(ctx: Context, config: { repoRoot?: string; workspaceRegistry?: WorkspaceRegistryLike; goals?: GoalServiceLike | null; jobs?: JobsRegistryLike | null; subagents?: SubagentsRuntimeLike | null } = {}) {
+  constructor(ctx: Context, config: { repoRoot?: string; workspaceRegistry?: WorkspaceRegistryLike; goals?: GoalServiceLike | null; jobs?: JobsRegistryLike | null; subagents?: SubagentsRuntimeLike | null; workflow?: WorkflowEngineLike | null } = {}) {
     super(ctx, 'recursive')
     this.repoRoot = config.repoRoot ?? process.cwd()
     this.workspaceRegistry = config.workspaceRegistry ?? null
@@ -132,10 +133,21 @@ export class RecursiveRuntime extends Service {
     this.jobs = config.jobs ?? null
     // T39: the subagents seam, resolved at the COMPOSITION like the other optional services.
     this.subagentsSeam = config.subagents ?? null
+    // T2: the workflow engine, likewise.
+    this.workflow = config.workflow ?? null
   }
 
   /** T10: the native jobs registry, when the composition mounts one. */
   private readonly jobs: JobsRegistryLike | null
+
+  /**
+   * T2: the workflow engine, when the composition mounts one.
+   *
+   * OPTIONAL like every other seam here — without it an audit fan-out reports that it could not be
+   * orchestrated rather than pretending a fan-out happened. The engine's `workflow/*` events are
+   * observe-only, so this is used to START a run and await its result, never to drive one.
+   */
+  private readonly workflow: WorkflowEngineLike | null
 
   /**
    * T39: the subagents seam the composition mounted, used when a caller does not pass one.

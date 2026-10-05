@@ -14,7 +14,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildAuditFanOutPlan, orchestrateAudit, describeAuditFanOut, auditWorkflowRequest,
-  AUDIT_FANOUT_SCRIPT,
+  startAuditFanOut, AUDIT_FANOUT_SCRIPT,
   type WorkflowHooksLike, type AuditPlanInput,
 } from '../src/workflow-audit.ts'
 
@@ -194,5 +194,91 @@ describe('T2 — the request the engine is asked to start', () => {
   it('omits the signal when none was given, rather than sending undefined', () => {
     expect(auditWorkflowRequest(PLAN, { parent: {} }).signal).toBeUndefined()
     expect(auditWorkflowRequest(PLAN, { parent: {}, signal: 'sig' }).signal).toBe('sig')
+  })
+})
+
+/**
+ * T2 part 3 — THE ACCEPTANCE, driven through a SCRIPTED engine.
+ *
+ * *"A scripted 3-reviewer audit produces 3 `workflow/agent-end` frames + a single verified
+ * verdict."* The engine is faked here because it is integration-grade against a live host (the
+ * item's own TDD mode says so) — but the fake RUNS THE SCRIPT'S JOB: it takes the request the plugin
+ * submitted, drives the plan from `request.args` through the hooks, and emits one `agent-end` frame
+ * per child. So the assertion covers the contract the real engine would honour, and says plainly
+ * that the live engine itself was not run.
+ */
+describe('T2 — a scripted 3-reviewer audit: 3 agent-end frames + a single verdict', () => {
+  const THREE: AuditPlanInput = {
+    ...INPUT,
+    reviewers: [{ role: 'code-reviewer' }, { role: 'tester' }, { role: 'memory-auditor' }],
+  }
+
+  /** Simulates the engine running AUDIT_FANOUT_SCRIPT over the request's plan. */
+  function scriptedEngine(answers: Record<string, unknown>) {
+    const frames: string[] = []
+    const seen: Array<{ script: string; phases: number; parent: unknown }> = []
+    const engine = {
+      start(request: { script: string; args: { plan: ReturnType<typeof buildAuditFanOutPlan> }; parent: unknown }) {
+        seen.push({ script: request.script, phases: request.args.plan.phases.length, parent: request.parent })
+        const hooks = {
+          phase: () => {},
+          agent: async (_prompt: string, options?: { label?: string }) => {
+            frames.push('workflow/agent-end ' + (options?.label ?? '?'))
+            return answers[options?.label ?? ''] ?? null
+          },
+          parallel: async (thunks: ReadonlyArray<() => Promise<unknown>>) => Promise.all(thunks.map((t) => t())),
+        }
+        const result = (async () => {
+          const outcome = await orchestrateAudit(hooks, request.args.plan)
+          return { verdict: outcome.failed === 0 ? 'APPROVE' : 'INCOMPLETE', failed: outcome.failed }
+        })()
+        return { result }
+      },
+    }
+    return { engine, frames, seen }
+  }
+
+  it('produces one frame per reviewer and ONE verdict', async () => {
+    const plan = buildAuditFanOutPlan(THREE)
+    const fake = scriptedEngine({
+      'run-1/code-reviewer/1': { verdict: 'APPROVE' },
+      'run-1/tester/1': { verdict: 'APPROVE' },
+      'run-1/memory-auditor/1': { verdict: 'APPROVE' },
+    })
+    const outcome = await startAuditFanOut(fake.engine, plan, { parent: { id: 'p' } })
+    expect(outcome.orchestrated).toBe(true)
+    // THREE frames — one per reviewer, from the three-item plan.
+    expect(fake.frames.length).toBe(3)
+    expect(fake.frames.every((frame) => frame.startsWith('workflow/agent-end'))).toBe(true)
+    // ONE verdict for the whole audit, not one per child.
+    expect(outcome.result).toEqual({ verdict: 'APPROVE', failed: 0 })
+    // And the plugin submitted the CONSTANT script with the plan as args.
+    expect(fake.seen[0].script).toBe(AUDIT_FANOUT_SCRIPT)
+    expect(fake.seen[0].phases).toBe(3)
+    expect(fake.seen[0].parent).toEqual({ id: 'p' })
+  })
+
+  it('a failed reviewer makes the single verdict INCOMPLETE rather than APPROVE', async () => {
+    // The null-dropping property, seen from the outcome a caller acts on: two of three reviewers
+    // answering must NOT read as a clean audit.
+    const plan = buildAuditFanOutPlan(THREE)
+    const fake = scriptedEngine({
+      'run-1/code-reviewer/1': { verdict: 'APPROVE' },
+      'run-1/tester/1': { verdict: 'APPROVE' },
+      // memory-auditor produces nothing.
+    })
+    const outcome = await startAuditFanOut(fake.engine, plan, { parent: {} })
+    expect(outcome.result).toEqual({ verdict: 'INCOMPLETE', failed: 1 })
+    expect(fake.frames.length).toBe(3)
+  })
+
+  it('WITHOUT an engine the fan-out is NOT silently empty — it says it was not orchestrated', async () => {
+    const plan = buildAuditFanOutPlan(THREE)
+    for (const absent of [null, undefined]) {
+      const outcome = await startAuditFanOut(absent, plan, { parent: {} })
+      expect(outcome.orchestrated).toBe(false)
+      expect(outcome.reason).toContain('NOT orchestrated')
+      expect(outcome.result).toBeUndefined()
+    }
   })
 })

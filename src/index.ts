@@ -7,6 +7,7 @@ import { RecursiveRuntime } from './runtime.ts'
 import type { JobsRegistryLike } from './jobs-runner.ts'
 import { planGateForExit } from './plan-gate.ts'
 import { registerPhaseSkills, type SkillRegistryLike } from './skills-phase.ts'
+import type { WorkflowEngineLike } from './workflow-audit.ts'
 import type { RecursiveModeConfig } from './config.ts'
 import { createRecursiveStatusTool } from './recursive_status.tool.ts'
 import { createRecursiveInitTool } from './recursive_init.tool.ts'
@@ -213,7 +214,7 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     // production caller of `delegateReview` — passes no seam, and the runtime then reported
     // "no ctx.subagents runtime available" on a host that had mounted it all along.
     const subagentsSeamForRuntime = ctx.get('subagents') as SubagentsRuntimeLike | undefined
-    const recursive = new RecursiveRuntime(ctx, { repoRoot: config?.repoRoot ?? process.cwd(), workspaceRegistry, goals, jobs, subagents: subagentsSeamForRuntime ?? null })
+    const recursive = new RecursiveRuntime(ctx, { repoRoot: config?.repoRoot ?? process.cwd(), workspaceRegistry, goals, jobs, subagents: subagentsSeamForRuntime ?? null, workflow: ctx.get('workflow') as WorkflowEngineLike | undefined ?? null })
 
     // T7 — THE SETTINGS NAMESPACE, APPLIED ON EVERY APPLY. The settings service edits the
     // Loader entry's config and the Loader RE-APPLIES this plugin, so a toggle in the UI

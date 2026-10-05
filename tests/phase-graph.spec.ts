@@ -156,3 +156,40 @@ describe('T17 — the graph can be asked about an artifact that is not on disk',
     expect(prerequisitesOf(graph, '02-to-be-plan.md')).toEqual(['00-requirements.md'])
   })
 })
+
+/**
+ * T17 — the three shipped rules `nextLegalPhase` must reproduce, because `lock.ts` delegates to it.
+ *
+ * Rule 3 is the one a graph earns its keep on, and it is invisible in a linear array.
+ */
+describe('T17 — the next-legal-phase rules, including the one only a GRAPH can get right', () => {
+  it('skips an ABSENT OPTIONAL phase rather than stopping the run', () => {
+    const graph = buildPhaseGraph({ sequence: SEQUENCE, present: ['00-requirements.md'], queried: SEQUENCE, locked: ['00-requirements.md'] })
+    // `00-worktree.md` is optional and was never created, so the run moves past it.
+    expect(nextLegalPhase(graph, { optional: new Set(['00-worktree.md']) })).toBe('01-as-is.md')
+    // Without the optional marking it is a required phase and IS the answer.
+    expect(nextLegalPhase(graph)).toBe('00-worktree.md')
+  })
+
+  it('answers NULL — not the next node — when the first unlocked node is BLOCKED', () => {
+    // ⚠ THE BACK-EDGE CASE. `00-requirements.md` is unlocked and first, but an addendum makes it
+    // depend on a LATER artifact that is not locked. "Continue to the next node" would answer
+    // `01-as-is.md` and silently skip the dependency; the shipped rule reports BLOCKED.
+    //
+    // The citation's SOURCE must be PRESENT — a citation comes FROM an artifact that exists, and the
+    // builder drops edges from absent nodes. My first fixture got that wrong and the test failed on
+    // its own premise rather than on the rule.
+    const graph = buildPhaseGraph({
+      sequence: SEQUENCE,
+      present: ['00-requirements.md', '01-as-is.md', '03-implementation-summary.md'],
+      citations: [{ from: '03-implementation-summary.md', to: '00-requirements.md' }],
+    })
+    expect(backEdges(graph).length).toBe(1)
+    expect(nextLegalPhase(graph)).toBeNull()
+  })
+
+  it('still returns a node whose prerequisites are all LOCKED', () => {
+    const graph = buildPhaseGraph({ sequence: SEQUENCE, present: ['00-requirements.md', '01-as-is.md'], locked: ['00-requirements.md'] })
+    expect(nextLegalPhase(graph)).toBe('01-as-is.md')
+  })
+})

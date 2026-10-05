@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 // T17: the graph model, for the queries that are graph operations (see getPrerequisites).
-import { buildPhaseGraph, prerequisitesOf } from './phase-graph.ts'
+import { buildPhaseGraph, nextLegalPhase, prerequisitesOf } from './phase-graph.ts'
 
 /**
  * Lock-hash + lock-chain validation for recursive-mode runs.
@@ -252,15 +252,14 @@ export function getStaleDownstreamPhases(runDir: string, artifactFile: string): 
 }
 
 export function getNextLegalPhase(runDir: string): string | null {
-  for (const phase of PHASE_SEQUENCE) {
-    const phasePath = join(runDir, phase)
-    const status = getLockStatus(phasePath)
-    if (status === 'LOCKED') continue
-    if (!existsSync(phasePath) && OPTIONAL_PHASES.has(phase)) continue
-    if (getPrerequisiteBlockers(runDir, phase).length > 0) return null
-    return phase
-  }
-  return null
+  // T17: delegated to the graph, which now models all three shipped rules (skip LOCKED; skip an
+  // ABSENT OPTIONAL phase; report BLOCKED rather than moving past a blocked node). `queried` carries
+  // the WHOLE sequence because an absent, required phase is a legitimate answer here, and the parity
+  // specs are the proof — the same goldens that caught the previous attempt.
+  const present = PHASE_SEQUENCE.filter((phase) => existsSync(join(runDir, phase)))
+  const locked = present.filter((phase) => getLockStatus(join(runDir, phase)) === 'LOCKED')
+  const graph = buildPhaseGraph({ sequence: PHASE_SEQUENCE, present, locked, queried: PHASE_SEQUENCE })
+  return nextLegalPhase(graph, { optional: OPTIONAL_PHASES })
 }
 
 /** All receipts whose prerequisite_hashes reference a missing or changed artifact. */

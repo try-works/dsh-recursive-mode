@@ -143,18 +143,38 @@ export function reachableFrom(graph: PhaseGraph, id: string): string[] {
 }
 
 /**
- * The next phase a run may work on: the first PRESENT, UNLOCKED node whose prerequisites are locked.
+ * The next phase a run may work on.
  *
- * A node with no prerequisites is legal by definition, which is what makes a fresh run start rather
- * than deadlock. `null` means nothing is pending — stated rather than approximated, because inventing
- * a phase would make "done" indistinguishable from "stuck".
+ * ⚠ THIS MODELS THE SHIPPED RULES EXACTLY, because `lock.ts` delegates to it and `lock.parity.spec.ts`
+ * is the proof. Three of them are easy to miss and are asserted in the spec:
+ *   1. a LOCKED node is skipped;
+ *   2. a node that is **absent and declared OPTIONAL** is skipped — an optional phase nobody created
+ *      must not stop the run;
+ *   3. if the first node that survives 1 and 2 has a prerequisite that is not LOCKED, the answer is
+ *      **`null`, NOT the next node** — the run is BLOCKED, and returning the node after it would
+ *      silently skip a dependency.
+ *
+ * ⚠ RULE 3 IS WHERE A GRAPH EARNS ITS KEEP, and it is invisible in a linear array: with a back-edge
+ * (an `upstream-gap` addendum citing a LATER artifact), an EARLY unlocked node can be blocked by a
+ * LATER one — so "continue to the next node" and "blocked, report null" give different answers, and
+ * only the second is correct.
+ *
+ * Nodes must cover the whole sequence for this query (an absent, required phase is a legitimate
+ * answer); `queried` is how the caller supplies them.
  */
-export function nextLegalPhase(graph: PhaseGraph): string | null {
+export function nextLegalPhase(
+  graph: PhaseGraph,
+  options: { optional?: ReadonlySet<string> } = {},
+): string | null {
+  const optional = options.optional ?? new Set<string>()
   const locked = new Set(graph.nodes.filter((node) => node.locked === true).map((node) => node.id))
-  for (const node of graph.nodes) {
+  const ordered = [...graph.nodes].sort((a, b) => a.index - b.index)
+  for (const node of ordered) {
     if (locked.has(node.id)) continue
+    if (node.present !== true && optional.has(node.id)) continue
     const blocked = prerequisitesOf(graph, node.id).some((from) => !locked.has(from))
-    if (!blocked) return node.id
+    if (blocked) return null
+    return node.id
   }
   return null
 }

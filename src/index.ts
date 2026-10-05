@@ -19,6 +19,7 @@ import { createRecursiveWorktreeTool } from './recursive_worktree.tool.ts'
 import { createRecursivePhaseTool } from './recursive_phase.tool.ts'
 import { createRecursiveAuditTeamTool } from './recursive_audit_team.tool.ts'
 import { createRecursiveReviewTool } from './recursive_review.tool.ts'
+import { createRecursiveAskTool } from './recursive_ask.tool.ts'
 import type { SubagentsRuntimeLike } from './delegation.ts'
 import { registerRecursiveCommand } from './commands.ts'
 import { evaluateToolGuard, coerceAskToDecision, type ToolGuardDecision } from './enforcement.ts'
@@ -276,6 +277,9 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
       ctx.tools.register(createRecursiveWorktreeTool(recursive)),
       ctx.tools.register(createRecursivePhaseTool(recursive)),
       ctx.tools.register(createRecursiveReviewTool(recursive, subagentsSeam)),
+    // T23: the three human gates as structured decisions. Registered here so the ask is a TOOL call
+    // — which is what the host renders as a card — rather than prose a person has to interpret.
+    ctx.tools.register(createRecursiveAskTool(recursive)),
       ...(agentTeams ? [ctx.tools.register(createRecursiveAuditTeamTool(agentTeams))] : []),
     ]
 

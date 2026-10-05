@@ -7,6 +7,7 @@
  * machine gates enforce (no prompt/gate contradiction).
  */
 import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { PHASE_SEQUENCE, getLockStatus } from './lock.ts'
 import { foldRun } from './status.ts'
@@ -78,4 +79,60 @@ export function renderRecursivePolicy(context: PolicyContext | null): string {
   }
 
   return lines.join('\n')
+}
+
+/**
+ * T22 — the STABLE contract: the part of the policy section that does not depend on the phase.
+ *
+ * WHY A SPLIT AT ALL, given the item's own premise check: the mechanism this was modelled on
+ * (iii's `system_sections` + `cache_boundary` + `cache_intent.surface_digest`) does **not** exist in
+ * DSH as a plugin-visible seam — the harness's only cache concepts live in the provider layer
+ * (`llm-pi-ai` accepts prompt-cache MARKERS and a retention preference), and whether any provider
+ * caches the prefix is **provider-side and unverified**. The item **withdrew its "largest cost
+ * lever" label for exactly that reason**, and this module keeps only what survives the check:
+ * **a byte-identical prefix is a PRECONDITION for any provider-side caching**, whatever the provider
+ * does with it — and a stable prefix costs nothing to produce.
+ *
+ * ⚠ THE CONTRACT DEPENDS ON THE CONFIG, NOT ON THE PHASE, and that distinction is the whole point:
+ * the enforcement modes and the lock rules are fixed for a RUN, so they belong in the prefix; the
+ * current phase, its required sections and its gate checklist change per phase and belong in the
+ * tail. A prefix that varied with the phase would be stable in name only.
+ */
+export function renderStableContract(config: EnforcementConfig = DEFAULT_ENFORCEMENT): string {
+  return [
+    'You are in a recursive-mode session (enforcement active).',
+    '- Lock chain: phases lock monotonically (' + PHASE_SEQUENCE.join(' -> ') + ').',
+    '- Gates in force: pre-step ' + config.preStep + ', tool guards ' + config.toolGuards
+      + ', tamper detection ' + config.tamper + '.',
+    '- A transition that fails its gates is BLOCKED (strict) or warns (advisory); no rejected transition proceeds silently.',
+    '- Writes to a Status: LOCKED phase doc are denied/asked; reopen explicitly to edit.',
+    '- Phase 3 lock requires TDD evidence (strict) or rationale (pragmatic); Phase 5 requires QA evidence.',
+    '- The control-plane root is resolved STRICTLY from this session workspace (never scanned from another).',
+  ].join('\n')
+}
+
+/**
+ * T22 — a LOCAL identifier for the contract, not a cache directive.
+ *
+ * The item's rescope is explicit that the digest is worth computing as a **local identifier**: it is
+ * stable within a run and changes when the contract changes, which is what makes "did the contract
+ * change under me?" answerable from the prompt alone. It claims **nothing** about provider caching —
+ * a digest that implied one would be the withdrawn label wearing a hash.
+ */
+export function contractDigest(config: EnforcementConfig = DEFAULT_ENFORCEMENT): string {
+  return createHash('sha256').update(renderStableContract(config), 'utf8').digest('hex').slice(0, 16)
+}
+
+/**
+ * T22 — the per-phase TAIL: everything that legitimately changes between phases.
+ *
+ * Kept as its own name so the split is a fact in the code rather than a convention: a caller that
+ * wants a cacheable prefix takes {@link renderStableContract} and puts this after it.
+ */
+export function renderPhaseTail(
+  phase: { label: string; phaseName: string; status: string } | null,
+): string {
+  if (phase === null) return '- Current phase: unknown\n- Next required artifact: none - run complete'
+  return '- Current phase: ' + phase.label + ' (' + phase.status + ')\n'
+    + '- Next required artifact: ' + phase.phaseName
 }

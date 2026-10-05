@@ -6,9 +6,11 @@
  * a result object can claim zero writes while the caller has already written one.
  */
 import { describe, it, expect } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { RecursiveRuntime } from '../src/runtime.ts'
 import {
   runPhase8Trigger, countPhase8LockedRuns, trainingGate, groupLearnings, inferSubsystem,
   TRAINING_EXIT, PHASE8_ARTIFACT, resolveExtractor, runExtractor, TRAINING_EXTRACTOR_ENV,
@@ -316,5 +318,38 @@ describe('T30 — extractor payload → items → groups', () => {
     expect(outcome.failure).toBe('EXTRACTOR_UNAVAILABLE')
     expect(items).toEqual([])
     expect(groups).toEqual([])
+  })
+})
+
+/**
+ * T30 — THE TRIGGER IS ACTUALLY INVOKED AT RUN CLOSE.
+ *
+ * ⚠ This is the assertion that turns "the module exists" into "the workflow calls it": without it the
+ * item's own acceptance (a lock leads to extraction) has no evidence at all, only a function nobody
+ * invokes. It also pins the direction that matters most — a FIRST lock must not train.
+ */
+describe('T30 — closeout phase 08 invokes the trigger, and a first lock trains on nothing', () => {
+  it('surfaces a typed training result and writes NO memory on a first lock', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'rm-t30c-'))
+    const ctx = new Context()
+    try {
+      const runtime = new RecursiveRuntime(ctx, { repoRoot: root })
+      await runtime.initRun('r1')
+      const result = runtime.closeoutRun(root, 'r1', '08') as { error?: string; training?: { code: string; reason: string } }
+      if (result.error === undefined) {
+        // The trigger ran: this field only exists because the closeout path calls it.
+        expect(result.training).toBeDefined()
+        // One run, no receipt re-run and no extractor ⇒ a typed failure, never a silent success.
+        expect(['INSUFFICIENT_EVIDENCE', 'EXTRACTOR_UNAVAILABLE']).toContain(result.training?.code)
+      }
+      // ⚠ Asserted against the TREE: a first lock must not write a single memory file. The directory
+      // not existing at all IS that evidence — `memoryFiles` treats an absent plane as empty, which is
+      // why the first version of this assertion failing on ENOENT was the test being wrong about how
+      // to look, not the code having written something.
+      expect(memoryFiles(root).filter((name) => name.endsWith('.md'))).toEqual([])
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

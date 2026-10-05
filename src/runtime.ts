@@ -1,6 +1,6 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { lintRun } from './ts-lint.ts'
 import { requirementsContent, worktreeContent, laterPhaseContent, detectGitContext, RUN_SCAFFOLD_DIRS, type GitContext } from './init-templates.ts'
 import { foldRun, getMdFieldValue, pendingWork, resolveRunDir } from './status.ts'
@@ -29,6 +29,7 @@ import { closeoutPhase } from './closeout.ts'
 import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './scratch.ts'
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
 import { readMemoryEntries, retrieveMemory, renderMemorySection, selectMemory } from './memory.ts'
+import { runPhase8Trigger, resolveExtractor } from './training.ts'
 import { contractDigest } from './policy.ts'
 import type { WorkflowEngineLike } from './workflow-audit.ts'
 import { createHandoff, createChildBrief, replyPath, childScratchPath, buildDelegationPrompt, type HandoffInput, type ChildBriefInput } from './handoff.ts'
@@ -322,8 +323,40 @@ export class RecursiveRuntime extends Service {
       return { error: 'Run not found in current workspace: ' + runId }
     }
     try {
+      // T30 — THE RUN-CLOSE TRIGGER, at the RE-RUN of closeout phase 08 and nowhere else.
+      //
+      // ⚠ DETECTED FROM THE RECEIPT THAT ALREADY EXISTS, not from a counter kept beside it: if phase 08
+      // has a receipt BEFORE this closeout runs, then it has been closed out before and this is the
+      // re-run the parent asks for. A first lock would otherwise train the run on itself.
+      //
+      // ⚠ THE SEAMS ARE THE REAL FILESYSTEM HERE — this IS the production call site, so the write and
+      // read seams that the tests inject are bound to the actual run root, and the registry read goes
+      // to `memory/MEMORY.md` under the same root.
+      const isPhase8 = phase.startsWith('08') || phase === '08-memory-impact.md'
+      const rerun = isPhase8 && existsSync(join(runDir, 'locks', '08-memory-impact.receipt.json'))
       const result = closeoutPhase(runDir, phase)
-      return { closeoutPhase: phase, runId, ...result }
+      const training = isPhase8
+        ? runPhase8Trigger(root, runId, {
+            rerun,
+            // The extractor is resolved but NOT spawned here: this plugin never embeds one, and an
+            // unset command must surface as exit 2 rather than as a silent success.
+            extractorAvailable: resolveExtractor(process.env) !== null,
+            write: (relativePath, content) => {
+              const target = join(root, relativePath)
+              mkdirSync(dirname(target), { recursive: true })
+              writeFileSync(target, content, 'utf8')
+              return relativePath
+            },
+            readText: (relativePath) => {
+              try {
+                return readFileSync(join(root, relativePath), 'utf8')
+              } catch {
+                return null
+              }
+            },
+          })
+        : null
+      return { closeoutPhase: phase, runId, ...result, ...(training === null ? {} : { training }) }
     } catch (err) {
       return { error: (err as Error).message }
     }

@@ -539,4 +539,56 @@ describe('T39 — a delegation round shows as a job', () => {
       rmSync(root, { recursive: true, force: true })
     }
   })
+
+  it('the PRODUCTION seam is used BY DEFAULT — subagents.interrupt, with the ancestor authority', async () => {
+    // The capability having no live user was the honest gap T39 recorded. This case closes it
+    // by passing NO explicit `interrupt`: the runtime must build the provider itself, from the
+    // same seam the continuable lifecycle uses, with the parent Agent as the authority.
+    const root = makeRoot()
+    const ctx = new Context()
+    const interrupts: Array<{ childId: string; authority: unknown }> = []
+    const parent = { id: 'parent-agent' }
+    let releaseRound: (value: unknown) => void = () => {}
+    const registry: JobsRegistryLike = {
+      start(spec) {
+        const hooks = spec.run({ id: 'delegation-4', append: () => {}, updateProgress: () => {} })
+        hooks.cancel('a board kill')
+        return 'delegation-4'
+      },
+    }
+    const runtime = new RecursiveRuntime(ctx, { repoRoot: root, jobs: registry })
+    try {
+      await runtime.delegateReview({
+        root,
+        runId: 'run-1',
+        phase: '3',
+        role: 'code-reviewer',
+        delegationId: 'd1',
+        childId: 'c1',
+        artifactPath: join(root, '.recursive', 'run', 'run-1', '03-implementation-summary.md'),
+        upstreamArtifacts: [],
+        auditQuestions: ['does it work?'],
+        requiredOutput: 'verdict',
+        mode: 'continuable',
+        parent,
+        subagents: {
+          startContinuable: async (spec: { childId?: string }) => ({ childId: spec.childId ?? 'c1', messageId: 'm1' }),
+          followup: async () => ({ messageId: 'm2' }),
+          interrupt: (childId: string, authority: unknown) => {
+            interrupts.push({ childId, authority })
+            releaseRound({ success: false, stopReason: 'interrupted' })
+          },
+        },
+        providers: { spawn: { name: 'spawn', capabilities: { outputSchema: true } } },
+        awaitRoundResult: () => new Promise<unknown>((resolve) => { releaseRound = resolve }),
+        // DELIBERATELY NO `interrupt` — that is the whole point of this case.
+      } as never)
+      expect(interrupts.length).toBe(1)
+      expect(interrupts[0].childId).toBe('c1')
+      // The seam's own authority shape, and the parent we passed rather than a bare id.
+      expect(interrupts[0].authority).toEqual({ kind: 'ancestor', agent: parent })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })

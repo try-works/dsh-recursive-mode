@@ -449,6 +449,30 @@ export class RecursiveRuntime extends Service {
       },
     })
 
+    /**
+     * T39 — the PRODUCTION provider of the interrupt seam.
+     *
+     * The delegation's job kill must reach the LIVE child, and the child is interrupted
+     * through the SAME `subagents.interrupt` seam the continuable lifecycle already uses —
+     * never a second stop path, so a board kill and a lifecycle stop cannot drift apart. The
+     * authority is `{ kind: 'ancestor', agent: parent }`: the parent Agent is the object-
+     * identity authority the seam expects, exactly as `followup` uses it.
+     *
+     * An explicit `input.interrupt` still WINS, so a caller with a better authority (a user-
+     * initiated stop, say) can supply one. With no seam and no parent there is nothing to
+     * interrupt, and this quietly does nothing rather than throwing: the kill already parked
+     * the round, and a kill that cannot reach a child must not become an error in its place.
+     */
+    const interruptChild = input.interrupt ?? ((childId: string, reason: string) => {
+      const seam = input.subagents
+      if (seam?.interrupt === undefined || input.parent === undefined) return
+      try {
+        seam.interrupt(childId as ContinuableChildId, { kind: 'ancestor', agent: input.parent })
+      } catch {
+        // Best-effort, like the call site that uses it.
+      }
+    })
+
     let result: SubagentResultLike | null = null
     let error: string | null = null
     let continuable: ContinuableDelegationLike | null = null
@@ -536,7 +560,7 @@ export class RecursiveRuntime extends Service {
                 // child, and nothing here pretends otherwise.
                 const onAbort = () => {
                   try {
-                    input.interrupt?.(input.childId, abortReason(signal))
+                    interruptChild(input.childId, abortReason(signal))
                   } catch {
                     // Best-effort by design: an interrupt that throws must not replace the
                     // kill's own outcome with an unrelated error.

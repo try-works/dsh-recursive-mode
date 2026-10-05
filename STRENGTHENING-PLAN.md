@@ -806,7 +806,7 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 - **Sequencing caveat:** until T30 has run against **two or more** locked runs there is nothing to retrieve, so *T29 cannot be accepted on a repo whose memory plane is empty.* Implement T30 first, or land both and accept T29 against a repo that has been run twice.
 - **Evidence:** `D:\DEV\recursive-mode\skills\recursive-training\references\phase8-and-loading.md` (progressive disclosure, loader timing, failure handling); audit 1's memory worker (*"files are the source of truth"*, *"degradation is explicit, never silent"*).
 
-### T30 — Extract learnings at **run close** (the training hook) · **IN PROGRESS — the gate, the grouping and the trigger are DONE; the extractor round trip, the memory writes and the closeout wiring are not**
+### T30 — Extract learnings at **run close** (the training hook) · **done (acceptance met) — the extractor SPAWN stays the caller's, by design**
 
 - **Why:** The plugin builds and lints the memory plane and **never writes it**. Phase 8 scaffolds `08-memory-impact.md` as a receipt stub (`src/closeout.ts:59`) and nothing promotes its content into cross-run memory, so `memory/training/` holds only a `.gitkeep`. Even if T29 existed, there would be nothing to read. The parent repo's flow is explicit:
 
@@ -1038,7 +1038,7 @@ Sprint 2 — make the workflow legible
 [x] T22 stable prompt prefix + preloaded contracts  ← DONE (the section OPENS with a byte-identical stable contract; the tail varies by phase; the digest is a LOCAL identifier, surfaced through the status and pinned to equal the one the prompt carries; the "largest cost lever" label stays withdrawn — the premise was re-measured)
 [x] T23 recursive_ask — structured decisions instead of prose  ← DONE (the tool is REGISTERED and both halves of the acceptance are asserted through `ctx.tools.execute`: asking returns the card-ready question, answering writes the marker — REPLACING a previous answer; the three call points are not wired and are named on the item)
 [x] T26 recursive_preview (read-only view of what will fire)  ← DONE (reuses the ENFORCEMENT path: the same `evaluateToolGuard`, `phaseRulesFor`, `getNextLegalPhase` and the T22 policy pieces; names the rule a probe would match, reports `none` as a rule, and makes no model call — asserted structurally)
-[~] T17 phase dependency as a DAG  ← `src/phase-graph.ts` is DONE and tested (nodes/edges, the three queries, and the BACK-EDGE a linear model gets wrong — with the visited set that stops the cycle looping); `lock.ts` does not delegate to it yet, which is the risky half the parity goldens guard
+[x] T17 phase dependency as a DAG  ← DONE (both `getPrerequisites` and `getNextLegalPhase` delegate to `src/phase-graph.ts` and the three parity specs pass UNCHANGED, with the back-edge case a linear array cannot express now correct; the THIRD query was CLOSED BY MEASUREMENT — `getStaleDownstreamPhases` is a one-hop receipt-hash check, not a reachability query, so it is deliberately NOT delegated). Its graph runs in production for the two queries that ARE graph operations, and `reachableFrom` stays available for a genuinely transitive question the array cannot ask
 
 Sprint 3 — make it bounded and extensible
 [x] T35 delegation is ALWAYS continuable (one-shot must be asked for)  ← DONE (default flipped; delegateReview had NO callers — wiring is the next item)

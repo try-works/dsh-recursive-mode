@@ -118,20 +118,46 @@ flowchart TD
 
 ### 3c · What the closeout does today **[!]**
 
+> ⚠ **`config.file` IS NOT A CONFIG FILE.** The name misled a reader once, so the path is spelled out here.
+> `config` is the `PHASE_CONFIG` entry for the requested phase — `{ file, label, scopeNote, todoItems }` —
+> and `config.file` is the **run document's** name (`04-test-summary.md`). The write target is therefore
+> `.recursive/run/<runId>/04-test-summary.md`: **the phase artifact itself**, which the agent already wrote
+> and locked. It writes nothing to `STATE.md`, `DECISIONS.md` or `memory/**` — those appear only as prose
+> *inside the document it overwrites*.
+
 ```mermaid
 flowchart TD
-  T1["recursive_closeout(runId, phase)"] --> T2["runtime.closeoutRun<br/>drain children (FU-3)"]
-  T2 --> T3["closeoutPhase(runDir, phase)"]
+  T1["recursive_closeout(runId, phase)"] --> T2["runtime.closeoutRun(root, runId, phase, agent)"]
+  T2 --> T2a{"runDir under &lt;root&gt;/.recursive/run<br/>AND exists?"}
+  T2a -->|no| T2b["error: Run not found in current workspace"]
+  T2a -->|yes| T2c["isPhase8? rerun =<br/>locks/08-memory-impact.receipt.json EXISTS"]
+  T2c --> T2d["drain children (FU-3)<br/>BEFORE the write, phase 8 only"]
+  T2d --> T3["closeoutPhase(runDir, phase)<br/>NO options — strict is TRUE in production"]
   T3 --> T4["mkdirSync(runDir)"]
-  T4 --> T5["writeFileSync(<br/>.recursive/run/&lt;runId&gt;/&lt;config.file&gt;)"]
+  T4 --> T5["writeFileSync(join(runDir, config.file))"]
   T5 --> T6["04-test-summary.md · 05-manual-qa.md<br/>06-decisions-update.md · 07-state-update.md<br/>08-memory-impact.md"]
   T6 --> X["✗ rewrites the artifact the agent<br/>already wrote and locked"]
+  T3 -.->|"phase 8 only, AFTER closeoutPhase"| T7["runPhase8Trigger(rerun, extractorAvailable,<br/>spawnExtractorRunner — FU-5)"]
 ```
 
-**[M]** Confirmed by reading the file: the only two filesystem effects are `mkdirSync(runDir)` and
-`writeFileSync(join(runDir, config.file))`, and `config.file` comes from `PHASE_CONFIG`, whose keys are
-`04, 05, 06, 07, 08`. **It writes nothing to `STATE.md`, `DECISIONS.md` or `memory/**`** — those appear only
-as prose *inside the document it overwrites*.
+**Measured from `runtime.closeoutRun` (L320-362):**
+
+- A **workspace-scoping guard**: the run must sit under `<root>/.recursive/run`, else
+  `Run not found in current workspace`. It never crosses workspaces.
+- The **T30 training trigger is already receipt-based and re-run-only** — `rerun` is true when phase 08
+  *already has a lock receipt* before this call, so a first lock cannot train a run on itself. That is the
+  reference "locked 08 rerun" semantics, implemented in the RUNTIME rather than in the closeout: a placement
+  difference, not a missing feature.
+- The **drain is computed before the write**, because the FU-8 guard throws for exactly the re-run case and a
+  drain placed after it would never run when it matters most.
+- **`closeoutPhase` is called with no options, so `strict` is TRUE in production**: the prerequisite refusal
+  is live, and `{ strict: false }` appears only in tests.
+
+> **[!] A CONSEQUENCE WORTH STATING: the training-trigger path is effectively UNREACHABLE in production.**
+> `runPhase8Trigger` runs *after* `closeoutPhase`, and on the only run that should trigger it — phase 08
+> already closed out once, so its artifact is LOCKED — the FU-8 guard throws first, so the trigger never
+> runs. The two mechanisms are individually right and mutually blocking. The closeout should never have been
+> writing at all, which is why a guard against writing kept turning into an obstacle.
 
 ### 3d · The reference's control flow, for comparison **[R]**
 

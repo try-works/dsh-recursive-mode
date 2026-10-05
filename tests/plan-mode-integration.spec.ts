@@ -11,8 +11,16 @@
  * answering "no".
  */
 import { describe, it, expect } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import * as plugin from '../src/index.ts'
 import {
-  phaseIndexOf, phaseUsesPlanMode, planGateRequired, describePlanMode, IMPLEMENTATION_PHASE_INDEX,
+  phaseIndexOf, phaseUsesPlanMode, planGateRequired, describePlanMode, planGateForExit,
+  IMPLEMENTATION_PHASE_INDEX,
 } from '../src/plan-gate.ts'
 
 describe('T13 — the phase index is read from every form this codebase uses', () => {
@@ -96,5 +104,101 @@ describe('T13 — the boundary is stated once, so it cannot drift between caller
     expect(describePlanMode('02-to-be-plan.md')).toContain('NON-MUTATING')
     expect(describePlanMode('03-implementation-summary.md')).toContain('past discovery')
     expect(describePlanMode('nonsense')).toContain('not a recognised phase')
+  })
+})
+
+/**
+ * T13 part 2 — the gate is LIVE, keyed on the phase the run is ALREADY waiting on.
+ *
+ * That input is what makes the gate unable to drift: it keeps no state of its own, so it cannot
+ * disagree with the workflow about where the run is.
+ */
+describe('T13 — whether exit_plan_mode may open, given the pending phase', () => {
+  it('REFUSES while the run is still waiting on a discovery phase, and says why', () => {
+    for (const pending of ['00-requirements.md', '01-as-is.md', '01.5-root-cause.md', '02-to-be-plan.md']) {
+      const gate = planGateForExit(pending)
+      expect(gate.allow).toBe(false)
+      expect(gate.reason).toContain('plan gate')
+      expect(gate.reason).toContain(pending)
+    }
+  })
+
+  it('OPENS once discovery is done — the gate is 02 -> 03', () => {
+    const gate = planGateForExit('03-implementation-summary.md')
+    expect(gate.allow).toBe(true)
+    expect(gate.reason).toContain('discovery is complete')
+  })
+
+  it('allows an exit when NOTHING is pending, with a reason that says which case it is', () => {
+    // "Nothing pending" is not "discovery is done"; refusing forever on a completed run would
+    // make plan mode a trap rather than a gate, so the reason distinguishes the two.
+    const gate = planGateForExit(null)
+    expect(gate.allow).toBe(true)
+    expect(gate.reason).toContain('no phase is pending')
+  })
+
+  it('claims nothing about a pending phase it cannot identify', () => {
+    const gate = planGateForExit('not-a-phase')
+    expect(gate.allow).toBe(true)
+    expect(gate.reason).toContain('not a recognised phase')
+  })
+})
+
+describe('T13 — the gate runs on the live chain, and only for exit_plan_mode', () => {
+  async function mountWithRun() {
+    const repo = mkdtempSync(join(tmpdir(), 'rm-t13-'))
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(plugin as never, { repoRoot: repo } as never)
+    await ctx.recursive.initRun('r1')
+    return {
+      ctx,
+      repo,
+      dispose: async () => {
+        await ctx.fiber.dispose()
+        rmSync(repo, { recursive: true, force: true })
+      },
+    }
+  }
+
+  it('is registered on pre_trigger as a built-in', async () => {
+    const m = await mountWithRun()
+    try {
+      const names = m.ctx.recursive.hooks.list('pre_trigger').map((entry) => entry.name)
+      expect(names).toContain('exit-plan-mode-gate')
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('DENIES exit_plan_mode on a run that is still in discovery', async () => {
+    const m = await mountWithRun()
+    try {
+      // A fresh run is waiting on 00-requirements.md, so the plan is not finished.
+      const result = await m.ctx.recursive.hooks.run('pre_trigger', {
+        tool: 'exit_plan_mode', args: {}, exec: { name: 'exit_plan_mode', arguments: {} },
+        root: m.repo, runId: 'r1',
+      })
+      expect(result.decision).toBe('deny')
+      expect(result.reason).toContain('plan gate')
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('does not interfere with any OTHER tool', async () => {
+    const m = await mountWithRun()
+    try {
+      const result = await m.ctx.recursive.hooks.run('pre_trigger', {
+        tool: 'recursive_status', args: {}, exec: { name: 'recursive_status', arguments: {} },
+        root: m.repo, runId: 'r1',
+      })
+      // The gate annotates nothing and denies nothing for a tool that is not the exit event.
+      const gateRecord = result.ran.find((entry) => entry.name === 'exit-plan-mode-gate')
+      expect(gateRecord?.decision).toBe('continue')
+    } finally {
+      await m.dispose()
+    }
   })
 })

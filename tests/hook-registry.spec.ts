@@ -467,7 +467,12 @@ describe('T38 — the built-in tool guard runs on the chain', () => {
         runId: 't38-run',
       })
       expect(result.decision).toBe('deny')
-      expect(result.ran.map((r) => r.name)).toEqual(['builtin-tool-guard'])
+      // The guard decided and the lower-priority sibling did NOT run. Asserted by presence and
+      // absence rather than by exact chain contents: T13 later added a second built-in
+      // (`exit-plan-mode-gate`), and a test that pinned the whole list would have to be edited
+      // every time a built-in is added, which is how an assertion stops meaning anything.
+      expect(result.ran.map((r) => r.name)).toContain('builtin-tool-guard')
+      expect(result.ran.map((r) => r.name)).not.toContain('late-sibling')
       expect(siblingRan).toBe(false)
     } finally {
       await m.dispose()
@@ -506,7 +511,10 @@ describe('T38 — the built-in tool guard runs on the chain', () => {
         runId: 't38-run',
       })
       expect(result.decision).toBe('continue')
-      const decision = result.ran[0].annotations?.guardDecision as { kind: string; warn?: string }
+      // Found BY NAME: the chain now carries more than one built-in (T13 added the plan gate),
+      // so indexing `ran[0]` would be asserting whichever hook happens to sort first.
+      const guardRecord = result.ran.find((entry) => entry.name === 'builtin-tool-guard')
+      const decision = guardRecord?.annotations?.guardDecision as { kind: string; warn?: string }
       expect(decision.kind).toBe('allow')
       expect(decision.warn).toContain('monotonic lock-order')
     } finally {

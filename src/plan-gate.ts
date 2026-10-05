@@ -77,3 +77,35 @@ export function describePlanMode(phase: string): string {
   if (index === null) return 'phase ' + phase + ' is not a recognised phase, so no plan-mode claim is made for it.'
   return 'phase ' + phase + ' is past discovery, so it may write and is no longer plan-gated.'
 }
+
+/**
+ * T13 — should `exit_plan_mode` be allowed, given the phase the run is WAITING on?
+ *
+ * The run's "next legal phase" is exactly the right input: while it is still a discovery
+ * phase, the plan is not finished and leaving plan mode would start implementing on an
+ * unfinished plan; once it is an implementation phase, discovery is done and the gate is
+ * open. So the gate needs no separate state — it reads the state the run already keeps, and
+ * that is why it cannot drift from the workflow.
+ *
+ * ⚠ A NULL next phase means "nothing is pending", which is NOT the same as "discovery is
+ * done". It allows the exit, because refusing forever on a completed or unrecognised run
+ * would make plan mode a trap rather than a gate — and the reason is stated so a reader can
+ * tell the two cases apart.
+ */
+export function planGateForExit(nextPhase: string | null): { allow: boolean; reason: string } {
+  if (nextPhase === null) {
+    return { allow: true, reason: 'no phase is pending, so nothing is held back by the plan gate.' }
+  }
+  if (phaseUsesPlanMode(nextPhase)) {
+    return {
+      allow: false,
+      reason: 'plan gate: phase ' + nextPhase + ' is still discovery, so the plan is not finished. '
+        + 'Complete it (and lock its artifact) before leaving plan mode; the gate opens at 02 -> 03.',
+    }
+  }
+  const index = phaseIndexOf(nextPhase)
+  if (index === null) {
+    return { allow: true, reason: 'phase ' + nextPhase + ' is not a recognised phase, so the plan gate makes no claim about it.' }
+  }
+  return { allow: true, reason: 'discovery is complete (next phase is ' + nextPhase + '), so the plan gate is open.' }
+}

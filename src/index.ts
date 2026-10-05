@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { RecursiveRuntime } from './runtime.ts'
 import type { JobsRegistryLike } from './jobs-runner.ts'
+import { planGateForExit } from './plan-gate.ts'
 import type { RecursiveModeConfig } from './config.ts'
 import { createRecursiveStatusTool } from './recursive_status.tool.ts'
 import { createRecursiveInitTool } from './recursive_init.tool.ts'
@@ -338,6 +339,30 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
         return decision.kind === 'deny'
           ? { decision: 'deny' as const, reason: decision.reason ?? 'denied by the tool guard', annotations: { guardDecision: decision } }
           : { decision: 'continue' as const, annotations: { guardDecision: decision } }
+      },
+    })
+    // T13 (part 2) — THE PLAN GATE IS LIVE. `exit_plan_mode` is the event that leaves plan mode,
+    // so it is where the gate belongs: a run still waiting on a DISCOVERY phase must not leave
+    // plan mode, because that would start implementing on an unfinished plan. The gate reads the
+    // phase the run is already waiting on rather than keeping its own state, which is why it
+    // cannot drift from the workflow.
+    //
+    // Priority 5, ABOVE the built-in tool guard at 0: this is a workflow-shaped refusal and
+    // should be the reason a caller sees, not something the generic guard has to restate.
+    recursive.hooks.register('pre_trigger', {
+      name: 'exit-plan-mode-gate',
+      priority: 5,
+      onError: 'fail_closed',
+      run: (input) => {
+        const payload = input as { tool?: string; root?: string; runId?: string }
+        if (payload.tool !== 'exit_plan_mode') return { decision: 'continue' as const }
+        const root = payload.root ?? ''
+        const runId = payload.runId ?? ''
+        if (root === '' || runId === '') return { decision: 'continue' as const }
+        const gate = planGateForExit(getNextLegalPhase(join(root, '.recursive', 'run', runId)))
+        return gate.allow
+          ? { decision: 'continue' as const, annotations: { planGate: gate.reason } }
+          : { decision: 'deny' as const, reason: gate.reason }
       },
     })
     const toolRuntime = ctx as unknown as { on?: (event: string, listener: (payload: unknown, next?: unknown) => unknown) => () => void }

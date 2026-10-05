@@ -256,3 +256,83 @@ export function renderGroupShard(group: TrainingGroup): string {
   }
   return lines.join('\n') + '\n'
 }
+
+/**
+ * T30 — the extractor, resolved from the environment.
+ *
+ * ⚠ THE EXTRACTOR IS NEVER EMBEDDED. The parent delegates through a command
+ * (`RECURSIVE_TRAINING_EXTRACTOR_CMD`) or a response file rather than shipping an LLM client, and this
+ * keeps that: the plugin resolves a command and hands it to a runner it is given.
+ *
+ * ⚠ WHY THE RUNNER IS INJECTED RATHER THAN SPAWNED HERE. This harness's file sandbox denies a child
+ * process the PIPED stdio a capture needs, so a module that spawned directly would be untestable in the
+ * environment it runs in — and a rule that cannot be tested is a rule that will rot. The DECISION lives
+ * here and is asserted with a fake runner; the SPAWN lives at the caller.
+ */
+export const TRAINING_EXTRACTOR_ENV = 'RECURSIVE_TRAINING_EXTRACTOR_CMD'
+
+export function resolveExtractor(env: Record<string, string | undefined>): string | null {
+  const cmd = env[TRAINING_EXTRACTOR_ENV]
+  return cmd === undefined || cmd.trim() === '' ? null : cmd.trim()
+}
+
+/** What a runner reports back. `status` is the process exit code; `stdout` its captured output. */
+export interface ExtractorRun {
+  status: number
+  stdout: string
+}
+
+export interface ExtractorOutcome {
+  ok: boolean
+  /** Present only when `ok`; the raw JSON the extractor produced. */
+  payload?: unknown
+  /** Present only when not `ok` — why, in the parent's terms. */
+  failure?: 'EXTRACTOR_UNAVAILABLE' | 'MALFORMED_OUTPUT'
+  reason: string
+}
+
+/**
+ * Run the extractor and interpret its answer.
+ *
+ * ⚠ A NON-ZERO STATUS AND MALFORMED OUTPUT ARE BOTH FAILURES, and neither is "no items" — a malformed
+ * answer is a broken extractor, not a run with nothing to learn, and collapsing the two would report
+ * exit 3 (insufficient evidence) for a bug that deserves exit 2.
+ */
+export function runExtractor(
+  runner: (cmd: string) => ExtractorRun,
+  cmd: string | null,
+): ExtractorOutcome {
+  if (cmd === null) {
+    return {
+      ok: false,
+      failure: 'EXTRACTOR_UNAVAILABLE',
+      reason: 'no extractor command is set (' + TRAINING_EXTRACTOR_ENV + '); do not claim memory updates',
+    }
+  }
+  let run: ExtractorRun
+  try {
+    run = runner(cmd)
+  } catch (err) {
+    return {
+      ok: false,
+      failure: 'EXTRACTOR_UNAVAILABLE',
+      reason: 'the extractor could not be run (' + (err instanceof Error ? err.message : String(err)) + '); do not claim memory updates',
+    }
+  }
+  if (run.status !== 0) {
+    return {
+      ok: false,
+      failure: 'EXTRACTOR_UNAVAILABLE',
+      reason: 'the extractor exited ' + run.status + '; do not claim memory updates',
+    }
+  }
+  try {
+    return { ok: true, payload: JSON.parse(run.stdout) as unknown, reason: 'the extractor returned a parseable answer' }
+  } catch {
+    return {
+      ok: false,
+      failure: 'MALFORMED_OUTPUT',
+      reason: 'the extractor exited 0 but its output is not JSON, which is a BROKEN EXTRACTOR rather than a run with nothing to learn',
+    }
+  }
+}

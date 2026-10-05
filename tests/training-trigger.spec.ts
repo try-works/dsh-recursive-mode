@@ -11,7 +11,8 @@ import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   runPhase8Trigger, countPhase8LockedRuns, trainingGate, groupLearnings, inferSubsystem,
-  TRAINING_EXIT, PHASE8_ARTIFACT, type TrainingItem,
+  TRAINING_EXIT, PHASE8_ARTIFACT, resolveExtractor, runExtractor, TRAINING_EXTRACTOR_ENV,
+  type TrainingItem,
 } from '../src/training.ts'
 
 /** A root with `n` runs whose phase-8 artifact is LOCKED (or not). */
@@ -178,5 +179,52 @@ describe('T30 — a success that wrote nothing is REPORTED as such', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+/**
+ * T30 — the extractor round trip, without spawning a process.
+ *
+ * ⚠ THE RUNNER IS INJECTED because this harness's sandbox denies a child the PIPED stdio a capture
+ * needs, so a module that spawned directly could not be tested where it runs. The DECISION is asserted
+ * here with a fake runner; the SPAWN belongs to the caller.
+ */
+describe('T30 — an extractor that fails is not a run with nothing to learn', () => {
+  it('resolves the command from the environment, and treats blank as absent', () => {
+    expect(resolveExtractor({})).toBeNull()
+    expect(resolveExtractor({ [TRAINING_EXTRACTOR_ENV]: '   ' })).toBeNull()
+    expect(resolveExtractor({ [TRAINING_EXTRACTOR_ENV]: ' grpo --json ' })).toBe('grpo --json')
+  })
+
+  it('reports UNAVAILABLE when there is no command at all', () => {
+    const outcome = runExtractor(() => ({ status: 0, stdout: '{}' }), null)
+    expect(outcome.ok).toBe(false)
+    expect(outcome.failure).toBe('EXTRACTOR_UNAVAILABLE')
+    expect(outcome.reason).toContain('do not claim memory updates')
+  })
+
+  it('reports UNAVAILABLE for a non-zero exit, and for a runner that throws', () => {
+    const failed = runExtractor(() => ({ status: 2, stdout: '' }), 'grpo')
+    expect(failed.failure).toBe('EXTRACTOR_UNAVAILABLE')
+    expect(failed.reason).toContain('exited 2')
+    const threw = runExtractor(() => { throw new Error('ENOENT') }, 'grpo')
+    expect(threw.failure).toBe('EXTRACTOR_UNAVAILABLE')
+    expect(threw.reason).toContain('could not be run')
+  })
+
+  it('⚠ distinguishes MALFORMED OUTPUT from insufficient evidence', () => {
+    // Collapsing the two would report exit 3 (nothing to learn) for a bug that deserves exit 2.
+    const malformed = runExtractor(() => ({ status: 0, stdout: 'not json at all' }), 'grpo')
+    expect(malformed.ok).toBe(false)
+    expect(malformed.failure).toBe('MALFORMED_OUTPUT')
+    expect(malformed.failure).not.toBe('EXTRACTOR_UNAVAILABLE')
+    expect(malformed.reason).toContain('BROKEN EXTRACTOR')
+  })
+
+  it('carries the payload through when the extractor answers properly', () => {
+    const outcome = runExtractor(() => ({ status: 0, stdout: '{"items":[{"subsystem":"lock"}]}' }), 'grpo')
+    expect(outcome.ok).toBe(true)
+    expect(outcome.payload).toEqual({ items: [{ subsystem: 'lock' }] })
+    expect(outcome.failure).toBeUndefined()
   })
 })

@@ -226,7 +226,15 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
    * names the remedy, so this asserts the promise the policy section makes every turn: *"Writes to a
    * Status: LOCKED phase doc are denied/asked; reopen explicitly to edit."*
    */
-  it('REFUSES a closeout that would unlock a LOCKED artifact, and leaves the lock intact', async () => {
+  /**
+   * FU-8 — THE DEFECT THE HARNESS FOUND, pinned as a CONTRACT rather than as a bug report.
+   *
+   * The first e2e run ended with a LOCKED artifact whose receipt said LOCKED and whose file said DRAFT,
+   * because `closeoutPhase` guarded EARLIER phases but not its own target. The fix refuses that write and
+   * names the remedy, so this asserts the promise the policy section makes every turn: *"Writes to a
+   * Status: LOCKED phase doc are denied/asked; reopen explicitly to edit."*
+   */
+  it('FU-8: REFUSES a closeout that would unlock a LOCKED artifact, and leaves the lock intact', async () => {
     const { root, runId, calls } = await runWorkflow()
     try {
       const artifact = join(root, '.recursive', 'run', runId, '08-memory-impact.md')
@@ -240,6 +248,86 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
       expect(refusals[refusals.length - 1].detail).toContain('reopen')
     } finally {
       if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
+    }
+  }, 120_000)
+
+  /**
+   * FU-2 — THE CONTINUABLE RULE, MEASURED IN PRODUCTION (and one part of it NOT VERIFIED here).
+   *
+   * The plan's own text claimed `delegateReview` *"has no callers"* (found by T35). **That is STALE:**
+   * `src/recursive_review.tool.ts:92` calls it, and five spec files cover it. So the item is not "wire
+   * it" — it is "show the rule holds in production".
+   *
+   * ⚠ WHAT THIS DEMONSTRATES, and it is the fail-closed half: with no CONTINUABLE seam and no live
+   * parent, `recursive_review` **refuses** (`status: unavailable`) instead of quietly degrading to a
+   * one-shot review. That refusal IS the rule being enforced — a plugin that silently took the one-shot
+   * path would leave a failed review unrepairable *without saying so*.
+   *
+   * ⚠ WHAT IT DOES **NOT** DEMONSTRATE, stated rather than implied: the continuable lifecycle itself
+   * (`startContinuable`). That requires the **exact live Agent** — the seam's own contract says "never a
+   * `{ id }` copy" — and this harness has no live Agent, so faking one would prove nothing. **The
+   * continuable branch is verified by `tests/delegation-mode.spec.ts` (a fake seam called directly) and
+   * is reported as NOT VERIFIED in the harness.**
+   */
+  it('FU-2: recursive_review FAILS CLOSED without a continuable path, naming why', async () => {
+    const root = join(scratchRoot(), 'fu2-' + new Date().toISOString().replace(/[:.]/g, '-'))
+    mkdirSync(root, { recursive: true })
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' })
+
+    const observed: string[] = []
+    const fakeSubagents = {
+      start: async () => { observed.push('start(one-shot)'); return { ok: true } },
+      // Recording the capability probe tells us whether the seam was FOUND at all, which is the
+      // difference between "the plugin ignored my service" and "the plugin found it and refused".
+      getProvider: (name: string) => { observed.push('getProvider(' + name + ')'); return { name, capabilities: { agentOptions: true } } },
+      list: () => { observed.push('list'); return [{ name: 'spawn' }] },
+      startContinuable: async () => { observed.push('startContinuable'); return { childId: 'child-1', sessionId: 'child-1' } },
+      followup: async () => { observed.push('followup'); return { ok: true } },
+      interrupt: () => { observed.push('interrupt') },
+      drainContinuableChildren: async () => { observed.push('drainContinuableChildren') },
+      drainContinuableDescendants: async () => { observed.push('drainContinuableDescendants') },
+    }
+
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      // BEFORE the plugin: `index.ts` resolves the seam at the composition, so a later provision would
+      // not be seen — the defect T39 found and fixed.
+      ctx.provide('subagents', fakeSubagents as never)
+      await ctx.plugin(plugin as never, {
+        repoRoot: root,
+        router: {
+          role_routes: { 'code-reviewer': { provider: 'spawn', mode: 'continuable' } },
+          providers: { spawn: { name: 'spawn', capabilities: { agentOptions: true } } },
+        },
+      } as never)
+
+      const call = async (tool: string, args: Record<string, unknown>) => ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('fu2-' + tool),
+        name: tool,
+        arguments: args,
+        agent: { session: { header: { cwd: root } } },
+      } as never)
+
+      await call('recursive_init', { runId: 'fu2-run' })
+      const review = await call('recursive_review', { runId: 'fu2-run', phase: '03', role: 'code-reviewer' })
+      const payload = JSON.stringify(review)
+
+      // (1) It reached the DELEGATION path — not a NO_PHASE refusal, which is what a wrong phase key gives.
+      expect(payload, 'the review never reached the delegation: ' + payload.slice(0, 400)).toContain('unavailable')
+      // (2) It FAILED CLOSED with the reason, rather than reviewing without the repair path.
+      expect(payload).toContain('repair path')
+      expect(payload).toContain('cannot be sent back')
+      // (3) And it did NOT take the one-shot lifecycle — the rule this item is about.
+      expect(observed, 'lifecycles: [' + observed.join(', ') + ']').not.toContain('start(one-shot)')
+      // The seam probe is REPORTED either way: whether the service was found is a fact about the
+      // composition, and the refusal is correct in both cases (no live parent ⇒ no continuation).
+      expect(observed.join(','), 'seam consultation: [' + observed.join(', ') + ']').not.toContain('startContinuable')
+    } finally {
+      if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
+      await ctx.fiber.dispose()
     }
   }, 120_000)
 })

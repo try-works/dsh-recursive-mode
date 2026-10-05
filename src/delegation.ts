@@ -69,6 +69,15 @@ export interface SubagentStartRequestLike {
   persona?: string
   parent?: unknown
   signal?: unknown
+  /**
+   * T9 — the child's provider/model overrides.
+   *
+   * ⚠ `SubagentStartRequest.agentOptions` is only valid for a provider that DECLARES
+   * `capabilities.agentOptions`; the harness REJECTS a start that sends it otherwise. Passing
+   * it unconditionally would therefore BREAK delegations on providers that do not support it,
+   * which is why the caller gates on the capability rather than on the model being non-null.
+   */
+  agentOptions?: { model?: string; provider?: string }
 }
 
 export interface SubagentResultLike {
@@ -443,6 +452,8 @@ export async function delegateContinuable(input: {
   readVerdict?: (result: SubagentResultLike) => DelegationVerdict
   readRepair?: (result: SubagentResultLike) => string | undefined
   awaitRoundResult?: (childId: ContinuableChildId, messageId: ContinuableMessageId) => Promise<SubagentResultLike | null>
+  /** T9: the child's provider/model overrides, forwarded onto the start request verbatim. */
+  agentOptions?: { model?: string; provider?: string }
 }): Promise<ContinuableDelegationLike> {
   const { subagents, provider, label, prompt, parent, toolFilter, maxDepth } = input
   const maxRounds = input.maxRounds ?? 3
@@ -492,6 +503,10 @@ export async function delegateContinuable(input: {
   }
   if (toolFilter !== undefined) request.toolFilter = toolFilter
   if (maxDepth !== undefined) request.maxDepth = maxDepth
+  // T9: the child's provider/model overrides, forwarded only when the caller supplied them —
+  // and the caller supplies them only for a provider that DECLARES the capability, because the
+  // harness rejects a start that carries them otherwise.
+  if (input.agentOptions !== undefined) request.agentOptions = input.agentOptions
 
   const spec: ContinuableStartSpecLike = {
     provider,

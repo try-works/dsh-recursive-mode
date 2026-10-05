@@ -19,6 +19,7 @@ import type { PendingWorkItem, RecursiveStatusResult } from './types.ts'
 import { findOperation, countOperations, operationId, recordOperation } from './identity.ts'
 import { createHookRegistry, type HookRegistry } from './hooks.ts'
 import { runTracked, abortReason, type JobsRegistryLike } from './jobs-runner.ts'
+import { modelForRole } from './role-route.ts'
 import { recordJobRun } from './job-log.ts'
 import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
@@ -431,6 +432,9 @@ export class RecursiveRuntime extends Service {
     // read structurally (the plugin's seam style) and SUBTRACTED, so the configured
     // ceiling bounds the whole recursion rather than being re-granted at every level
     // — a "depth 2" budget that resets per level bounds nothing.
+    // T9: notes about routing decisions that could NOT be applied, so a caller is told rather
+    // than left to infer it from a model that silently did not take effect.
+    const routingNotes: string[] = []
     const request: SubagentStartRequestLike = {
       prompt: [{ type: 'text', text: prompt }],
       label: input.delegationId + '/' + input.childId,
@@ -439,6 +443,27 @@ export class RecursiveRuntime extends Service {
       maxDepth: remainingDepthFor(this.enforcementConfig.budgets, parentDepthOf(input.parent), input.maxDepth),
     }
     if (input.parent !== undefined) request.parent = input.parent
+
+    // T9 — PER-ROLE MODEL ROUTING, applied only where the provider SAYS it supports it.
+    //
+    // The harness rejects a start that sends `agentOptions` to a provider without the
+    // `agentOptions` capability, so gating on the model alone would BREAK delegations on
+    // providers that do not accept overrides — a routing feature that takes down the
+    // delegation it was meant to improve. The capability decides, and an unsatisfied model
+    // is reported rather than silently dropped.
+    const roleModel = modelForRole(input.role, policy)
+    if (roleModel !== null) {
+      const target = decision.provider ?? ''
+      const capable = providers[target]?.capabilities?.agentOptions === true
+      if (capable) {
+        request.agentOptions = { model: roleModel }
+      } else {
+        routingNotes.push(
+          'role ' + input.role + ' names model ' + roleModel + ', but provider ' + (target || '(none)')
+          + ' does not declare the agentOptions capability, so the model was NOT applied',
+        )
+      }
+    }
 
     // T19 — DETERMINISTIC OPERATION IDENTITY for the delegation itself. The id
     // covers the inputs PLUS the artifact's BODY, and the body is what keeps a
@@ -547,6 +572,10 @@ export class RecursiveRuntime extends Service {
           maxDepth: remainingDepthFor(this.enforcementConfig.budgets, parentDepthOf(input.parent), input.maxDepth),
           toolFilter: input.toolFilter ?? defaultReviewToolFilter(),
           maxRounds: input.maxRounds ?? 3,
+          // T9: the model the role resolved to, when the provider accepts overrides. It must be
+          // forwarded THROUGH the continuable delegation — that seam builds the start request
+          // itself, so setting it on `request` alone would never reach the provider.
+          ...(request.agentOptions === undefined ? {} : { agentOptions: request.agentOptions }),
           // T39: the ROUND AWAIT is the hangable part of a delegation — the child may work for
           // minutes — so it is what the board should be able to see as a running job.
           //
@@ -722,6 +751,8 @@ export class RecursiveRuntime extends Service {
       request,
       result,
       evaluation,
+      /** T9: routing decisions that could NOT be applied, so a caller is told rather than left to infer. */
+      routingNotes,
       actionRecordPath,
       error,
       /** T35: which child lifecycle actually carried this delegation. */

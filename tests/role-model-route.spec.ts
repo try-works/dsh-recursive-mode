@@ -7,6 +7,11 @@
  * NOT rather than left for a reader to infer.
  */
 import { describe, it, expect } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { RecursiveRuntime } from '../src/runtime.ts'
 import { roleKindOf, routeForRole, modelForRole } from '../src/role-route.ts'
 import { resolveRole, type RouterPolicy } from '../src/router.ts'
 
@@ -114,5 +119,90 @@ describe('T9 — the route decision carries the role’s model', () => {
     // this path", which is the inconsistency the wrapper exists to prevent.
     const decision = resolveRole('implementer', policy({}), {} as never)
     expect(decision.model).toBeNull()
+  })
+})
+
+/**
+ * T9 part 3 — the model is DECLARED on the request, and only where the provider accepts it.
+ *
+ * ⚠ The safety property is the second case, not the first: the harness REJECTS a start that
+ * sends `agentOptions` to a provider without that capability, so an unconditional pass would
+ * take down the delegation the routing was meant to improve.
+ */
+describe('T9 — the delegation request declares the role’s model', () => {
+  const POLICY_WITH_MODEL = {
+    version: 1,
+    role_routes: {
+      'code-reviewer': { enabled: true, mode: 'external-cli', cli: null, model: 'rigorous', fallback: 'self-audit' },
+    },
+    cli_overrides: {},
+    custom_clis: [],
+  }
+
+  function makeRoot(): string {
+    const root = mkdtempSync(join(tmpdir(), 'rm-t9r-'))
+    const runDir = join(root, '.recursive', 'run', 'run-1')
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, '03-implementation-summary.md'), '# Impl\n\nStatus: `DRAFT`\n\n## TODO\n\n- [x] done\n', 'utf8')
+    const cfg = join(root, '.recursive', 'config')
+    mkdirSync(cfg, { recursive: true })
+    writeFileSync(join(cfg, 'recursive-router.json'), JSON.stringify(POLICY_WITH_MODEL), 'utf8')
+    return root
+  }
+
+  /** Captures the START REQUEST, which is where the model has to appear. */
+  async function startRequestFor(capabilities: Record<string, boolean>) {
+    const root = makeRoot()
+    const ctx = new Context()
+    // ⚠ The spec is `{ provider, label, request }` — the request is NESTED. My first version of
+    // this fake read `spec.agentOptions` and so asserted a field that could never be there,
+    // which made the wiring look broken when it was the test reading the wrong level.
+    const seen: Array<{ agentOptions?: unknown }> = []
+    const runtime = new RecursiveRuntime(ctx, { repoRoot: root })
+    try {
+      const out = await runtime.delegateReview({
+        root,
+        runId: 'run-1',
+        phase: '3',
+        role: 'code-reviewer',
+        delegationId: 'd1',
+        childId: 'c1',
+        artifactPath: join(root, '.recursive', 'run', 'run-1', '03-implementation-summary.md'),
+        upstreamArtifacts: [],
+        auditQuestions: ['does it work?'],
+        requiredOutput: 'verdict',
+        mode: 'continuable',
+        parent: {},
+        providers: { spawn: { name: 'spawn', capabilities } },
+        subagents: {
+          startContinuable: async (spec: { request?: { agentOptions?: unknown } }) => {
+            seen.push((spec.request ?? {}) as { agentOptions?: unknown })
+            return { childId: 'c1', messageId: 'm1' }
+          },
+          followup: async () => ({ messageId: 'm2' }),
+        },
+        awaitRoundResult: async () => null,
+      } as never) as { routingNotes?: string[] }
+      return { seen, out }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+
+  it('declares agentOptions.model when the provider says it accepts overrides', async () => {
+    const { seen } = await startRequestFor({ outputSchema: true, agentOptions: true })
+    expect(seen.length).toBe(1)
+    expect(seen[0].agentOptions).toEqual({ model: 'rigorous' })
+  })
+
+  it('sends NOTHING the provider would reject, and SAYS the model was not applied', async () => {
+    // Without the capability the start must not carry agentOptions at all — and the caller is
+    // told the model was dropped rather than left to infer it from a delegation that ran
+    // without the routing it asked for.
+    const { seen, out } = await startRequestFor({ outputSchema: true })
+    expect(seen.length).toBe(1)
+    expect(seen[0].agentOptions).toBeUndefined()
+    expect((out.routingNotes ?? []).join(' ')).toContain('does not declare the agentOptions capability')
+    expect((out.routingNotes ?? []).join(' ')).toContain('rigorous')
   })
 })

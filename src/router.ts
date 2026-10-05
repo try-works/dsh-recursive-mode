@@ -65,6 +65,12 @@ export interface SubagentProviderLike {
     depthLimit?: boolean
     toolFilter?: boolean
     persona?: boolean
+    /**
+     * T9: whether this provider accepts `agentOptions` (provider/model/reasoning-effort
+     * overrides). The harness REJECTS a start that sends them to a provider without this
+     * capability, so the caller must ASK rather than assume — see `delegateReview`.
+     */
+    agentOptions?: boolean
   }
 }
 

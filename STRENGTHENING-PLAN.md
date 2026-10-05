@@ -771,7 +771,7 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 - **Acceptance:** a recorded decision in §9.3 with the revision and date. No code change.
 - **Evidence:** the tag ladder and the §2 verification in the review session.
 
-### T29 — Inject memory at **run start** (the loader hook) · **backlog — temporal axis**
+### T29 — Inject memory at **run start** (the loader hook) · **IN PROGRESS — the loader and the selection rules are DONE; the run-entry injection and the once-gate reuse are not**
 
 - **Why:** The plugin builds and lints the memory plane and **never reads it**. Every run therefore starts from zero, and the "temporal" axis of §3 is dead. The parent repo treats retrieval as a first-class step with an explicit **timing** rule — *"call the loader after reading `RECURSIVE.md` and `MEMORY.md`, but **before planning or implementation starts**"* — and enforces **progressive disclosure** in three steps: read the `MEMORY.md` router, run the loader with the current task description *and file paths*, then apply only the items that match.
 - **What:**
@@ -784,6 +784,14 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 - **TDD Mode:** `strict`.
 - **RED:** `tests/memory-load.spec.ts` — a repo with a populated plane returns the relevant shards ranked by the router's own rules; `STALE`/`DEPRECATED` are excluded; an empty plane returns nothing and does **not** error; injection happens once per run, not per turn; nothing is injected when nothing matches.
 - **GREEN:** `src/memory.ts` (new), `src/index.ts` (wire into the entry path), `src/phase-rules.ts` (reuse the once-gate).
+
+- **RESULT (part 1) — the READ half of the temporal axis exists: the loader, the selection rules, and the refusal to fabricate.** `loadMemoryIndex(root)` reads the plane through T14's `readMemoryEntries`, and `selectMemory(root, { query, files, maxDocs, maxItems })` returns ranked `MemoryShard`s with `injected` and a `reason`.
+  - **⚠ RETIRED MEMORY IS NEVER INJECTED, and the marker had to be found rather than assumed:** `MemoryEntry` carries **no status field** (measured), so `Status: STALE` / `Status: DEPRECATED` is read from the entry's own text. That is the read-side counterpart of *supersede, never delete*: an update writes a new entry, and **this is what makes the old one stop being read**.
+  - **⚠ PATHS ARE THE STRONGER SIGNAL, WEIGHTED RATHER THAN SUBSTITUTED** (+3 per changed path named in the shard, on top of T14's query score): a shard that mentions a path the run has actually changed outranks one that merely shares wording — but the run's requirements text still counts, because that is what says what the run is **for**.
+  - **⚠ NOTHING RELEVANT MEANS NOTHING INJECTED** — the parent's sentence verbatim, and it is asserted twice: an **empty plane** and a **plane whose only match is retired** both return `injected: false` with a reason containing *"rather than fabricating memory"*. A zero score is **no match**, not a weak one.
+  - **Progressive disclosure is a default, not a hope:** the cap is `MAX_MEMORY_DOCS` (3, matching the parent) and a test asks for 99 to prove the cap — rather than the plane being small — is what limits the answer.
+  - **REMAINING, and the item is not finished:** nothing injects at run entry yet — `src/index.ts` does not call `selectMemory`, and `src/phase-rules.ts`'s existing once-per-`(root, runId, phase)` gate is **not reused**, so there is no dedupe and **the loader has no caller in the workflow**. The parent's "read back what the context already contains" trick is likewise not implemented.
+  - **Evidence:** `tests/memory-load.spec.ts` (7 tests) and T14's `tests/memory-retrieval.spec.ts` (15, unchanged), full suite **81 files / 790 tests** green, typecheck 0, build 0.
 - **Acceptance:** a run started in a repo with populated memory receives the matching shards before planning begins; a run in an empty repo is unaffected and silent.
 - **Sequencing caveat:** until T30 has run against **two or more** locked runs there is nothing to retrieve, so *T29 cannot be accepted on a repo whose memory plane is empty.* Implement T30 first, or land both and accept T29 against a repo that has been run twice.
 - **Evidence:** `D:\DEV\recursive-mode\skills\recursive-training\references\phase8-and-loading.md` (progressive disclosure, loader timing, failure handling); audit 1's memory worker (*"files are the source of truth"*, *"degradation is explicit, never silent"*).

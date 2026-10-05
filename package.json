@@ -84,6 +84,7 @@
     "build": "node scripts/link-dsh.mjs && node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && tsdown",
     "bundle": "tsdown",
     "test": "node scripts/link-dsh.mjs && vitest run",
+    "e2e": "node scripts/e2e-run.mjs",
     "typecheck": "node scripts/link-dsh.mjs && tsc --noEmit",
     "link:dsh": "node scripts/link-dsh.mjs",
     "prepare": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && tsdown"

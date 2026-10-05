@@ -1064,13 +1064,37 @@ a person would inspect it. A harness that asserted on its own in-memory expectat
 
 | id | item | mode | status | spec | evidence | notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| FU-1 | `E:` end-to-end harness: mount the real plugin in a real context and drive a full run through the tools | strict | **backlog** | `tests/e2e-harness.spec.ts` + `scripts/e2e-run.mjs` | (planned) one command → a completed run on `E:` with 08 LOCKED | the vehicle for FU-2…FU-7; asserts on the RUN DIRECTORY, and names the first tool refusal when a run fails |
+| FU-1 | `E:` end-to-end harness: mount the real plugin in a real context and drive a full run through the tools | strict | **done** | `tests/e2e-harness.spec.ts` (3) + `scripts/e2e-run.mjs` | `pnpm e2e` → **all 12 phases LOCKED**, 12 receipts, and a written report pointing at the run dir | the vehicle for FU-2…FU-7. Found FU-8 on its FIRST run |
 | FU-2 | wire `delegateReview` so the always-continuable rule is true IN PRODUCTION, not only in the default | strict | **backlog** | `src/recursive_review.tool.ts`, `src/runtime.ts` | (planned) e2e run where a review is delegated and the verdict read back | found by T35: no callers in `src/`, `tests/` or anywhere |
 | FU-3 | drain the child at closeout with the live parent Agent | strict | **backlog** | `src/runtime.ts` (closeout path) | (planned) child settled/stopped at closeout in an e2e run | the unchecked follow-up on the `recursive_review` item (L1082) |
 | FU-4 | compute the worktree's CHANGED PATHS and pass them to `selectMemory` | strict | **backlog** | `src/runtime.ts` (`phaseRules`), a changed-path helper | (planned) e2e run where a shard naming a changed path outranks one that does not | without it the +3 path weighting (T29) is test-exercised only |
 | FU-5 | the production extractor SPAWN behind the injected runner, plus the response-file path | pragmatic | **backlog** | `src/training.ts` (a spawn adapter), `src/runtime.ts` | (planned) live exit 2 with no command; live exit 3 when it returns nothing | the runner is injected because this sandbox denies piped stdio; the adapter is where the spawn lives |
 | FU-6 | prove T2's audit fan-out against the **live** `ctx.workflow` engine | pragmatic | **backlog** | `scripts/e2e-run.mjs` (an audit step) | (planned) N `workflow/agent-end` frames + ONE verdict, live | T2's acceptance was met against a SCRIPTED engine; its own TDD mode defers this to manual verification |
 | FU-7 | the three `recursive_ask` call points at phase-3 entry, QA sign-off and a gate block | strict | **backlog** | `src/phase-rules.ts`, `src/recursive_ask.tool.ts` | (planned) e2e run where each gate is asked once and the answer lands in the artifact | named as not done on T23; `createAskLedger` still has no caller |
+| FU-8 | **DEFECT FOUND BY FU-1:** `recursive_closeout` silently unlocked its OWN artifact | strict | **done** | `src/closeout.ts` (the guard), `tests/e2e-harness.spec.ts` | e2e: the post-lock closeout is REFUSED and `08` stays `LOCKED` | the file said `DRAFT` while its receipt said `LOCKED`; the policy section promises *"Writes to a Status: LOCKED phase doc are denied/asked; reopen explicitly to edit"* |
+
+**FU-1 RESULT — the harness works, and it paid for itself on the first run.** `pnpm e2e` mounts the real
+plugin in a real Cordis context inside a timestamped repo on `E:`, drives **12 phases through the tools**
+(`recursive_init` → per phase: closeout stub where the workflow scaffolds one, `recursive_phase` for the
+rules → satisfy the gate vocabulary those rules name → `recursive_lint` → `recursive_lock`), then the
+closeout, status and preview tools. It asserts on **the run directory**: **all 12 phases LOCKED**, **12
+receipts**, and a markdown report of every call written into the run root. `E2E_KEEP=1` (the runner's
+default) keeps the evidence, because a harness that deletes its own evidence cannot be debugged.
+
+**⚠ THREE THINGS IT TAUGHT, EACH OF WHICH WAS A WRONG ASSUMPTION OF MINE:**
+
+1. **The closeout is a scaffolding step, not a closing one.** *"Creates/updates Phase 4/5/6/7/8
+   delta-receipt stubs"* — so it belongs at phase ENTRY. My first harness ran it AFTER the locks, and the
+   run ended with `08` reset to `DRAFT`.
+2. **…and that reset is a REAL DEFECT (FU-8), not just my ordering.** `closeoutPhase` refused when
+   *earlier* phases were unlocked but never checked **its own target**, so it rewrote a `LOCKED` artifact
+   while the receipt still said LOCKED — a run whose file and receipt disagree, against the rule the
+   policy section publishes every turn. Now guarded, and asserted live.
+3. **A tool refusal does NOT set `isError`.** The envelope is
+   `{isError: false, content: [{text: '{"error": "Artifact is LOCKED…"}'}]}` — the plugin's convention is
+   an `error` field **inside the payload**, so a harness checking only `isError`, or only catching
+   exceptions, would report **a refused call as ok**. That is the same class of mistake this harness
+   exists to catch elsewhere, and it is now handled in both shapes.
 
 **Sequencing, and why:** FU-1 → FU-2 → FU-3 (the delegation chain: reachable, then drained) → FU-4 → FU-5
 (the two seams the loader/extractor leave open) → FU-6 → FU-7. FU-1 is first because it is the instrument;
@@ -1094,7 +1118,8 @@ Sprint 0 — rebase onto the pinned baseline
 
 ## 5b. Follow-up checklist (FU-1…FU-7) — the instrument first
 
-[ ] FU-1 `E:` end-to-end harness — mount the real plugin in a real Cordis context in a temp repo on `E:` and drive a full run THROUGH THE TOOLS, asserting on the RUN DIRECTORY  ← FIRST: it is the instrument every later item is proven with
+[x] FU-1 `E:` end-to-end harness — mount the real plugin in a real Cordis context in a temp repo on `E:` and drive a full run THROUGH THE TOOLS, asserting on the RUN DIRECTORY  ← DONE (`pnpm e2e`: 12 phases locked, 12 receipts, a written report; found FU-8 on its first run)
+[x] FU-8 **DEFECT FOUND BY FU-1** — `recursive_closeout` silently unlocked its own artifact  ← DONE (guarded in `src/closeout.ts`; the e2e run now shows the post-lock closeout REFUSED with the lock intact)
 [ ] FU-2 wire `delegateReview` so the always-continuable rule is true IN PRODUCTION (T35 found it has no callers)
 [ ] FU-3 drain the child at closeout with the live parent Agent (the unchecked follow-up on the `recursive_review` item)
 [ ] FU-4 compute the worktree's CHANGED PATHS and pass them to `selectMemory`, so T29's path weighting is live

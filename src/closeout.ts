@@ -5,7 +5,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { getPrerequisiteBlockers } from './lock.ts'
+import { getLockStatus, getPrerequisiteBlockers } from './lock.ts'
 
 export interface CloseoutPhaseConfig {
   file: string
@@ -155,6 +155,23 @@ export function closeoutPhase(runDir: string, phase: string, opts: CloseoutOptio
   mkdirSync(runDir, { recursive: true })
   const filePath = join(runDir, config.file)
   const existed = existsSync(filePath)
+
+  // ⚠ FU-8 — A CLOSEOUT MUST NOT SILENTLY UNLOCK ITS OWN ARTIFACT. Found by the FU-1 harness: a
+  // closeout run after the phase had locked rewrote the file to `Status: \`DRAFT\`` while its RECEIPT
+  // still said LOCKED, leaving a run whose file and receipt disagree. The plugin publishes the rule this
+  // breaks, in the policy section a model reads every turn: *"Writes to a Status: LOCKED phase doc are
+  // denied/asked; reopen explicitly to edit."* The prerequisite check above guards EARLIER phases; this
+  // guards the artifact the closeout actually writes.
+  //
+  // ⚠ IT REFUSES RATHER THAN SKIPPING QUIETLY, and it names the remedy, because the caller's next move
+  // differs: a refusal means "reopen it first if you really mean to", while a silent skip would look
+  // like a successful closeout that changed nothing.
+  if (getLockStatus(filePath) === 'LOCKED') {
+    throw new Error(
+      'Artifact is LOCKED: ' + config.file + ' — the contract denies a write to a LOCKED phase doc; '
+      + 'reopen it explicitly (recursive_lock with reopen) before scaffolding its receipt',
+    )
+  }
 
   const runId = runDir.split(/[\\/]/).filter(Boolean).pop() ?? 'unknown-run'
   const lines: string[] = [

@@ -82,8 +82,39 @@ const DEFAULT_POLICY: RouterPolicy = {
   custom_clis: [],
 }
 
+/**
+ * T7 — the settings OVERRIDE layer over the declarative file.
+ *
+ * ONE PATH, NOT TWO (the item's own interaction note): `recursive-router.json` remains the
+ * declarative source, and the settings namespace can OVERRIDE individual fields without
+ * restating the file. That is why every field here is optional and why the schema declares
+ * NO defaults for them: an absent field means "defer to the file", and a default would make
+ * every field present and silently shadow the file forever.
+ */
+export interface RouterPolicyOverrides {
+  defaults?: Partial<RouterPolicy['defaults']>
+}
+
+/** Drop keys explicitly set to `undefined`, so "unset" cannot erase a file's value. */
+function compact<T extends object>(value: T | undefined): Partial<T> {
+  if (value === undefined) return {}
+  const out: Record<string, unknown> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry !== undefined) out[key] = entry
+  }
+  return out as Partial<T>
+}
+
 /** Parse recursive-router.json. A missing/invalid file yields a default self-audit policy (never throws). */
-export function loadRouterPolicy(path?: string): RouterPolicy {
+export function loadRouterPolicy(path?: string, overrides?: RouterPolicyOverrides): RouterPolicy {
+  const base = readRouterPolicy(path)
+  const applied = compact(overrides?.defaults)
+  if (Object.keys(applied).length === 0) return base
+  return { ...base, defaults: { ...base.defaults, ...applied } }
+}
+
+/** The file (or the built-in default) — the declarative source the overrides sit on top of. */
+function readRouterPolicy(path?: string): RouterPolicy {
   if (!path || !existsSync(path)) return DEFAULT_POLICY
   try {
     const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<RouterPolicy>

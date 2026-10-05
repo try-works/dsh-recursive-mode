@@ -26,7 +26,7 @@ import { closeoutPhase } from './closeout.ts'
 import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './scratch.ts'
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
 import { createHandoff, createChildBrief, replyPath, childScratchPath, buildDelegationPrompt, type HandoffInput, type ChildBriefInput } from './handoff.ts'
-import { loadRouterPolicy, routerPolicyPath, resolveRole, capabilityProbe, delegationDecisionBasis, type RouterPolicy, type SubagentProviderLike, type RouteDecision, type CapabilityProbe } from './router.ts'
+import { loadRouterPolicy, routerPolicyPath, resolveRole, capabilityProbe, delegationDecisionBasis, type RouterPolicy, type RouterPolicyOverrides, type SubagentProviderLike, type RouteDecision, type CapabilityProbe } from './router.ts'
 import { delegate, delegateContinuable, remainingDepthFor, validateReferences, writeActionRecord, evaluateDelegationResult, reviewOutputSchema, defaultReviewToolFilter, type SubagentsRuntimeLike, type SubagentStartRequestLike, type SubagentResultLike, type Reference, type ActionRecordInput, type ContinuableDelegationLike, type SubagentParentHandle } from './delegation.ts'
 import { validateTransition, coupleGateBlockToGoal, type PhaseTransitionIntent, type RecursivePhaseState, type GateCheckResult } from './lifecycle.ts'
 import { resolveEnforcementConfig, DEFAULT_ENFORCEMENT, evaluateToolGuard, detectTamper, type EnforcementConfig, type ToolGuardDecision, type ToolExecLike } from './enforcement.ts'
@@ -143,6 +143,18 @@ export class RecursiveRuntime extends Service {
    * is a registry whose ordering depends on when someone remembered to fetch it.
    */
   readonly hooks: HookRegistry = createHookRegistry()
+
+  /**
+   * T7 — router overrides from the settings namespace. Kept beside the config rather than
+   * merged into the file so the workspace's `recursive-router.json` stays the declarative
+   * source: `loadRouterPolicy` reads the file and lays these on top.
+   */
+  private _routerOverrides: RouterPolicyOverrides | undefined = undefined
+
+  /** T7: set (or clear) the router overrides. Called from `apply` on every plugin load. */
+  setRouterOverrides(overrides: RouterPolicyOverrides | undefined): void {
+    this._routerOverrides = overrides
+  }
 
   private _enforcementConfig: EnforcementConfig | null = null
 
@@ -326,7 +338,7 @@ export class RecursiveRuntime extends Service {
     /** T4: the exact live direct-parent Agent (object-identity authority). */
     parent?: SubagentParentHandle
   }) {
-    const policy = loadRouterPolicy(input.policyPath ?? routerPolicyPath(input.root))
+    const policy = loadRouterPolicy(input.policyPath ?? routerPolicyPath(input.root), this._routerOverrides)
     const providers = input.providers ?? {}
     const decision = resolveRole(input.role, policy, providers)
     const probe = capabilityProbe({ providers, role: input.role, policy })
@@ -597,7 +609,7 @@ export class RecursiveRuntime extends Service {
 
   /** R7: probe availability for a role and render the decision basis prose. */
   probeDelegation(root: string, role: string, providers: Record<string, SubagentProviderLike> = {}) {
-    const policy = loadRouterPolicy(routerPolicyPath(root))
+    const policy = loadRouterPolicy(routerPolicyPath(root), this._routerOverrides)
     const decision = resolveRole(role, policy, providers)
     const probe = capabilityProbe({ providers, role, policy })
     return {

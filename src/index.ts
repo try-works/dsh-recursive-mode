@@ -215,6 +215,11 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     // from any source is refused rather than coerced.
     if (config?.enforcement !== undefined) recursive.setEnforcementConfig(config.enforcement)
 
+    // T7 part 2 — the ROUTER overrides, on the same terms: present means override, absent
+    // means defer to the workspace's declarative `recursive-router.json`. ONE PATH, NOT
+    // TWO: this does not replace the file, it lays over it (see `loadRouterPolicy`).
+    if (config?.router !== undefined) recursive.setRouterOverrides(config.router)
+
     const repairedRoots = new Set<string>()
     const reminderGate = new ReminderOnceGate()
     // T3 (agentTeams task loop): wire the live ctx.agentTeams service (optional —

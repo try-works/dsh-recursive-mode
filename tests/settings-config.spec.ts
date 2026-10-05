@@ -23,10 +23,11 @@ import { describe, it, expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Config, type RecursiveModeConfig } from '../src/config.ts'
+import { loadRouterPolicy } from '../src/router.ts'
 import { DEFAULT_BUDGETS } from '../src/enforcement.ts'
 import * as plugin from '../src/index.ts'
 
@@ -146,5 +147,92 @@ describe('T7 — a settings edit changes enforcement LIVE (the acceptance)', () 
     // The schema rejects it, and so does the strict resolver — belt and braces, because a
     // config can also arrive from a file rather than the form.
     await expect(mountWith({ enforcement: { nope: true } as never })).rejects.toThrow(/unknown key/)
+  })
+})
+
+/**
+ * T7 part 2 — the ROUTER half, on the same terms as the enforcement half.
+ *
+ * THE PROPERTY THAT MATTERS MOST is a NEGATIVE one: the router fields must carry **no
+ * schema defaults**. A default makes every field PRESENT, and a present field overrides the
+ * workspace's `recursive-router.json` — so defaulting them would silently shadow the
+ * declarative file forever, which is exactly the "one path, not two" failure the item warns
+ * about. That is asserted first, before any behaviour.
+ */
+describe('T7 — the router overrides, one path and not two', () => {
+  it('declares NO defaults, so an unedited namespace cannot shadow the workspace file', () => {
+    const filled = editedConfig({}) as { router?: { defaults?: Record<string, unknown> } }
+    const defaults = filled.router?.defaults ?? {}
+    const present = Object.entries(defaults).filter(([, value]) => value !== undefined)
+    expect(present).toEqual([])
+  })
+
+  it('lays an override ON TOP of the file, keeping the file’s other values', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rm-t7r-'))
+    try {
+      const file = join(dir, 'recursive-router.json')
+      writeFileSync(file, JSON.stringify({ defaults: { probe_timeout_ms: 111, invoke_timeout_ms: 222 } }), 'utf8')
+      const policy = loadRouterPolicy(file, { defaults: { invoke_timeout_ms: 999 } })
+      expect(policy.defaults.invoke_timeout_ms).toBe(999)   // the override
+      expect(policy.defaults.probe_timeout_ms).toBe(111)    // the file kept its own
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('an explicitly UNSET field does NOT erase the file’s value', () => {
+    // A form that submits `undefined` for an untouched field must not delete configuration.
+    const dir = mkdtempSync(join(tmpdir(), 'rm-t7r2-'))
+    try {
+      const file = join(dir, 'recursive-router.json')
+      writeFileSync(file, JSON.stringify({ defaults: { probe_timeout_ms: 111 } }), 'utf8')
+      const policy = loadRouterPolicy(file, { defaults: { probe_timeout_ms: undefined, invoke_timeout_ms: undefined } })
+      expect(policy.defaults.probe_timeout_ms).toBe(111)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('with no overrides at all the policy is exactly what the file says', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rm-t7r3-'))
+    try {
+      const file = join(dir, 'recursive-router.json')
+      writeFileSync(file, JSON.stringify({ defaults: { when_model_unknown: 'fallback-local' } }), 'utf8')
+      const withNone = loadRouterPolicy(file)
+      const withEmpty = loadRouterPolicy(file, { defaults: {} })
+      expect(withNone.defaults.when_model_unknown).toBe('fallback-local')
+      expect(withEmpty).toEqual(withNone)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a missing file still yields the built-in defaults, with the override applied', () => {
+    const policy = loadRouterPolicy(join(tmpdir(), 'rm-does-not-exist', 'recursive-router.json'), {
+      defaults: { probe_timeout_ms: 7 },
+    })
+    expect(policy.defaults.probe_timeout_ms).toBe(7)
+    expect(policy.version).toBe(1)
+  })
+
+  it('REACHES the runtime: a mounted plugin carries the router section through', async () => {
+    // White-box on purpose: this asserts the WIRING (config -> runtime), which is the part
+    // this change adds. `loadRouterPolicy`'s behaviour is covered by the cases above, and a
+    // full delegation round trip would test the router rather than the settings seam.
+    const repo = mkdtempSync(join(tmpdir(), 'rm-t7r4-'))
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(plugin, {
+        repoRoot: repo,
+        router: { defaults: { probe_timeout_ms: 4242 } },
+      } as never)
+      const carried = (ctx.recursive as unknown as { _routerOverrides?: { defaults?: { probe_timeout_ms?: number } } })._routerOverrides
+      expect(carried?.defaults?.probe_timeout_ms).toBe(4242)
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(repo, { recursive: true, force: true })
+    }
   })
 })

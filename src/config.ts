@@ -43,6 +43,8 @@ export interface RecursiveModeConfig {
   repoRoot?: string
   /** T7/T28: the enforcement modes and the budgets, editable live. */
   enforcement?: RecursiveModeEnforcement
+  /** T7: overrides for the workspace router file — see the schema comment on defaults. */
+  router?: { defaults?: Record<string, string | number | boolean | undefined> }
 }
 
 /**
@@ -84,4 +86,28 @@ export const Config = z.object({
       ),
     }).description('T28 budgets.'),
   }).description('The enforcement modes plus the T28 budgets.'),
+  /**
+   * T7 — the ROUTER overrides. Deliberately NO defaults on these fields: `.default()`
+   * would make every field present, and a present field overrides the workspace's
+   * `recursive-router.json` — so defaulting them would silently shadow the declarative
+   * file forever. Absent means "defer to the file"; present means "override it".
+   */
+  router: z.object({
+    defaults: z.object({
+      when_role_unconfigured: z.union([z.const('ask'), z.const('fallback-local')]).description(
+        'What to do when a role has no configured route. Leave unset to use the workspace router file.',
+      ),
+      when_cli_unavailable: z.union([z.const('ask'), z.const('fallback-local')]).description(
+        'What to do when the routed CLI is unavailable. Leave unset to use the workspace router file.',
+      ),
+      when_model_unknown: z.union([z.const('ask'), z.const('fallback-local')]).description(
+        'What to do when a routed model is not a known provider. Leave unset to use the workspace router file.',
+      ),
+      allow_auto_assign_if_single_cli: z.boolean().description(
+        'Assign a role automatically when exactly one CLI is configured. Unset defers to the file.',
+      ),
+      probe_timeout_ms: z.natural().description('CLI capability probe timeout in ms. Unset defers to the file.'),
+      invoke_timeout_ms: z.natural().description('Routed CLI invocation timeout in ms. Unset defers to the file.'),
+    }).description('Router default policy fields this namespace overrides.'),
+  }).description('Overrides for .recursive/config/recursive-router.json — one path, not two.'),
 })

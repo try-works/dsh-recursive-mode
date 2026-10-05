@@ -248,6 +248,36 @@ export function apply(ctx: Context, config?: { shellOnly?: boolean; repoRoot?: s
         // here, because a run created moments ago must be visible immediately. If a
         // cache is ever added it must be provably invalidated on run creation.
         const runId = root ? resolveRunDir(root)?.runId ?? '' : ''
+
+        // T27 — THE NAMED POINT IS LIVE AT THE ENFORCEMENT SEAM. A sibling hook may
+        // deny here BEFORE the built-in guard runs, so participation is real rather
+        // than a reachable registry that nothing consults.
+        //
+        // With no hooks registered — the ordinary case — the chain returns `continue`
+        // and the guard below runs exactly as it always has, which is what keeps
+        // `guard-path.spec.ts`'s pinned contract byte-identical. That is the point of
+        // putting the chain FIRST: it adds a way in without moving what was there.
+        //
+        // A `hold` is treated as a denial at this seam. `hold` means "stop and wait"
+        // for a point that can resume later; a tool call has nothing to resume, so
+        // pretending to hold would silently proceed. Better to refuse and say so.
+        const preTrigger = await recursive.hooks.run('pre_trigger', {
+          tool: exec.name,
+          args: exec.arguments,
+          root,
+          runId,
+        })
+        if (preTrigger.decision === 'deny' || preTrigger.decision === 'hold') {
+          const by = preTrigger.ran[preTrigger.ran.length - 1]?.name ?? 'a pre_trigger hook'
+          const why = preTrigger.reason ?? 'no reason given'
+          return {
+            kind: 'deny',
+            reason: preTrigger.decision === 'hold'
+              ? 'held by pre_trigger hook ' + by + ': ' + why
+              : 'denied by pre_trigger hook ' + by + ': ' + why,
+          }
+        }
+
         const guardMode = recursive.enforcementConfig.toolGuards
         const decision = evaluateToolGuard(exec as never, root, runId, guardMode)
         // T6 (approval ask→policy bridge): an `ask` must never be a silent

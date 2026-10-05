@@ -17,6 +17,10 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RecursiveRuntime } from '../src/runtime.ts'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as plugin from '../src/index.ts'
 import {
   HOOK_POINTS, GATING_POINTS, OBSERVING_POINTS, createHookRegistry, hookFingerprint,
   isGating, isObserving, type HookOutcome,
@@ -302,6 +306,83 @@ describe('T27 — a sibling plugin can participate through the mounted service',
     } finally {
       await ctx.fiber.dispose()
       rmSync(repo, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * T27 — the seam is LIVE: a sibling vetoes a REAL tool call.
+ *
+ * Reaching the registry is not the same as being consulted by it. These cases drive an
+ * actual `ctx.tools.execute` through the plugin's own `tools/pre-execute` listener, so a
+ * sibling hook is proven to sit in the ENFORCEMENT path — and the guard's pinned
+ * contract is proven undisturbed when no hook is registered.
+ */
+describe('T27 — a sibling hook vetoes a real tool call, and changes nothing when absent', () => {
+  async function mountPlugin() {
+    const repo = mkdtempSync(join(tmpdir(), 'rm-hookseam-'))
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(plugin, { repoRoot: repo })
+    return {
+      ctx,
+      repo,
+      dispose: async () => {
+        await ctx.fiber.dispose()
+        rmSync(repo, { recursive: true, force: true })
+      },
+    }
+  }
+
+  function callStatus(m: { ctx: Context; repo: string }, callId: string) {
+    return m.ctx.tools.execute({
+      signal: new AbortController().signal,
+      callId: ToolCallId(callId),
+      name: 'recursive_status',
+      arguments: {},
+      agent: { session: { header: { cwd: m.repo } } },
+    } as never)
+  }
+
+  it('WITHOUT hooks the guard path is untouched (the pinned contract, live)', async () => {
+    const m = await mountPlugin()
+    try {
+      const out = await callStatus(m, 'h1') as { isError?: boolean }
+      // No hooks registered: the chain returns `continue` and the tool runs as always.
+      expect(out.isError).toBeFalsy()
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('a sibling hook DENIES a real tool call, naming itself and its reason', async () => {
+    const m = await mountPlugin()
+    try {
+      m.ctx.recursive.hooks.register('pre_trigger', {
+        name: 'policy-blocker', priority: 50,
+        run: () => ({ decision: 'deny', reason: 'the workspace policy forbids this' }),
+      })
+      const text = JSON.stringify(await callStatus(m, 'h2'))
+      expect(text).toContain('policy-blocker')
+      expect(text).toContain('the workspace policy forbids this')
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('a HOLD is refused with its own wording, because a tool call has nothing to resume', async () => {
+    const m = await mountPlugin()
+    try {
+      m.ctx.recursive.hooks.register('pre_trigger', {
+        name: 'waiter', priority: 50,
+        run: () => ({ decision: 'hold', reason: 'waiting for the child to settle' }),
+      })
+      const text = JSON.stringify(await callStatus(m, 'h3'))
+      expect(text).toContain('held by pre_trigger hook waiter')
+      expect(text).toContain('waiting for the child to settle')
+    } finally {
+      await m.dispose()
     }
   })
 })

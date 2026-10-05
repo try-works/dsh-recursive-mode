@@ -583,8 +583,7 @@ describe('T39 — a delegation round shows as a job', () => {
     }
   })
 
-  it('the PRODUCTION seam is used BY DEFAULT — subagents.interrupt, with the ancestor authority', async () => {
-    // The capability having no live user was the honest gap T39 recorded. This case closes it
+  it('the PRODUCTION seam is used BY DEFAULT — subagents.interrupt, with the ancestor authority', async () => {    // The capability having no live user was the honest gap T39 recorded. This case closes it
     // by passing NO explicit `interrupt`: the runtime must build the provider itself, from the
     // same seam the continuable lifecycle uses, with the parent Agent as the authority.
     const root = makeRoot()
@@ -630,6 +629,51 @@ describe('T39 — a delegation round shows as a job', () => {
       expect(interrupts[0].childId).toBe('c1')
       // The seam's own authority shape, and the parent we passed rather than a bare id.
       expect(interrupts[0].authority).toEqual({ kind: 'ancestor', agent: parent })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('resolves the seam from the COMPOSITION when the caller passes none', async () => {
+    // ⚠ THE DEFECT THIS CLOSES, measured rather than assumed: `recursive_review.tool.ts` — the
+    // only production caller of `delegateReview` — passes no `subagents`, and the runtime then
+    // reported "no ctx.subagents runtime available (self-audit fallback)" on a host that had
+    // mounted the service all along. So its rounds never reached a child. Here the seam is
+    // given to the RUNTIME (exactly as index.ts does it) and NOT to the call.
+    const root = makeRoot()
+    const ctx = new Context()
+    const calls: string[] = []
+    const seam = {
+      startContinuable: async (spec: { childId?: string }) => {
+        calls.push('startContinuable')
+        return { childId: spec.childId ?? 'c1', messageId: 'm1' }
+      },
+      followup: async () => ({ messageId: 'm2' }),
+    }
+    const runtime = new RecursiveRuntime(ctx, { repoRoot: root, subagents: seam as never })
+    try {
+      const out = await runtime.delegateReview({
+        root,
+        runId: 'run-1',
+        phase: '3',
+        role: 'code-reviewer',
+        delegationId: 'd1',
+        childId: 'c1',
+        artifactPath: join(root, '.recursive', 'run', 'run-1', '03-implementation-summary.md'),
+        upstreamArtifacts: [],
+        auditQuestions: ['does it work?'],
+        requiredOutput: 'verdict',
+        mode: 'continuable',
+        parent: {},
+        providers: { spawn: { name: 'spawn', capabilities: { outputSchema: true } } },
+        awaitRoundResult: async () => null,
+        // DELIBERATELY NO `subagents` HERE.
+      } as never) as { error?: unknown }
+      // A child was actually started, and the self-audit fallback is gone.
+      expect(calls).toContain('startContinuable')
+      expect(out.error ?? null).toBeNull()
+      // The round is recorded under the run it belongs to, as at every other site.
+      expect(readJobRuns(root, 'run-1')[0].kind).toBe('delegation')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

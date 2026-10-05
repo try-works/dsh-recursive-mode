@@ -120,7 +120,7 @@ const ARTIFACT_STUB = {
 export class RecursiveRuntime extends Service {
   /** Recursive-mode runtime service. Owns run-state reads + lock/init/lint operations. */
 
-  constructor(ctx: Context, config: { repoRoot?: string; workspaceRegistry?: WorkspaceRegistryLike; goals?: GoalServiceLike | null; jobs?: JobsRegistryLike | null } = {}) {
+  constructor(ctx: Context, config: { repoRoot?: string; workspaceRegistry?: WorkspaceRegistryLike; goals?: GoalServiceLike | null; jobs?: JobsRegistryLike | null; subagents?: SubagentsRuntimeLike | null } = {}) {
     super(ctx, 'recursive')
     this.repoRoot = config.repoRoot ?? process.cwd()
     this.workspaceRegistry = config.workspaceRegistry ?? null
@@ -128,10 +128,25 @@ export class RecursiveRuntime extends Service {
     // T10: the native jobs registry is OPTIONAL. Absent, long operations run inline and say
     // so; see `runTracked` for why that is better than refusing to work without a board.
     this.jobs = config.jobs ?? null
+    // T39: the subagents seam, resolved at the COMPOSITION like the other optional services.
+    this.subagentsSeam = config.subagents ?? null
   }
 
   /** T10: the native jobs registry, when the composition mounts one. */
   private readonly jobs: JobsRegistryLike | null
+
+  /**
+   * T39: the subagents seam the composition mounted, used when a caller does not pass one.
+   *
+   * ⚠ WHY THIS EXISTS, measured rather than assumed: `recursive_review.tool.ts` — the ONLY
+   * production caller of `delegateReview` — passes **no `subagents`** at its call site, and
+   * `delegateReview` reports *"no ctx.subagents runtime available (self-audit fallback)"* when
+   * the input lacks one. So on a composition that HAS the service, the review tool's rounds
+   * never reached a child at all, and the fallback message blamed a missing runtime that was
+   * in fact mounted. Resolving the seam here fixes the wiring without asking every call site to
+   * remember, while an explicit `input.subagents` still wins for a test or a narrower caller.
+   */
+  private readonly subagentsSeam: SubagentsRuntimeLike | null
 
   private readonly repoRoot: string
   private readonly workspaceRegistry: WorkspaceRegistryLike | null
@@ -355,6 +370,10 @@ export class RecursiveRuntime extends Service {
   }) {
     const policy = loadRouterPolicy(input.policyPath ?? routerPolicyPath(input.root), this._routerOverrides)
     const providers = input.providers ?? {}
+    // T39: the seam the caller passed, else the one the COMPOSITION mounted. See the field's
+    // comment: without this the review tool's rounds silently self-audited on a host that had
+    // the service all along.
+    const subagents: SubagentsRuntimeLike | undefined = input.subagents ?? this.subagentsSeam ?? undefined
     const decision = resolveRole(input.role, policy, providers)
     const probe = capabilityProbe({ providers, role: input.role, policy })
 
@@ -465,7 +484,7 @@ export class RecursiveRuntime extends Service {
      * the round, and a kill that cannot reach a child must not become an error in its place.
      */
     const interruptChild = input.interrupt ?? ((childId: string, reason: string) => {
-      const seam = input.subagents
+      const seam = subagents
       if (seam?.interrupt === undefined || input.parent === undefined) return
       try {
         seam.interrupt(childId as ContinuableChildId, { kind: 'ancestor', agent: input.parent })
@@ -514,13 +533,13 @@ export class RecursiveRuntime extends Service {
     }
 
     if (decision.tier === 'native' || decision.tier === 'external-cli') {
-      if (!input.subagents) {
+      if (!subagents) {
         error = 'no ctx.subagents runtime available (self-audit fallback)'
       } else if (input.mode !== 'one-shot') {
         // T35: continuable BY DEFAULT — only an explicit 'one-shot' opts out of
         // the repair path, because a one-shot child cannot be resumed.
         continuable = await delegateContinuable({
-          subagents: input.subagents,
+          subagents,
           provider: decision.provider as string,
           label: input.delegationId + '/' + input.childId,
           prompt,
@@ -610,7 +629,7 @@ export class RecursiveRuntime extends Service {
       } else {
         try {
           result = await delegate({
-            subagents: input.subagents,
+            subagents,
             provider: decision.provider as string,
             request,
           })

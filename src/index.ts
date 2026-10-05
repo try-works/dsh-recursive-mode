@@ -206,7 +206,12 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     // a long operation must still run, and say it was untracked, rather than fail because no
     // board is attached.
     const jobs = ctx.get('jobs') as JobsRegistryLike | undefined
-    const recursive = new RecursiveRuntime(ctx, { repoRoot: config?.repoRoot ?? process.cwd(), workspaceRegistry, goals, jobs })
+    // T39: the subagents seam is resolved HERE, at the composition, so the runtime can fall back
+    // to it when a caller passes none. Measured reason: `recursive_review.tool.ts` — the only
+    // production caller of `delegateReview` — passes no seam, and the runtime then reported
+    // "no ctx.subagents runtime available" on a host that had mounted it all along.
+    const subagentsSeamForRuntime = ctx.get('subagents') as SubagentsRuntimeLike | undefined
+    const recursive = new RecursiveRuntime(ctx, { repoRoot: config?.repoRoot ?? process.cwd(), workspaceRegistry, goals, jobs, subagents: subagentsSeamForRuntime ?? null })
 
     // T7 — THE SETTINGS NAMESPACE, APPLIED ON EVERY APPLY. The settings service edits the
     // Loader entry's config and the Loader RE-APPLIES this plugin, so a toggle in the UI
@@ -241,7 +246,7 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     // same reason as agentTeams — absent it, `recursive_review` still runs and
     // reports `unavailable`, naming that the repair path does not exist rather than
     // pretending the review was a success.
-    const subagentsSeam = ctx.get('subagents') as SubagentsRuntimeLike | undefined
+    const subagentsSeam = subagentsSeamForRuntime
 
     // Packaged skill (dsh plugin standard): register the `recursive-mode` skill
     // into the host skills registry via ctx.skills.registerProvider (the

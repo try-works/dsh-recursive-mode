@@ -496,7 +496,34 @@ export class RecursiveRuntime extends Service {
           maxDepth: remainingDepthFor(this.enforcementConfig.budgets, parentDepthOf(input.parent), input.maxDepth),
           toolFilter: input.toolFilter ?? defaultReviewToolFilter(),
           maxRounds: input.maxRounds ?? 3,
-          awaitRoundResult: input.awaitRoundResult,
+          // T39: the ROUND AWAIT is the hangable part of a delegation — the child may work for
+          // minutes — so it is what the board should be able to see as a running job.
+          //
+          // ⚠ SAFETY BY CONSTRUCTION, which is why this wrapper is safe to add at all: the
+          // seam's contract is `SubagentResultLike | null`, and `delegateContinuable` reads a
+          // null as PARKED. So every non-completed job outcome returns `null` — never a throw
+          // and never an invented result — which means a killed or failed round parks exactly
+          // as an unobserved round does. This wrapper therefore CANNOT convert a parked round
+          // into a settlement, and the property holds without a special case.
+          //
+          // ⚠ MEASURED, and it corrects T39's own plan: `delegateReview` has NO interrupt
+          // seam — its input carries none, and this module has no interrupt path (the audit
+          // loop has one only because IT receives the teams runtime). So the job's cancel
+          // cannot yet pre-empt the child; wiring that needs the seam added here first. The
+          // job still gives the board visibility, and the signal is honoured at the boundary.
+          awaitRoundResult: input.awaitRoundResult === undefined ? undefined : async (childId, messageId) => {
+            const awaited = await runTracked(this.jobs, {
+              kind: 'delegation',
+              label: 'delegation round ' + input.runId + ' ' + input.phase,
+              run: async ({ report, signal }) => {
+                report('awaiting the review round')
+                if (signal.aborted) throw new Error('the round was cancelled before it was awaited')
+                return await input.awaitRoundResult!(childId, messageId)
+              },
+            })
+            if (awaited.status !== 'completed') return null
+            return awaited.value ?? null
+          },
           parent: input.parent,
         })
         if (continuable.parked === true) {

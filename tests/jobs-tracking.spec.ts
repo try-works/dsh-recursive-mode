@@ -354,3 +354,128 @@ describe('T10 — the worktree create runs as a native job', () => {
     }
   })
 })
+
+/**
+ * T39 — the DELEGATION's round await is the hangable part, and it is now a job.
+ *
+ * The property under test is a NEGATIVE one, and it is the whole reason the wrapper is safe
+ * to add: the seam's contract is `SubagentResultLike | null` where a null means PARKED, so
+ * every non-completed job outcome returns `null` rather than throwing or inventing a result.
+ * A PARKED round must therefore park — NOT settle as a failure — and that holds by
+ * construction rather than by a special case.
+ *
+ * ⚠ The pre-emptive kill T39's plan predicted is NOT reachable yet, and this suite does not
+ * pretend otherwise: `delegateReview` has no interrupt seam (measured — its input carries
+ * none and this module has no interrupt path; the audit loop has one only because IT receives
+ * the teams runtime). The job gives the board visibility; pre-emption needs that seam first.
+ */
+describe('T39 — a delegation round shows as a job', () => {
+  const POLICY = {
+    version: 1,
+    role_routes: {
+      'code-reviewer': { enabled: true, mode: 'external-cli', cli: null, model: null, fallback: 'self-audit' },
+    },
+    cli_overrides: {},
+    custom_clis: [],
+  }
+
+  function makeRoot(): string {
+    const root = mkdtempSync(join(tmpdir(), 'rm-t39-'))
+    const runDir = join(root, '.recursive', 'run', 'run-1')
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, '03-implementation-summary.md'), '# Impl\n\nStatus: `DRAFT`\n\n## TODO\n\n- [x] done\n', 'utf8')
+    const cfg = join(root, '.recursive', 'config')
+    mkdirSync(cfg, { recursive: true })
+    writeFileSync(join(cfg, 'recursive-router.json'), JSON.stringify(POLICY), 'utf8')
+    return root
+  }
+
+  /** The continuable lifecycle the round await runs inside. */
+  function fakeSubagents() {
+    return {
+      startContinuable: async (spec: { childId?: string }) => ({ childId: spec.childId ?? 'c1', messageId: 'm1' }),
+      followup: async () => ({ messageId: 'm2' }),
+    } as never
+  }
+
+  function jobRecorder() {
+    const specs: JobSpecLike[] = []
+    const progress: string[] = []
+    const registry: JobsRegistryLike = {
+      start(spec) {
+        specs.push(spec)
+        spec.run({ id: 'delegation-1', append: () => {}, updateProgress: (line) => progress.push(line) })
+        return 'delegation-1'
+      },
+    }
+    return { registry, specs, progress }
+  }
+
+  async function review(root: string, jobs: JobsRegistryLike | undefined, round: () => Promise<unknown>) {
+    const ctx = new Context()
+    const runtime = new RecursiveRuntime(ctx, { repoRoot: root, ...(jobs === undefined ? {} : { jobs }) })
+    const out = await runtime.delegateReview({
+      root,
+      runId: 'run-1',
+      phase: '3',
+      role: 'code-reviewer',
+      delegationId: 'd1',
+      childId: 'c1',
+      artifactPath: join(root, '.recursive', 'run', 'run-1', '03-implementation-summary.md'),
+      upstreamArtifacts: [],
+      auditQuestions: ['does it work?'],
+      requiredOutput: 'verdict',
+      mode: 'continuable',
+      subagents: fakeSubagents(),
+      parent: {},
+      providers: { spawn: { name: 'spawn', capabilities: { outputSchema: true } } },
+      awaitRoundResult: round,
+    } as never)
+    return out as { evaluation?: { accepted?: boolean }; error?: unknown; delegationMode?: string }
+  }
+
+  it('starts a job kinded delegation for the round, with a progress line', async () => {
+    const root = makeRoot()
+    const jobs = jobRecorder()
+    try {
+      await review(root, jobs.registry, async () => ({
+        success: true, stopReason: 'completed', structured: { verdict: 'APPROVE', findings: [], references: [] },
+      }))
+      expect(jobs.specs.length).toBe(1)
+      expect(jobs.specs[0].kind).toBe('delegation')
+      expect(jobs.specs[0].label).toContain('run-1')
+      expect(jobs.progress).toContain('awaiting the review round')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('a PARKED round still parks — it is NOT settled as a failure', async () => {
+    // The safety property: a null from the seam means parked, and the wrapper must not turn
+    // that into a settlement. Asserted through the OUTCOME rather than the internal flag.
+    const root = makeRoot()
+    const jobs = jobRecorder()
+    try {
+      const out = await review(root, jobs.registry, async () => null)
+      expect(out.delegationMode).toBe('continuable')
+      // Parked is not approved...
+      expect(out.evaluation?.accepted).toBe(false)
+      // ...and, crucially, not an ERROR either: parking is an ordinary waiting state.
+      expect(out.error ?? null).toBeNull()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('WITHOUT a registry the round behaves exactly as before', async () => {
+    const root = makeRoot()
+    try {
+      const out = await review(root, undefined, async () => null)
+      expect(out.delegationMode).toBe('continuable')
+      expect(out.evaluation?.accepted).toBe(false)
+      expect(out.error ?? null).toBeNull()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})

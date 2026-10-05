@@ -868,3 +868,48 @@ export function evaluateDelegationResult(result: SubagentResultLike): { accepted
   }
   return { accepted: true, reason: 'delegation completed' }
 }
+
+/**
+ * T8 — the child's CLAIMED references, read from wherever the delegation put them.
+ *
+ * The review output schema requires `references`, so a reviewer states which files back its
+ * verdict — and NOTHING read that field: `evaluateDelegationResult` looks only at
+ * `success`/`stopReason`, so a review citing files that do not exist was indistinguishable
+ * from one citing real evidence. This reads the claims so they can be checked.
+ *
+ * Both carriers are tried, because a delegation may return structured output or the raw
+ * JSON text: `structured` first (the native path), then `output` parsed as JSON. A result
+ * that carries neither yields `[]` — "no claims" — which the caller treats as NOTHING TO
+ * CHECK rather than as a pass, so an unparseable result can never be mistaken for a
+ * verified one. Malformed entries are dropped rather than thrown on: this reads a model's
+ * output, which is untrusted.
+ */
+export function referencesFromResult(result: SubagentResultLike): Reference[] {
+  const candidates: unknown[] = []
+  if (result.structured !== undefined && result.structured !== null && typeof result.structured === 'object') {
+    candidates.push((result.structured as { references?: unknown }).references)
+  }
+  if (typeof result.output === 'string' && result.output.trim() !== '') {
+    try {
+      const parsed = JSON.parse(result.output) as { references?: unknown } | null
+      if (parsed !== null && typeof parsed === 'object') candidates.push(parsed.references)
+    } catch {
+      // Not JSON: no structured claims to read. Never a failure of the delegation itself.
+    }
+  }
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue
+    const refs: Reference[] = []
+    for (const entry of candidate) {
+      if (entry === null || typeof entry !== 'object') continue
+      const path = (entry as { path?: unknown }).path
+      if (typeof path !== 'string' || path.trim() === '') continue
+      const reference: Reference = { path }
+      const lineRange = (entry as { lineRange?: unknown }).lineRange
+      if (typeof lineRange === 'string') reference.lineRange = lineRange
+      refs.push(reference)
+    }
+    if (refs.length > 0) return refs
+  }
+  return []
+}

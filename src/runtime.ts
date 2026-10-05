@@ -27,7 +27,7 @@ import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
 import { createHandoff, createChildBrief, replyPath, childScratchPath, buildDelegationPrompt, type HandoffInput, type ChildBriefInput } from './handoff.ts'
 import { loadRouterPolicy, routerPolicyPath, resolveRole, capabilityProbe, delegationDecisionBasis, type RouterPolicy, type RouterPolicyOverrides, type SubagentProviderLike, type RouteDecision, type CapabilityProbe } from './router.ts'
-import { delegate, delegateContinuable, remainingDepthFor, validateReferences, writeActionRecord, evaluateDelegationResult, reviewOutputSchema, defaultReviewToolFilter, type SubagentsRuntimeLike, type SubagentStartRequestLike, type SubagentResultLike, type Reference, type ActionRecordInput, type ContinuableDelegationLike, type SubagentParentHandle } from './delegation.ts'
+import { delegate, delegateContinuable, remainingDepthFor, validateReferences, referencesFromResult, writeActionRecord, evaluateDelegationResult, reviewOutputSchema, defaultReviewToolFilter, type SubagentsRuntimeLike, type SubagentStartRequestLike, type SubagentResultLike, type Reference, type ActionRecordInput, type ContinuableDelegationLike, type SubagentParentHandle } from './delegation.ts'
 import { validateTransition, coupleGateBlockToGoal, type PhaseTransitionIntent, type RecursivePhaseState, type GateCheckResult } from './lifecycle.ts'
 import { resolveEnforcementConfig, DEFAULT_ENFORCEMENT, evaluateToolGuard, detectTamper, type EnforcementConfig, type ToolGuardDecision, type ToolExecLike } from './enforcement.ts'
 import type { Session } from '@deepseek-ai/dsh-session'
@@ -524,7 +524,27 @@ export class RecursiveRuntime extends Service {
       error = 'delegation resolved to ' + decision.tier + ' (' + decision.reason + ')'
     }
 
-    const evaluation = result ? evaluateDelegationResult(result) : { accepted: false, reason: error ?? 'no result' }
+    const rawEvaluation = result ? evaluateDelegationResult(result) : { accepted: false, reason: error ?? 'no result' }
+
+    // T8 — THE WIRING BUG THE ITEM'S RESCOPE NAMED. `validateReferences` existed, was
+    // exported, was even reachable through this runtime — and was called by NOTHING on the
+    // delegate path. The module header had always claimed the opposite ("validates the
+    // child's references before writing an action record"), so a reviewer could cite files
+    // that do not exist, or paths that escape the root, and the review was recorded as a
+    // PASS. A claim nobody checks is worse than no claim, because it reads as evidence.
+    //
+    // Placed BEFORE the operation record and the action record, which is what makes it
+    // matter: a review with unverifiable references is never indexed as `accepted`, so the
+    // T19 repeat guard treats it as retryable instead of freezing a bad review in place.
+    //
+    // A delegation that claims NOTHING is not checked — refusing an empty list would be a
+    // policy change (is a reference-free review invalid?) rather than a wiring fix, and it
+    // is recorded here as a deliberate boundary rather than an oversight.
+    const claims = result ? referencesFromResult(result) : []
+    const referenceCheck = claims.length === 0 ? null : validateReferences(input.root, claims)
+    const evaluation = referenceCheck === null || referenceCheck.ok
+      ? rawEvaluation
+      : { accepted: false, reason: 'review references failed: ' + referenceCheck.failures.join('; ') }
 
     // T19 — persist the attempt so a RESTART can match it. Only an accepted review is
     // recorded as `accepted`, which is what makes the recognition above block a

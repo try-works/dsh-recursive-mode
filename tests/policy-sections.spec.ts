@@ -11,9 +11,11 @@
  * caching**, and the digest is a **local identifier** — never a cache directive.
  */
 import { describe, it, expect } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { RecursiveRuntime } from '../src/runtime.ts'
 import { renderStableContract, renderPhaseTail, contractDigest, renderRecursivePolicy } from '../src/policy.ts'
 import { DEFAULT_ENFORCEMENT } from '../src/enforcement.ts'
 
@@ -142,5 +144,21 @@ describe('T22 — the rendered section begins with the stable contract', () => {
     expect(rendered).toContain('recursive_phase')
     expect(rendered).toContain('required sections')
     expect(rendered).toContain('Current phase:')
+  })
+
+  it('exposes the SAME digest through the status, so prompt and status can be compared', async () => {
+    // The point of surfacing it: "did the contract change under me?" is answerable without
+    // re-rendering the section, by comparing what the prompt carried with what the status reports.
+    const root = mkdtempSync(join(tmpdir(), 'rm-t22s-'))
+    const ctx = new Context()
+    try {
+      const runtime = new RecursiveRuntime(ctx, { repoRoot: root })
+      await runtime.initRun('r1')
+      const status = await runtime.status('r1') as { contractDigest?: string }
+      expect(status.contractDigest).toBe(contractDigest())
+      expect(status.contractDigest).toMatch(/^[0-9a-f]{16}$/)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

@@ -29,6 +29,7 @@ import { closeoutPhase } from './closeout.ts'
 import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './scratch.ts'
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
 import { readMemoryEntries, retrieveMemory, renderMemorySection } from './memory.ts'
+import { contractDigest } from './policy.ts'
 import type { WorkflowEngineLike } from './workflow-audit.ts'
 import { createHandoff, createChildBrief, replyPath, childScratchPath, buildDelegationPrompt, type HandoffInput, type ChildBriefInput } from './handoff.ts'
 import { loadRouterPolicy, routerPolicyPath, resolveRole, capabilityProbe, delegationDecisionBasis, type RouterPolicy, type RouterPolicyOverrides, type SubagentProviderLike, type RouteDecision, type CapabilityProbe } from './router.ts'
@@ -88,6 +89,15 @@ export type RecursiveStatusWithGuardDecisions = RecursiveStatusResult & {
    * than merely detectable in a test.
    */
   receiptChain?: ReceiptChainResult
+  /**
+   * T22: the local identifier of the policy section's STABLE prefix.
+   *
+   * Surfaced so "did the contract change under me?" is answerable from the status alone — the same
+   * digest the prompt carries, so a reader can compare them without re-rendering anything. It is an
+   * IDENTIFIER, not a cache directive: whether any provider caches the prefix is provider-side and
+   * unverified, which is why the item's "largest cost lever" label was withdrawn.
+   */
+  contractDigest?: string
 }
 
 /** How many recent decisions to read from the log before scoping to one run. */
@@ -888,6 +898,9 @@ export class RecursiveRuntime extends Service {
       guardDecisions,
       pendingWork: pendingWork(resolved.runDir),
       receiptChain: validateReceiptChain(resolved.runDir, resolved.runId),
+      // T22: the same identifier the prompt's stable prefix carries, so a reader can compare status
+      // against prompt without re-rendering the section.
+      contractDigest: contractDigest(this.enforcementConfig),
     }
   }
 

@@ -256,3 +256,94 @@ describe('delegation.ts — T4 continuable delegation', () => {
     expect(readRepairFromStructured({ structured: {} })).toContain('REVISE')
   })
 })
+
+/**
+ * T36 — the loop is RESUMABLE across turns.
+ *
+ * There is no parent-side await-settlement promise, so a round that has not settled
+ * yet must be reported rather than waited on. That makes two behaviours load-bearing:
+ * an unsettled round PARKS (preserving the child id, never accepting), and a later
+ * turn RESUMES that same child instead of starting a second one. Without resume, a
+ * turn-shaped caller would orphan the child already doing the work.
+ *
+ * Note the contrast with the pinned test above: `readVerdictFromStructured` returns
+ * APPROVE for a result with no verdict, which is fine where the caller re-evaluates.
+ * A review round reads its verdict from `reply.md` through the FAIL-CLOSED reader in
+ * `tests/reply-verdict.spec.ts` instead, so prose is never an approval.
+ */
+describe('delegation.ts — T36 turn-shaped continuation', () => {
+  const PARENT = { id: 'parent-1' } as SubagentParentHandle
+
+  it('an unsettled round PARKS: child id preserved, nothing accepted', async () => {
+    // An empty script means the observer has no settlement to report.
+    const fake = fakeContinuableRuntime([])
+    const result = await delegateContinuable({
+      subagents: fake.runtime,
+      provider: 'spawn',
+      label: 'delegation-1',
+      prompt: 'review it',
+      parent: PARENT,
+      awaitRoundResult: fake.awaitRoundResult,
+    })
+    expect(result.parked).toBe(true)
+    expect(result.accepted).toBe(false)
+    expect(result.childId).toBe('child-1')
+    expect(result.reason).toContain('still working')
+  })
+
+  it('RESUMING observes the existing child and NEVER starts another', async () => {
+    const fake = fakeContinuableRuntime([{ verdict: 'APPROVE' }])
+    const result = await delegateContinuable({
+      subagents: fake.runtime,
+      provider: 'spawn',
+      label: 'delegation-1',
+      prompt: 'review it',
+      parent: PARENT,
+      awaitRoundResult: fake.awaitRoundResult,
+      resumeChild: 'child-1',
+    })
+    expect(fake.calls.filter(c => c.startsWith('startContinuable'))).toHaveLength(0)
+    expect(fake.calls).not.toContain('start')
+    expect(result.childId).toBe('child-1')
+    expect(result.accepted).toBe(true)
+    expect(result.parked).toBeUndefined()
+  })
+
+  it('a RESUMED round that REVISEs followups the SAME child', async () => {
+    const fake = fakeContinuableRuntime([{ verdict: 'REVISE' }, { verdict: 'APPROVE' }])
+    const result = await delegateContinuable({
+      subagents: fake.runtime,
+      provider: 'spawn',
+      label: 'delegation-1',
+      prompt: 'review it',
+      parent: PARENT,
+      awaitRoundResult: fake.awaitRoundResult,
+      resumeChild: 'child-1',
+    })
+    expect(fake.calls.filter(c => c.startsWith('startContinuable'))).toHaveLength(0)
+    // The repair went to the SAME durable child, which is the whole point.
+    expect(fake.calls.some(c => c.startsWith('followup:child-1:'))).toBe(true)
+    expect(result.accepted).toBe(true)
+  })
+
+  it('park then resume is the cross-turn shape: the second call finishes the round', async () => {
+    // Turn 1: nothing settled.
+    const turn1 = fakeContinuableRuntime([])
+    const parked = await delegateContinuable({
+      subagents: turn1.runtime, provider: 'spawn', label: 'd1', prompt: 'review it',
+      parent: PARENT, awaitRoundResult: turn1.awaitRoundResult,
+    })
+    expect(parked.parked).toBe(true)
+
+    // Turn 2: the caller passes the child it was given, and the verdict is there.
+    const turn2 = fakeContinuableRuntime([{ verdict: 'APPROVE' }])
+    const finished = await delegateContinuable({
+      subagents: turn2.runtime, provider: 'spawn', label: 'd1', prompt: 'review it',
+      parent: PARENT, awaitRoundResult: turn2.awaitRoundResult,
+      resumeChild: parked.childId!,
+    })
+    expect(finished.accepted).toBe(true)
+    expect(finished.childId).toBe(parked.childId)
+    expect(turn2.calls.filter(c => c.startsWith('startContinuable'))).toHaveLength(0)
+  })
+})

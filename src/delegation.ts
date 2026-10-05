@@ -235,6 +235,13 @@ export interface ContinuableDelegationLike {
   accepted: boolean
   /** True when the fallback one-shot `delegate()` was used (no continuable seam). */
   fellBackToOneShot?: boolean
+  /**
+   * True when the round ended because NO settlement has landed yet — the caller's
+   * signal to resume on a later turn with the SAME `childId`, not a failure. The
+   * harness offers no parent-side await-settlement promise, so this is the honest
+   * report of "the child is still working".
+   */
+  parked?: boolean
 }
 
 /** Verdict vocabulary shared by T3/T4 (matches the delegated review schema). */
@@ -263,6 +270,123 @@ export function readRepairFromStructured(result: SubagentResultLike): string {
   return 'REVISE: address the review findings and re-submit.'
 }
 
+/** What a delegated child's `reply.md` said, as far as the plugin can tell. */
+export interface ReplyVerdict {
+  /** The verdict the reply STATES, or null when it states none. */
+  verdict: DelegationVerdict | null
+  /** Finding titles, when the reply carried review-schema JSON. */
+  findings: string[]
+  /** Why no verdict was read, for the repair instruction. Null when one was. */
+  problem: string | null
+}
+
+/**
+ * Read a verdict out of a child's `reply.md`, FAILING CLOSED.
+ *
+ * WHY THIS EXISTS RATHER THAN `readVerdictFromStructured`. The settlement's closing
+ * text is free-form — a child may report prose, a fenced JSON block, or a bare
+ * field line — and the structured reader's fallback for "no verdict" is
+ * `APPROVE`. That default is defensible where the caller re-evaluates the result,
+ * but it is the wrong default for a REVIEW ROUND: a child that answered with prose,
+ * or answered the wrong question, or wrote nothing parseable, must never be read as
+ * having approved the work. Verification that fails open is not verification.
+ *
+ * So this reader accepts exactly three things — review-schema JSON (fenced or
+ * bare), or an explicit `Verdict:` field — and reports `verdict: null` plus a
+ * `problem` for anything else. The caller turns that into a REVISE with a repair
+ * instruction that says what was wrong, so an unreadable reply costs a round rather
+ * than a false approval.
+ */
+export function parseReplyVerdict(replyText: string): ReplyVerdict {
+  const text = replyText ?? ''
+  if (text.trim() === '') {
+    return { verdict: null, findings: [], problem: 'the reply is empty' }
+  }
+
+  const candidates: string[] = []
+  // A fenced block first: a child that wraps its JSON is being explicit about it.
+  for (const match of text.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)) {
+    if (match[1] !== undefined) candidates.push(match[1])
+  }
+  // Then a bare object, so an unfenced submission still reads.
+  const bare = text.match(/\{[\s\S]*\}/)
+  if (bare?.[0] !== undefined) candidates.push(bare[0])
+
+  for (const candidate of candidates) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(candidate)
+    } catch {
+      continue
+    }
+    const record = typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : null
+    const raw = record?.verdict
+    const verdict = normaliseVerdict(raw)
+    if (verdict !== null) {
+      const findings = Array.isArray(record?.findings)
+        ? record.findings
+          .map((f) => (typeof f === 'object' && f !== null ? (f as { title?: unknown }).title : undefined))
+          .filter((t): t is string => typeof t === 'string' && t !== '')
+        : []
+      return { verdict, findings, problem: null }
+    }
+    return { verdict: null, findings: [], problem: 'the reply carries JSON but no usable "verdict" field' }
+  }
+
+  // A plain field line, which is how a child that ignores the schema tends to answer.
+  // The decoration class around the value allows the asterisks, backticks and
+  // underscores a child may wrap it in — including a backtick INSIDE bold, as in
+  // `**Verdict:** \`REVISE\``, which is the shape that first broke this reader.
+  const field = text.match(/^[ \t>*_`-]*verdict[ \t]*[:=][ \t>*_`-]*([A-Za-z]+)/im)
+  const fieldVerdict = normaliseVerdict(field?.[1])
+  if (fieldVerdict !== null) return { verdict: fieldVerdict, findings: [], problem: null }
+
+  return {
+    verdict: null,
+    findings: [],
+    problem: field?.[1] !== undefined
+      ? 'the reply states a verdict of "' + field[1] + '", which is not one of APPROVE, REVISE or REJECT'
+      : 'the reply states no verdict',
+  }
+}
+
+/** Accept the verdict vocabulary case-insensitively; reject everything else. */
+function normaliseVerdict(raw: unknown): DelegationVerdict | null {
+  if (typeof raw !== 'string') return null
+  const upper = raw.trim().toUpperCase()
+  if (upper === 'APPROVE' || upper === 'REVISE' || upper === 'REJECT') return upper
+  return null
+}
+
+/**
+ * The verdict for one round, from the child's reply text, FAILING CLOSED: an
+ * unreadable reply becomes `REVISE`, never `APPROVE`.
+ */
+export function readVerdictFromReply(replyText: string): DelegationVerdict {
+  const parsed = parseReplyVerdict(replyText)
+  if (parsed.verdict !== null) return parsed.verdict
+  return 'REVISE'
+}
+
+/**
+ * The repair instruction for a round whose reply did not approve.
+ *
+ * Findings drive it when the reply carried them (and are the ONLY source of
+ * instruction text — a child cannot inject instructions, since only the titles
+ * travel). When there is nothing to quote, the instruction states the contract
+ * violation instead of asking vaguely for "improvement", because a repair request
+ * that does not say what was wrong cannot be acted on.
+ */
+export function readRepairFromReply(replyText: string): string {
+  const parsed = parseReplyVerdict(replyText)
+  if (parsed.findings.length > 0) return 'Address the findings: ' + parsed.findings.join('; ')
+  if (parsed.problem !== null) {
+    return 'Your reply.md could not be read as a review: ' + parsed.problem + '. Re-submit with the required '
+      + 'JSON contract (verdict APPROVE | REVISE | REJECT, plus findings) written to reply.md.'
+  }
+  return 'REVISE: address the review findings and re-submit.'
+}
+
 /**
  * Run a multi-round delegated task on ONE durable continuable child:
  * 1. `startContinuable` (initial prompt) — `start()` is never called.
@@ -284,6 +408,13 @@ export async function delegateContinuable(input: {
   toolFilter?: unknown
   maxDepth?: number
   childId?: ContinuableChildId
+  /**
+   * T36: RESUME an existing durable child instead of starting one. The turn-shaped
+   * caller passes the childId from a previous `parked` round, which is what makes
+   * the loop resumable across turns — `startContinuable` is not called, so a parked
+   * round does not create a second child.
+   */
+  resumeChild?: ContinuableChildId
   maxRounds?: number
   readVerdict?: (result: SubagentResultLike) => DelegationVerdict
   readRepair?: (result: SubagentResultLike) => string | undefined
@@ -345,16 +476,40 @@ export async function delegateContinuable(input: {
   }
   if (input.childId !== undefined) spec.childId = input.childId
   try {
-    const started = await startContinuable(spec)
-    childId = started.childId
-    messageIds.push(started.messageId)
-    rounds.push({ text: prompt })
+    if (input.resumeChild !== undefined) {
+      // T36: RESUME. The initial prompt went out in an earlier turn, so this round
+      // has no message id of its own — and the observer keys on the CHILD anyway,
+      // because the settlement log is child-keyed. Starting a second child here
+      // would orphan the one already doing the work.
+      childId = input.resumeChild
+      rounds.push({ text: prompt })
+    } else {
+      const started = await startContinuable(spec)
+      childId = started.childId
+      messageIds.push(started.messageId)
+      rounds.push({ text: prompt })
+    }
 
     for (let round = 0; round < maxRounds; round += 1) {
       const current = rounds[round]
-      const observed = await input.awaitRoundResult!(childId, messageIds[messageIds.length - 1])
+      const lastMessageId = messageIds.length > 0
+        ? messageIds[messageIds.length - 1]!
+        : ('' as ContinuableMessageId)
+      const observed = await input.awaitRoundResult!(childId, lastMessageId)
       if (observed === null) {
-        return { ok: false, reason: 'continuable child produced no settlement for round ' + (round + 1), childId, messageIds, rounds, accepted: false }
+        // NOT a failure: nothing has settled yet. Reported as `parked` so a
+        // turn-shaped caller resumes on a later turn instead of treating the round
+        // as lost, and so `accepted` stays false — an unobserved round is never an
+        // approval.
+        return {
+          ok: false,
+          reason: 'no settlement has landed for round ' + (round + 1) + ' yet (the child is still working)',
+          childId,
+          messageIds,
+          rounds,
+          accepted: false,
+          parked: true,
+        }
       }
       current.result = observed
       const verdict = readVerdict(observed)

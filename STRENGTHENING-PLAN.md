@@ -375,7 +375,7 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 - **Acceptance:** no tool result is unbounded; every refusal says what to do next in a greppable form.
 - **Evidence:** audit 1 §Result caps and §Error codes.
 
-### T25 — Executable documentation tests · **backlog — cheapest high-value item**
+### T25 — Executable documentation tests · **done**
 
 - **Why:** the harness enforces documentation with a test that **fails the build** if a shipped prompt names a removed id or a worker the agent is meant to discover — and it exists because *the removal originally missed all eight provider identity prompts; agents kept reaching for `react` because they were still being told to*. This repo has golden lint fixtures but nothing guarding its prose, and both audits found real drift in both codebases as a result.
 - **The concrete bug this would catch today:** `writeActionRecord` emits `# Subagent action record: <id>` while `ts-lint.ts` requires the literal `# Subagent Action Record` plus `Run ID` and `Timestamp` in `## Metadata` and `Diff Basis` under `## Inputs Provided` — and every top-level `.md` under `subagents/` is linted as an action record. **Plugin-generated action records currently fail the repo's own lint contract.**
@@ -388,6 +388,20 @@ Moved from `deviated` to **settled**. `fs/write-intent`/`fs/edit-intent` are sin
 - **GREEN:** fix `writeActionRecord` to the linter's contract; fix or remove dead references.
 - **Acceptance:** the suite fails if prose and code drift apart in any of those four ways.
 - **Evidence:** audit 1 §Documentation architecture; audit 2 §8.1 for the same class of drift in iii.
+
+- **RESULT — done, and the headline finding is a CORRECTION to the review.** `tests/docs-contract.spec.ts` (15 tests, 4 blocks) now fails the build on four classes of prose/code drift. The item's premise — that `writeActionRecord`'s output fails the repo's own linter — was verified **by execution** rather than by the static reading the review used, and the count is **SEVEN violations, not the five** the handoff's §6.1 table claims. The full set, replaying the pre-fix writer byte-for-byte out of git and running the real `lintSubagentActionRecordFile`/`lintRun` over its real output:
+  1. `Missing title: # Subagent Action Record` (the case mismatch — the table's row 1)
+  2. `Metadata is missing Run ID` (row 2)
+  3. `Metadata is missing Timestamp` (row 3)
+  4. `Inputs Provided is missing Current Artifact` (row 4)
+  5. `Inputs Provided is missing Diff Basis` (row 5)
+  6. `Inputs Provided must cite upstream artifacts or the review bundle used for delegation` — **not in the table.** It is the composite of two defects: `Review Bundle` is read from `## Inputs Provided` but was emitted under `## Metadata`, and `Upstream Artifacts` was emitted as bare bullets where `extractPathsFromNamedField` needs a NAMED field, so the extracted set was empty.
+  7. `Missing or empty section: ## Verification Handoff` — **not in the table, and not a writer error at all.** It is the `\Z` anchor bug, now tracked as **T33**.
+  - **Two further corrections to the table's reasoning.** (a) The table's row 4 pairs `Current Artifact` with `Artifact Content Hash`; the hash check is *gated behind* `Current Artifact` resolving (`ts-lint.ts:1309`), so a missing hash is real but **invisible** until the placement is fixed. (b) The handoff justified the two placement failures by claiming `getMdFieldValue` "scans the whole document, not the section it was handed" — **that is wrong**: `getHeadingBody` terminates at the next `##` via lookahead, so the linter is properly section-scoped. The failures are real for the simpler reason that the field is under the wrong heading. **The shipped canonical template agrees with the linter, not with the old writer** (`references/artifact-template.md` lists `Diff Basis` as an INPUTS field), so the fix matches the template as well as the lint.
+  - **What shipped:** the writer now emits the canonical H1, `Run ID` + `Timestamp` in Metadata, and `Current Artifact` / `Artifact Content Hash` (LF-normalized sha256 derived from `artifactPath` via the existing `contentSha256` — **no new caller input was needed, so no call site changed**) / `Diff Basis` / `Review Bundle` / NAMED `Upstream Artifacts` + `Code Refs` inside `## Inputs Provided`. `package.json`'s description now states the real tool count and names all nine, asserted bidirectionally against the counted `createRecursive*Tool` registration sites so a tenth tool breaks the spec instead of rotting. `PROPOSAL.md`'s `scripts/test-recursive-mode-smoke.py` → `.ts` (the one genuine class-1 drift; the assertion was left alone).
+  - **The T33 hole is PINNED, not hidden:** the `reviewedFiles`-only case is asserted with vitest's `it.fails`, so it passes while the limitation exists and will fail the moment T33 fixes the linter.
+  - **Two things deliberately NOT done, with reasons:** `src/runtime.ts:362` still passes no file claims, so enforced-path records fail the DATA-ABSENCE checks (no artifact path / no created-modified-reviewed) — fabricating claims to satisfy a linter would be dishonest, and that gap is recorded rather than papered over; and `src/ts-lint.ts` was not touched (T33 owns it).
+  - **Audit:** the orchestrator re-ran everything independently — `pnpm typecheck` exit 0, **`pnpm test` 48 files / 308 tests green** (`evidence/logs/green/T25-audit-full-suite.txt`), the four drift classes confirmed present as tests, and `(d)` verified as a *narrowing* (verbs read only from real advertised surfaces — the preset description, `commands.ts`'s `input.hint`, and `/recursive <verb>` inside code spans) rather than a deletion, so the English word "command" after `/recursive` no longer counts as an advertised verb.
 
 ### T26 — `recursive_preview`: a read-only view of what will happen · **backlog**
 
@@ -556,7 +570,7 @@ Sprint 0 — rebase onto the pinned baseline
 Sprint 1 — make enforcement real (no new infrastructure)
 [x] T15 repair the enforcement path — runId, validateTransition, detectTamper, decision log  ← DONE (audited: 10/10 contract, 47 files/293 tests)
 [ ] T16 declarative ordered tool policy (ask as the no-match default)
-[ ] T25 executable documentation tests (catches the action-record mismatch today)
+[x] T25 executable documentation tests (catches the action-record mismatch today)  ← DONE (7 violations, not 5)
 [ ] T33 lint section parsers: `\Z` is a literal Z in JS — the final section is unreadable, so a read-only review record cannot satisfy the linter
 [ ] T24 result caps, elision markers, stable error codes
 
@@ -633,7 +647,7 @@ Evidence paths marked `(planned)` do **not** exist yet — they are the spec tha
 | T22 | stable prompt prefix + digest | strict/pragmatic | backlog | (planned) `tests/policy-sections.spec.ts` | (planned) same | **largest cost lever**; fully compatible with zero-emission |
 | T23 | `recursive_ask` | strict | backlog | (planned) `tests/recursive-ask.spec.ts` | (planned) same | three human gates render as cards |
 | T24 | result caps + error codes | strict | backlog | (planned) `tests/result-caps.spec.ts` | (planned) same | self-describing elision; stable greppable codes with a `Next:` clause |
-| T25 | executable documentation tests | strict | backlog | (planned) `tests/docs-contract.spec.ts` | (planned) same | **would fail today** on the action-record contract mismatch |
+| T25 | executable documentation tests | strict | **done** | `tests/docs-contract.spec.ts` (15) | full suite 48 files/308 tests + typecheck 0 | **The execution proof found SEVEN writer violations, not the review's five** — rows 1-5 confirmed, plus a composite `Review Bundle`/`Upstream Artifacts` defect and the T33 `\Z` false positive. `(a)`'s criterion had to be scoped to class 1 (the plan's own 40 planned deliverables must not be required to exist). The `reviewedFiles`-only hole is pinned with `it.fails` |
 | T26 | `recursive_preview` | strict | backlog | (planned) `tests/preview.spec.ts` | (planned) same | read-only; states what it cannot compute |
 | T27 | hook registry | strict | backlog | (planned) `tests/hook-registry.spec.ts` | (planned) same | note: `tests/hooks.spec.ts` already exists for DSH hooks — use a distinct name |
 | T28 | budgets | strict | backlog | (planned) `tests/budgets.spec.ts` | (planned) same | a child narrows, never widens |

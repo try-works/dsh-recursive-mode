@@ -1,0 +1,53 @@
+npm warn Unknown env config "manage-package-manager-versions". This will stop working in the next major version of npm.
+record-level linter issues: 2
+   - Claimed File Impact must cite at least one created, modified, reviewed, or relevant untouched file
+   - Inputs Provided code refs do not exist: src/delegation.ts
+Linting run: audit-run
+Path: E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run
+Workflow Profile: legacy
+
+[FAIL] E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\00-requirements.md: Missing required header field(s): Run, Phase, Status, Inputs, Outputs, Scope note
+Remediation (copy/paste):
+  Run: `/.recursive/run/<run-id>/`
+  Phase: `<phase name>`
+  Status: `DRAFT`
+  Inputs:
+  - `<path>`
+  Outputs:
+  - `<path>`
+  Scope note: <one sentence describing what this artifact decides/enables>.
+
+[WARN] Missing artifact (ok if not reached yet): E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\00-worktree.md
+[WARN] Missing artifact (ok if not reached yet): E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\01-as-is.md
+[WARN] Missing artifact (ok if not reached yet): E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\01.5-root-cause.md
+[WARN] Missing artifact (ok if not reached yet): E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\02-to-be-plan.md
+[WARN] Missing artifact (ok if not reached yet): E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\03-implementation-summary.md
+[WARN] Missing artifact (ok if not reached yet): E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\03.5-code-review.md
+[WARN] Missing artifact (ok if not reached yet): E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\04-test-summary.md
+[WARN] Missing artifact (ok if not reached yet): E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\05-manual-qa.md
+[WARN] Missing artifact (ok if not reached yet): E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\06-decisions-update.md
+[WARN] Missing artifact (ok if not reached yet): E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\07-state-update.md
+[WARN] Missing artifact (ok if not reached yet): E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\08-memory-impact.md
+[FAIL] E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\subagents\1791159757115-audit-probe-action.md: Claimed File Impact must cite at least one created, modified, reviewed, or relevant untouched file
+
+[FAIL] E:\tmp\rm-audit-t25-evPORf\.recursive\run\audit-run\subagents\1791159757115-audit-probe-action.md: Inputs Provided code refs do not exist: src/delegation.ts
+
+----
+
+Summary
+- FAIL: 3
+- WARN: 11
+
+[FAIL] Lint failed
+D:\DEV\dsh-recursive-mode\.recursive\run\probe-t25.ts:33
+const runIssues = lintRun(root, runId).filter((l: string) => l.includes('subagents'))
+                                       ^
+
+TypeError: lintRun(...).filter is not a function
+    at <anonymous> (D:\DEV\dsh-recursive-mode\.recursive\run\probe-t25.ts:33:40)
+    at ModuleJob.run (node:internal/modules/esm/module_job:377:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:691:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.11.0
+

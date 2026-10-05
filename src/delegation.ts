@@ -563,9 +563,18 @@ function slugify(value: string): string {
 }
 
 /**
- * Write a durable action record under subagents/ with the canonical sections
- * (matches recursive-subagent-action.py). A success:false attempt is written
- * with a failed status and is NOT accepted.
+ * Write a durable action record under subagents/ in the shape this repo's own
+ * linter accepts (ts-lint.ts lintSubagentActionRecordFile — every top-level .md
+ * under a run's subagents/ is linted as one):
+ *   - the literal title `# Subagent Action Record`;
+ *   - `Run ID` and `Timestamp` in ## Metadata (Run ID must equal the run dir name);
+ *   - `Current Artifact`, `Artifact Content Hash` (the artifact's LF-normalized
+ *     sha256, derived from the artifact itself — no extra caller input), `Diff
+ *     Basis`, `Review Bundle`, and the NAMED fields `Upstream Artifacts` /
+ *     `Code Refs` strictly inside ## Inputs Provided. The linter resolves each of
+ *     those through the heading body, so a field under another heading is not
+ *     found at all.
+ * A success:false attempt is written with a failed status and is NOT accepted.
  */
 export function writeActionRecord(input: ActionRecordInput): string {
   const { root, runId } = input
@@ -574,34 +583,63 @@ export function writeActionRecord(input: ActionRecordInput): string {
   const fileName = Date.now() + '-' + slugify(input.subagentId) + '-action.md'
   const path = join(dir, fileName)
 
+  const tick = String.fromCharCode(96)
+  const code = (value: string) => tick + norm(value) + tick
+
   const list = (title: string, values: string[]) => {
     const out: string[] = [title]
     if (!values?.length) {
       out.push('- none')
       return out
     }
-    for (const v of values) out.push('- ' + String.fromCharCode(96) + norm(v) + String.fromCharCode(96))
+    for (const v of values) out.push('- ' + code(v))
     return out
   }
 
+  /** A NAMED field whose value is a block of backticked paths (`Field: none` when empty). */
+  const namedList = (fieldName: string, values: string[]): string[] =>
+    values.length
+      ? ['- ' + fieldName + ':', ...values.map((v) => '  - ' + code(v))]
+      : ['- ' + fieldName + ': none']
+
+  const artifactRel = input.artifactPath ? norm(input.artifactPath) : ''
+  let artifactHash = ''
+  if (artifactRel) {
+    try {
+      const artifactAbs = resolveUnderRoot(root, artifactRel)
+      if (existsSync(artifactAbs)) artifactHash = contentSha256(readFileSync(artifactAbs, 'utf8'))
+    } catch {
+      artifactHash = ''
+    }
+  }
+
   const lines: string[] = [
-    '# Subagent action record: ' + input.subagentId,
+    // The canonical template (references/artifact-template.md) H1 and the string the
+    // linter looks for — the subagent identity belongs in Metadata, not the title.
+    '# Subagent Action Record',
     '',
     '## Metadata',
     '- Subagent ID: ' + input.subagentId,
+    '- Run ID: ' + runId,
     '- Phase: ' + input.phase,
     '- Purpose: ' + input.purpose,
     '- Execution Mode: ' + input.executionMode,
     '- Status: ' + (input.success ? 'accepted' : 'failed'),
     '- Stop Reason: ' + (input.stopReason ?? 'n/a'),
-    ...(input.artifactPath ? ['- Current Artifact: ' + String.fromCharCode(96) + norm(input.artifactPath) + String.fromCharCode(96)] : []),
-    ...(input.reviewBundle ? ['- Review Bundle: ' + String.fromCharCode(96) + norm(input.reviewBundle) + String.fromCharCode(96)] : []),
+    // Timestamp goes LAST in Metadata: the linter's section parser (getHeadingBody)
+    // has no end-of-input anchor in JS — its `\Z` is a literal `Z` — so a heading
+    // body is truncated at its first `Z`. Keeping the ISO timestamp last means that
+    // truncation can never hide a required field.
+    '- Timestamp: ' + new Date().toISOString(),
     '',
     '## Inputs Provided',
-    ...list('', input.upstreamArtifacts ?? []).slice(1),
-    '',
-    '## Routing',
-    ...(input.diffBasis ? ['- Diff Basis: ' + input.diffBasis] : ['- Diff Basis: n/a']),
+    ...(artifactRel ? ['- Current Artifact: ' + code(artifactRel)] : []),
+    ...(artifactHash ? ['- Artifact Content Hash: ' + code(artifactHash)] : []),
+    '- Diff Basis: ' + (input.diffBasis ?? 'n/a'),
+    ...namedList('Upstream Artifacts', input.upstreamArtifacts ?? []),
+    ...(input.reviewBundle ? ['- Review Bundle: ' + code(norm(input.reviewBundle))] : []),
+    ...namedList('Code Refs', input.codeRefs ?? []),
+    '- Audit / Task Questions: ' + (input.auditQuestions?.length ? input.auditQuestions.join(' ') : 'n/a'),
     '',
     '## Claimed Actions Taken',
     ...list('', input.actionsTaken ?? []).slice(1),
@@ -618,8 +656,16 @@ export function writeActionRecord(input: ActionRecordInput): string {
     ...(input.findings?.length ? input.findings.map((f) => '- ' + f) : ['- none']),
     '',
     '## Verification Handoff',
-    '- Inspect first: ' + (input.artifactPath ? String.fromCharCode(96) + norm(input.artifactPath) + String.fromCharCode(96) : 'n/a'),
+    '- Inspect first: ' + (artifactRel ? code(artifactRel) : 'n/a'),
     '- Notes: main agent must verify every claimed reference against actual files, actual recursive artifacts, and the actual diff before acceptance.',
+    '',
+    // This trailing section is LOAD-BEARING, do not delete: the linter's section
+    // parser has no end-of-input anchor in JS, so a document's FINAL section reads
+    // as empty and `## Verification Handoff` would always be reported as
+    // "Missing or empty section".
+    '## Record Provenance',
+    '- Writer: dsh-recursive-mode ' + code('writeActionRecord') + ' (plugin-generated action record; hashes are LF-normalized sha256).',
+    '- Contract: canonical Subagent Action Record sections, as read by recursive_lint.',
     '',
   ]
 

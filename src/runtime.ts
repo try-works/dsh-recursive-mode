@@ -1,5 +1,5 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { lintRun } from './ts-lint.ts'
 import { requirementsContent, worktreeContent, laterPhaseContent, detectGitContext, RUN_SCAFFOLD_DIRS, type GitContext } from './init-templates.ts'
@@ -28,6 +28,7 @@ import { phaseRulesFor, type PhaseRules } from './phase-rules.ts'
 import { closeoutPhase } from './closeout.ts'
 import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './scratch.ts'
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
+import { readMemoryEntries, retrieveMemory, renderMemorySection } from './memory.ts'
 import { createHandoff, createChildBrief, replyPath, childScratchPath, buildDelegationPrompt, type HandoffInput, type ChildBriefInput } from './handoff.ts'
 import { loadRouterPolicy, routerPolicyPath, resolveRole, capabilityProbe, delegationDecisionBasis, type RouterPolicy, type RouterPolicyOverrides, type SubagentProviderLike, type RouteDecision, type CapabilityProbe } from './router.ts'
 import { delegate, delegateContinuable, remainingDepthFor, validateReferences, referencesFromResult, writeActionRecord, evaluateDelegationResult, reviewOutputSchema, defaultReviewToolFilter, type SubagentsRuntimeLike, type SubagentStartRequestLike, type SubagentResultLike, type Reference, type ActionRecordInput, type ContinuableDelegationLike, type SubagentParentHandle } from './delegation.ts'
@@ -379,6 +380,30 @@ export class RecursiveRuntime extends Service {
     const probe = capabilityProbe({ providers, role: input.role, policy })
 
     // R1 bundle + R2 handoff/brief/prompt (file-backed context-in contract).
+    // T14 — PRIOR-RUN MEMORY, retrieved by relevance to THIS phase/artifact/role and written into
+    // the bundle. Two facts decided the shape: there is NO native memory service (measured), so the
+    // store is the plugin's own `.recursive/memory/` layer; and the prompt references the bundle by
+    // PATH, so the content must go INTO the bundle rather than beside the prompt.
+    //
+    // `memoryRefs` is filled as well as the content, and it is NOT a duplicate: it was a DEAD SLOT —
+    // rendered by the bundle and set by nobody — so the memory section a reviewer was meant to see
+    // never existed. Refs give traceability; the content is what a reviewer can actually cite.
+    const memoryEntries = retrieveMemory(
+      readMemoryEntries(
+        (path) => { try { return readFileSync(path, 'utf8') } catch { return null } },
+        (kind) => {
+          try {
+            return readdirSync(join(input.root, '.recursive', 'memory', kind))
+              .filter((name) => name.endsWith('.md'))
+              .map((name) => join(input.root, '.recursive', 'memory', kind, name))
+          } catch {
+            // An absent or unreadable memory directory is a missing advantage, not a failed review.
+            return []
+          }
+        },
+      ),
+      [input.phase, input.role, ...input.auditQuestions].join(' '),
+    )
     const bundle = buildReviewBundle({
       root: input.root,
       runId: input.runId,
@@ -391,6 +416,10 @@ export class RecursiveRuntime extends Service {
       codeRefs: input.codeRefs,
       changedFiles: input.changedFiles,
       diffBasis: input.diffBasis,
+      ...(memoryEntries.length === 0 ? {} : {
+        memory: renderMemorySection(memoryEntries),
+        memoryRefs: [...new Set(memoryEntries.map((entry) => entry.source))],
+      }),
     })
     const handoffPath = createHandoff({
       root: input.root,

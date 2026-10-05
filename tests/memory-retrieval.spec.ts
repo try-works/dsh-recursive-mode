@@ -7,6 +7,11 @@
  * empty result SAYS it is not conclusive rather than reading as "nothing was ever learned".
  */
 import { describe, it, expect } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { RecursiveRuntime } from '../src/runtime.ts'
 import {
   parseMemoryEntries, scoreMemoryEntry, retrieveMemory, readMemoryEntries, renderMemorySection,
   DEFAULT_MEMORY_LIMIT, MEMORY_KINDS, type MemoryEntry,
@@ -124,5 +129,108 @@ describe('T14 — the bundle section is honest about an empty result', () => {
     const rendered = renderMemorySection([])
     expect(rendered).toContain('No prior-run memory matched')
     expect(rendered).toContain('not by recency')
+  })
+})
+
+/**
+ * T14 — THE ACCEPTANCE: a reviewer actually RECEIVES the memory.
+ *
+ * Asserted by reading the written bundle FILE, because the prompt references the bundle by path —
+ * so the only place a section can be seen by the reviewer is inside that document. A test that
+ * checked the prompt instead would pass while the reviewer saw nothing.
+ */
+describe('T14 — the bundle the reviewer reads carries the retrieved memory', () => {
+  function makeRootWithMemory(): string {
+    const root = mkdtempSync(join(tmpdir(), 'rm-t14-'))
+    const runDir = join(root, '.recursive', 'run', 'run-1')
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, '03-implementation-summary.md'), '# Impl\n\nStatus: `DRAFT`\n\n## TODO\n\n- [x] done\n', 'utf8')
+    // A prior-run note that MATCHES the review's phase/role query, and one that does not.
+    mkdirSync(join(root, '.recursive', 'memory', 'patterns'), { recursive: true })
+    writeFileSync(
+      join(root, '.recursive', 'memory', 'patterns', 'locking.md'),
+      '# Lock ordering\nAlways lock the upstream phase before implementation.\n',
+      'utf8',
+    )
+    mkdirSync(join(root, '.recursive', 'memory', 'domains'), { recursive: true })
+    writeFileSync(join(root, '.recursive', 'memory', 'domains', 'billing.md'), '# Billing\nInvoices.\n', 'utf8')
+    return root
+  }
+
+  it('writes the memory section into the bundle body, with its source', async () => {
+    const root = makeRootWithMemory()
+    const ctx = new Context()
+    try {
+      const runtime = new RecursiveRuntime(ctx, { repoRoot: root })
+      await runtime.delegateReview({
+        root,
+        runId: 'run-1',
+        phase: '03-implementation-summary',
+        role: 'code-reviewer',
+        delegationId: 'd1',
+        childId: 'c1',
+        artifactPath: join(root, '.recursive', 'run', 'run-1', '03-implementation-summary.md'),
+        upstreamArtifacts: [],
+        auditQuestions: ['does the implementation summary hold up?'],
+        requiredOutput: 'verdict',
+        mode: 'continuable',
+        parent: {},
+        providers: { spawn: { name: 'spawn', capabilities: { outputSchema: true } } },
+        subagents: {
+          startContinuable: async () => ({ childId: 'c1', messageId: 'm1' }),
+          followup: async () => ({ messageId: 'm2' }),
+        },
+        awaitRoundResult: async () => null,
+      } as never)
+      const bundleDir = join(root, '.recursive', 'run', 'run-1', 'evidence', 'review-bundles')
+      const bundleFile = readdirSync(bundleDir).find((name) => name.endsWith('-bundle.md'))
+      expect(bundleFile).toBeDefined()
+      const bundle = readFileSync(join(bundleDir, bundleFile as string), 'utf8')
+      // The reviewer can READ the rule and CITE it, which is what "compounds rather than resets" means.
+      expect(bundle).toContain('## Prior-run memory')
+      expect(bundle).toContain('Lock ordering')
+      expect(bundle).toContain('lock the upstream phase')
+      expect(bundle).toContain('locking.md')
+      // And the unrelated note is absent: padding costs attention and buys nothing.
+      expect(bundle).not.toContain('Invoices.')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('adds NO memory section when nothing matches, so an empty result is not dressed up', async () => {
+    const root = makeRootWithMemory()
+    // Remove the memory layer entirely: a composition with no memory must produce a clean bundle.
+    rmSync(join(root, '.recursive', 'memory'), { recursive: true, force: true })
+    const ctx = new Context()
+    try {
+      const runtime = new RecursiveRuntime(ctx, { repoRoot: root })
+      await runtime.delegateReview({
+        root,
+        runId: 'run-1',
+        phase: '03-implementation-summary',
+        role: 'code-reviewer',
+        delegationId: 'd1',
+        childId: 'c1',
+        artifactPath: join(root, '.recursive', 'run', 'run-1', '03-implementation-summary.md'),
+        upstreamArtifacts: [],
+        auditQuestions: ['does it hold up?'],
+        requiredOutput: 'verdict',
+        mode: 'continuable',
+        parent: {},
+        providers: { spawn: { name: 'spawn', capabilities: { outputSchema: true } } },
+        subagents: {
+          startContinuable: async () => ({ childId: 'c1', messageId: 'm1' }),
+          followup: async () => ({ messageId: 'm2' }),
+        },
+        awaitRoundResult: async () => null,
+      } as never)
+      const bundleDir = join(root, '.recursive', 'run', 'run-1', 'evidence', 'review-bundles')
+      const bundleFile = readdirSync(bundleDir).find((name) => name.endsWith('-bundle.md'))
+      const bundle = readFileSync(join(bundleDir, bundleFile as string), 'utf8')
+      expect(bundle).not.toContain('## Prior-run memory')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

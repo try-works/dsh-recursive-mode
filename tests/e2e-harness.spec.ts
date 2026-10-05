@@ -539,6 +539,72 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
       if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
     }
   }, 120_000)
+
+  /**
+   * FU-7 — THE PHASE-ENTRY CALL POINTS, DEMONSTRATED AS A ROUND TRIP.
+   *
+   * The ask tool, its validation, its markers and its ledger were already tested (T23). What was missing
+   * is that NOTHING ASKED: the workflow never surfaced the question at the moment it mattered. This drives
+   * the real `recursive_phase` tool to phase 03 and asserts the whole cycle —
+   *
+   *   1. entry surfaces the `TDD Mode` gate, with the options and the artifact it belongs in;
+   *   2. answering it through `recursive_ask` writes the marker into that artifact;
+   *   3. the NEXT entry does not ask again, because the artifact IS the record.
+   *
+   * ⚠ THE THIRD STEP IS THE ONE THAT MATTERS MOST: without it, a run would be asked the same question on
+   * every phase call, and a person would learn to dismiss it.
+   */
+  it('FU-7: phase entry ASKS the gate once, and stops asking once it is answered', async () => {
+    const root = join(scratchRoot(), 'fu7-' + new Date().toISOString().replace(/[:.]/g, '-'))
+    mkdirSync(root, { recursive: true })
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' })
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      const call = async (tool: string, args: Record<string, unknown>) => ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('fu7-' + tool),
+        name: tool,
+        arguments: args,
+        agent: { session: { header: { cwd: root } } },
+      } as never)
+      const phaseOf = async (): Promise<{ phase: string; ask?: { gate: string; artifact: string; header: string; options: Array<{ label: string }> } }> => {
+        const envelope = JSON.parse(JSON.stringify(await call('recursive_phase', { runId: 'fu7-run' }))) as { content: Array<{ text: string }> }
+        return JSON.parse(envelope.content[0].text) as never
+      }
+
+      await call('recursive_init', { runId: 'fu7-run' })
+      // The workflow must actually BE at phase 03 for its gate to be owed: lock 00..02 in order.
+      for (const artifact of ['00-requirements.md', '00-worktree.md', '01-as-is.md', '01.5-root-cause.md', '02-to-be-plan.md']) {
+        await call('recursive_lock', { runId: 'fu7-run', artifact })
+      }
+
+      // 1. Entry surfaces the gate.
+      const first = await phaseOf()
+      expect(first.phase, 'the run is not at the TDD-gate phase: ' + JSON.stringify(first).slice(0, 200)).toBe('03-implementation-summary.md')
+      expect(first.ask, 'phase entry did not surface the gate: ' + JSON.stringify(first).slice(0, 300)).toBeDefined()
+      expect(first.ask?.gate).toBe('tdd-mode')
+      expect(first.ask?.artifact).toBe('03-implementation-summary.md')
+      expect(first.ask?.options.map((option) => option.label)).toEqual(['strict', 'pragmatic'])
+
+      // 2. Answering writes the marker into the artifact the gate names.
+      const answered = JSON.parse(JSON.stringify(await call('recursive_ask', {
+        gate: 'tdd-mode', runId: 'fu7-run', answer: 'pragmatic',
+      }))) as { content: Array<{ text: string }> }
+      expect(answered.content[0].text).toContain('pragmatic')
+      expect(readFileSync(join(root, '.recursive', 'run', 'fu7-run', '03-implementation-summary.md'), 'utf8'))
+        .toContain('- TDD Mode: pragmatic')
+
+      // 3. The NEXT entry does not ask again — the artifact is the record.
+      const second = await phaseOf()
+      expect(second.ask, 'the gate was asked twice: ' + JSON.stringify(second.ask)).toBeUndefined()
+    } finally {
+      if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
+      await ctx.fiber.dispose()
+    }
+  }, 120_000)
 })
 
 /** The last few tool calls, for an assertion message that says what happened. */

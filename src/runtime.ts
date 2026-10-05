@@ -30,6 +30,7 @@ import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
 import { readMemoryEntries, retrieveMemory, renderMemorySection, selectMemory } from './memory.ts'
 import { runPhase8Trigger, resolveExtractor, spawnExtractorRunner } from './training.ts'
+import { buildAskQuestion, GATE_DEFAULT_ARTIFACT, pendingGateFor } from './recursive_ask.tool.ts'
 import { contractDigest } from './policy.ts'
 import type { WorkflowEngineLike } from './workflow-audit.ts'
 import { createHandoff, createChildBrief, replyPath, childScratchPath, buildDelegationPrompt, type HandoffInput, type ChildBriefInput } from './handoff.ts'
@@ -1039,6 +1040,15 @@ export class RecursiveRuntime extends Service {
         return ''
       }
     })()
+    // `phase` IS the artifact file name (`getNextLegalPhase` returns one of PHASE_SEQUENCE), so the gate
+    // lookup needs no mapping — and the artifact's own text is what says whether it is still owed.
+    const pending = pendingGateFor(phase, (() => {
+      try {
+        return readFileSync(join(resolved.runDir, phase), 'utf8')
+      } catch {
+        return null
+      }
+    })())
     const selection = selectMemory(root, {
       query: requirements.slice(0, 4000),
       // FU-4: the run's OWN changed paths, computed when the caller supplies none — so T29's path
@@ -1052,6 +1062,11 @@ export class RecursiveRuntime extends Service {
       ...phaseRulesFor(phase),
       memory: selection.injected ? renderMemorySection(selection.shards.map((shard) => shard.entry)) : '',
       memoryReason: selection.reason,
+      // FU-7 — THE PHASE-ENTRY CALL POINTS. Phase 03 owes a `TDD Mode` decision and phase 05 a
+      // `QA Execution Mode` one; both are surfaced HERE, at the entry the tool already makes, so a
+      // caller does not have to know the workflow's gate vocabulary to be asked the right question.
+      // Omitted entirely once the artifact carries the marker (that IS the once-gate).
+      ...(pending === null ? {} : { ask: { gate: pending, ...buildAskQuestion(pending), artifact: GATE_DEFAULT_ARTIFACT[pending] } }),
     }
   }
 

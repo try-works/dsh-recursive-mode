@@ -188,6 +188,26 @@ export const GATE_DEFAULT_ARTIFACT: Record<AskGateId, string> = {
 }
 
 /**
+ * FU-7 — THE CALL POINTS: which gate, if any, a phase ENTRY still owes.
+ *
+ * ⚠ THE ARTIFACT IS THE RECORD, so no ledger is needed to ask once: if the document already carries the
+ * gate's marker line, the question has been answered and is not asked again. That is the same
+ * "once per run at entry" property T29 got from riding an existing gate — one mechanism, not two.
+ *
+ * ⚠ AND AN UNKNOWN PHASE OWES NOTHING. Returning a gate for a phase that has no such decision would ask a
+ * person a question the workflow does not act on, which is worse than not asking at all.
+ */
+export function pendingGateFor(artifactFile: string, artifactText: string | null): AskGateId | null {
+  const gate = (Object.keys(GATE_DEFAULT_ARTIFACT) as AskGateId[])
+    .find((id) => GATE_DEFAULT_ARTIFACT[id] === artifactFile)
+  if (gate === undefined) return null
+  const marker = ASK_GATES[gate].marker
+  // Already answered: the marker is in the document, so the decision is settled.
+  if (artifactText !== null && new RegExp('^- ' + marker + ':', 'm').test(artifactText)) return null
+  return gate
+}
+
+/**
  * T23 — the tool.
  *
  * TWO BRANCHES, and the split is the point: called WITHOUT an answer it ASKS (returning the validated

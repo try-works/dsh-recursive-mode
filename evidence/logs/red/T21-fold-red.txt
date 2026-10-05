@@ -1,0 +1,57 @@
+
+ RUN  v2.1.9 D:/DEV/dsh-recursive-mode
+
+ ❯ tests/fold-incremental.spec.ts (11 tests | 11 failed) 15ms
+   × T21 — one named position per phase > names every reachable state, and the vocabulary is closed 8ms
+     → resetFoldCache is not a function
+   × T21 — one named position per phase > maps each underlying shape to exactly one position 1ms
+     → resetFoldCache is not a function
+   × T21 — one named position per phase > LINKS a lock-valid LOCKED artifact to "locked" and nothing else (the mapping is total) 1ms
+     → resetFoldCache is not a function
+   × T21 — one named position per phase > rides on every phase of a real fold 1ms
+     → resetFoldCache is not a function
+   × T21 — the incremental fold > answers an unchanged run without re-reading a single artifact 1ms
+     → resetFoldCache is not a function
+   × T21 — the incremental fold > steps only the artifact that changed 0ms
+     → resetFoldCache is not a function
+   × T21 — the incremental fold > steps an APPENDED artifact and keeps the rest of the frame 0ms
+     → resetFoldCache is not a function
+   × T21 — the incremental fold > THROWS when a remembered artifact disappears instead of returning a shorter state 0ms
+     → resetFoldCache is not a function
+   × T21 — the incremental fold > a COLD fold still reports the honest state after a removal 0ms
+     → resetFoldCache is not a function
+   × T21 — the incremental fold > does not serve a stale state when content changes at the same size 1ms
+     → resetFoldCache is not a function
+   × T21 — the incremental fold > reports a lock-valid LOCKED artifact as "locked" end to end 0ms
+     → resetFoldCache is not a function
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 11 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/fold-incremental.spec.ts > T21 — one named position per phase > names every reachable state, and the vocabulary is closed
+ FAIL  tests/fold-incremental.spec.ts > T21 — one named position per phase > maps each underlying shape to exactly one position
+ FAIL  tests/fold-incremental.spec.ts > T21 — one named position per phase > LINKS a lock-valid LOCKED artifact to "locked" and nothing else (the mapping is total)
+ FAIL  tests/fold-incremental.spec.ts > T21 — one named position per phase > rides on every phase of a real fold
+ FAIL  tests/fold-incremental.spec.ts > T21 — the incremental fold > answers an unchanged run without re-reading a single artifact
+ FAIL  tests/fold-incremental.spec.ts > T21 — the incremental fold > steps only the artifact that changed
+ FAIL  tests/fold-incremental.spec.ts > T21 — the incremental fold > steps an APPENDED artifact and keeps the rest of the frame
+ FAIL  tests/fold-incremental.spec.ts > T21 — the incremental fold > THROWS when a remembered artifact disappears instead of returning a shorter state
+ FAIL  tests/fold-incremental.spec.ts > T21 — the incremental fold > a COLD fold still reports the honest state after a removal
+ FAIL  tests/fold-incremental.spec.ts > T21 — the incremental fold > does not serve a stale state when content changes at the same size
+ FAIL  tests/fold-incremental.spec.ts > T21 — the incremental fold > reports a lock-valid LOCKED artifact as "locked" end to end
+TypeError: resetFoldCache is not a function
+ ❯ tests/fold-incremental.spec.ts:62:20
+ Test Files  1 failed (1)
+     60| }
+     61| 
+     62| beforeEach(() => { resetFoldCache() })
+       |                    ^
+     63| 
+     64| describe('T21 — one named position per phase', () => {
+      Tests  11 failed (11)
+   Start at  09:21:18
+   Duration  810ms (transform 104ms, setup 0ms, collect 89ms, tests 15ms, environment 0ms, prepare 219ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/11]⎯
+
+

@@ -114,6 +114,13 @@ export interface RecursiveCardFacts {
   subagents: RecursiveSubagentChip[]
 }
 
+/** T21: the single derived positions present on a card's rows, in phase order. */
+function rowPositions(card: RecursiveRunCard): string[] {
+  return Object.values(card.phases)
+    .map((row) => row.position)
+    .filter((p): p is NonNullable<typeof p> => p !== undefined)
+}
+
 /** Derive §11.4 presentation facts from one card (no fs, no session). */
 export function cardFacts(card: RecursiveRunCard): RecursiveCardFacts {
   const groups = new Set<string>()
@@ -148,12 +155,21 @@ export function cardFacts(card: RecursiveRunCard): RecursiveCardFacts {
     }
   }
 
-  const tampered = Object.keys(card.tampers).length > 0
+  const tampered = Object.keys(card.tampers).length > 0 || rowPositions(card).includes('tampered')
   // Lock validity: tampered beats everything; else every MANDATORY phase present
   // and LOCKED -> locked; else still in-progress (01.5 stays optional).
+  //
+  // T21: when a row carries the server's single derived `position`, USE IT rather
+  // than recombining `status` here. Recombining is how this consumer came to call
+  // a LOCKED-but-gate-failing phase "locked" while the server's fold called it
+  // `invalid-lock` — two consumers, two answers, one phase. The `status` test
+  // remains as the fallback for a row produced before `position` existed.
   const allMandatoryLocked = MANDATORY_GROUPS.every((g) => {
     const row = Object.entries(card.phases).find(([key]) => phaseGroupOf(key) === g)
-    return row !== undefined && row[1].status === 'LOCKED'
+    if (row === undefined) return false
+    const phase = row[1]
+    if (phase.position !== undefined) return phase.position === 'locked'
+    return phase.status === 'LOCKED'
   })
   const lockValidity: RecursiveCardFacts['lockValidity'] = tampered
     ? 'tampered'

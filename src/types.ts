@@ -22,6 +22,27 @@ export interface ArtifactState {
   todoUnchecked: number
 }
 
+/**
+ * T21 — ONE named position per phase, derived from the fields every consumer
+ * currently recombines for itself (`status`, `lockValid`, `lockProblems`,
+ * `blockers`). Two consumers recombining those independently is exactly how two
+ * consumers come to disagree about a phase's state; a single derived value gives
+ * them nothing to disagree about.
+ *
+ * Closed vocabulary, total and disjoint (see `phasePosition`):
+ *   `absent`       the artifact does not exist
+ *   `skipped`      an optional (or legacy-profile late) phase that is not present
+ *   `draft`        present and unlocked, with no blockers
+ *   `blocked`      present and unlocked, with at least one blocker
+ *   `invalid-lock` LOCKED but failing a condition other than its hash
+ *   `locked`       LOCKED and lock-valid
+ *   `tampered`     LOCKED with a hash mismatch — the more serious fact, so it wins
+ *                  over any other lock problem
+ */
+export type PhasePosition = 'absent' | 'skipped' | 'draft' | 'blocked' | 'invalid-lock' | 'locked' | 'tampered'
+
+export const PHASE_POSITIONS: readonly PhasePosition[] = ['absent', 'skipped', 'draft', 'blocked', 'locked', 'invalid-lock', 'tampered']
+
 export interface PhaseState {
   key: string
   label: string
@@ -32,6 +53,8 @@ export interface PhaseState {
   lockValid: boolean
   lockProblems: string[]
   blockers: string[]
+  /** T21: the single derived state of this phase. */
+  position: PhasePosition
 }
 
 export interface RecursiveStatusResult {
@@ -94,6 +117,12 @@ export interface RecursivePhaseRow {
   status: string
   lockedAt?: string
   lockHash?: string
+  /**
+   * T21: the same single derived position `foldRun` publishes, carried onto the
+   * wire so the board and the tooling cannot disagree about a phase's state.
+   * Optional so a row produced before this field existed stays readable.
+   */
+  position?: PhasePosition
 }
 
 /**

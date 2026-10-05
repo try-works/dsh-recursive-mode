@@ -1,0 +1,1425 @@
+$ vitest run
+
+ RUN  v2.1.9 D:/DEV/dsh-recursive-mode
+
+ ✓ tests/continuable-delegate.spec.ts (12 tests) 26ms
+ ✓ tests/teams-task-loop.spec.ts (7 tests) 22ms
+ ✓ tests/derive.spec.ts (14 tests) 24ms
+ ✓ tests/errors.spec.ts (12 tests) 37ms
+ ✓ tests/live-route.spec.ts (5 tests) 52ms
+ ✓ tests/policy-globs.spec.ts (31 tests) 107ms
+ ✓ tests/board.spec.ts (13 tests) 111ms
+ ✓ tests/fold-incremental.spec.ts (11 tests) 202ms
+ ✓ tests/slots.spec.ts (9 tests) 28ms
+ ✓ tests/result-caps.spec.ts (11 tests) 191ms
+ ✓ tests/live-route.doc.spec.ts (8 tests) 100ms
+ ✓ tests/docs-contract.spec.ts (15 tests) 870ms
+ ✓ tests/phase-rules.parity.spec.ts (14 tests) 24ms
+ ✓ tests/enforcement.spec.ts (10 tests) 64ms
+ ✓ tests/inspector.spec.ts (8 tests) 134ms
+ ✓ tests/section-parser.spec.ts (14 tests) 22ms
+ ✓ tests/status.parity.spec.ts (5 tests) 58ms
+ ✓ tests/lock.parity.spec.ts (9 tests) 69ms
+stdout | tests/tools.spec.ts > recursive-mode read-path tools (R4) > recursive_lint reports issues on a DRAFT artifact
+Linting run: fixture-run
+Path: D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run
+Workflow Profile: memory-phase8
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-requirements.md: Missing required section heading: ## Requirements
+Remediation (copy/paste):
+  ## Requirements
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-requirements.md: Missing required section heading: ## Out of Scope
+Remediation (copy/paste):
+  ## Out of Scope
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-requirements.md: Missing required section heading: ## Constraints
+Remediation (copy/paste):
+  ## Constraints
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-requirements.md: Missing required section heading: ## Coverage Gate
+Remediation (copy/paste):
+  ## Coverage Gate
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-requirements.md: Missing required section heading: ## Approval Gate
+Remediation (copy/paste):
+  ## Approval Gate
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-worktree.md: Missing required section heading: ## Directory Selection
+Remediation (copy/paste):
+  ## Directory Selection
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-worktree.md: Missing required section heading: ## Safety Verification
+Remediation (copy/paste):
+  ## Safety Verification
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-worktree.md: Missing required section heading: ## Worktree Creation
+Remediation (copy/paste):
+  ## Worktree Creation
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-worktree.md: Missing required section heading: ## Main Branch Protection
+Remediation (copy/paste):
+  ## Main Branch Protection
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-worktree.md: Missing required section heading: ## Project Setup
+Remediation (copy/paste):
+  ## Project Setup
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-worktree.md: Missing required section heading: ## Test Baseline Verification
+Remediation (copy/paste):
+  ## Test Baseline Verification
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-worktree.md: Missing required section heading: ## Worktree Context
+Remediation (copy/paste):
+  ## Worktree Context
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-worktree.md: Missing required section heading: ## Diff Basis For Later Audits
+Remediation (copy/paste):
+  ## Diff Basis For Later Audits
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-worktree.md: Missing required section heading: ## Traceability
+Remediation (copy/paste):
+  ## Traceability
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-worktree.md: Missing required section heading: ## Coverage Gate
+Remediation (copy/paste):
+  ## Coverage Gate
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\00-worktree.md: Missing required section heading: ## Approval Gate
+Remediation (copy/paste):
+  ## Approval Gate
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\01-as-is.md: Missing required section heading: ## Reproduction Steps (Novice-Runnable)
+Remediation (copy/paste):
+  ## Reproduction Steps (Novice-Runnable)
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\01-as-is.md: Missing required section heading: ## Current Behavior by Requirement
+Remediation (copy/paste):
+  ## Current Behavior by Requirement
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\01-as-is.md: Missing required section heading: ## Source Requirement Inventory
+Remediation (copy/paste):
+  ## Source Requirement Inventory
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\01-as-is.md: Missing required section heading: ## Relevant Code Pointers
+Remediation (copy/paste):
+  ## Relevant Code Pointers
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\01-as-is.md: Missing required section heading: ## Known Unknowns
+Remediation (copy/paste):
+  ## Known Unknowns
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\01-as-is.md: Missing required section heading: ## Evidence
+Remediation (copy/paste):
+  ## Evidence
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\01-as-is.md: Missing required section heading: ## Traceability
+Remediation (copy/paste):
+  ## Traceability
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\01-as-is.md: Missing required section heading: ## Coverage Gate
+Remediation (copy/paste):
+  ## Coverage Gate
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\01-as-is.md: Missing required section heading: ## Approval Gate
+Remediation (copy/paste):
+  ## Approval Gate
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\01-as-is.md: Missing required gate line: Coverage: PASS|FAIL
+Remediation (copy/paste):
+  Coverage: FAIL
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\01-as-is.md: Missing required gate line: Approval: PASS|FAIL
+Remediation (copy/paste):
+  Approval: FAIL
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\01-as-is.md: Missing Traceability section content
+
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\01.5-root-cause.md
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required section heading: ## Planned Changes by File
+Remediation (copy/paste):
+  ## Planned Changes by File
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required section heading: ## Requirement Mapping
+Remediation (copy/paste):
+  ## Requirement Mapping
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required section heading: ## Implementation Steps
+Remediation (copy/paste):
+  ## Implementation Steps
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required section heading: ## Testing Strategy
+Remediation (copy/paste):
+  ## Testing Strategy
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required section heading: ## Playwright Plan (if applicable)
+Remediation (copy/paste):
+  ## Playwright Plan (if applicable)
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required section heading: ## Manual QA Scenarios
+Remediation (copy/paste):
+  ## Manual QA Scenarios
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required section heading: ## Idempotence and Recovery
+Remediation (copy/paste):
+  ## Idempotence and Recovery
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required section heading: ## Implementation Sub-phases
+Remediation (copy/paste):
+  ## Implementation Sub-phases
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required section heading: ## Plan Drift Check
+Remediation (copy/paste):
+  ## Plan Drift Check
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required section heading: ## Traceability
+Remediation (copy/paste):
+  ## Traceability
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required section heading: ## Coverage Gate
+Remediation (copy/paste):
+  ## Coverage Gate
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required section heading: ## Approval Gate
+Remediation (copy/paste):
+  ## Approval Gate
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required gate line: Coverage: PASS|FAIL
+Remediation (copy/paste):
+  Coverage: FAIL
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing required gate line: Approval: PASS|FAIL
+Remediation (copy/paste):
+  Approval: FAIL
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Missing Traceability section content
+
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\03-implementation-summary.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\03.5-code-review.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\04-test-summary.md
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\05-manual-qa.md: Missing required section heading: ## Traceability
+Remediation (copy/paste):
+  ## Traceability
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\05-manual-qa.md: Missing required section heading: ## Coverage Gate
+Remediation (copy/paste):
+  ## Coverage Gate
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\05-manual-qa.md: Missing required section heading: ## Approval Gate
+Remediation (copy/paste):
+  ## Approval Gate
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\05-manual-qa.md: Missing Traceability section content
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\05-manual-qa.md: Evidence directory missing at D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\evidence
+Remediation (copy/paste):
+  mkdir -p "D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\evidence\screenshots"
+  mkdir -p "D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\evidence\logs"
+  mkdir -p "D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\evidence\perf"
+  mkdir -p "D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\evidence\traces"
+  mkdir -p "D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\evidence\other"
+
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\06-decisions-update.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\07-state-update.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\08-memory-impact.md
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\02-to-be-plan.md: Phase-sequence violation: '02-to-be-plan.md' exists but prerequisite '01-as-is.md' is DRAFT (must be LOCKED first)
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\05-manual-qa.md: Phase-sequence violation: '05-manual-qa.md' exists but prerequisite '01-as-is.md' is DRAFT (must be LOCKED first)
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\05-manual-qa.md: Phase-sequence violation: '05-manual-qa.md' exists but prerequisite '02-to-be-plan.md' is DRAFT (must be LOCKED first)
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\run\fixture-run\06-decisions-update.md: Run profile memory-phase8 requires 06-decisions-update.md after 05-manual-qa.md locks
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\repo\.recursive\memory: Memory plane directory is missing
+
+----
+
+Summary
+- FAIL: 52
+- WARN: 8
+
+[FAIL] Lint failed
+
+ ✓ tests/tools.spec.ts (6 tests) 938ms
+   ✓ recursive-mode read-path tools (R4) > recursive_init scaffolds a run dir in the temp repo (idempotent) 449ms
+ ✓ tests/lifecycle.spec.ts (6 tests) 93ms
+ ✓ tests/bootstrap.parity.spec.ts (5 tests) 732ms
+ ✓ tests/goals-projection.spec.ts (11 tests) 27ms
+ ✓ tests/guard-path.spec.ts (10 tests) 1499ms
+ ✓ tests/hooks.spec.ts (6 tests) 52ms
+ ✓ tests/repair.spec.ts (4 tests) 691ms
+ ✓ tests/no-emission.spec.ts (1 test) 116ms
+ ✓ tests/skills.spec.ts (5 tests) 43ms
+ ✓ tests/delegation.spec.ts (7 tests) 75ms
+ ✓ tests/router.spec.ts (9 tests) 28ms
+ ✓ tests/policy-render.spec.ts (3 tests) 210ms
+ ✓ tests/init-templates.parity.spec.ts (4 tests) 3238ms
+   ✓ detectGitContext — hermetic > prefills the executable diff basis from a live repo HEAD 2863ms
+   ✓ detectGitContext — hermetic > degrades to the placeholder path when HEAD cannot be resolved 361ms
+ ✓ tests/review.spec.ts (5 tests) 40ms
+ ✓ tests/commands.spec.ts (6 tests) 266ms
+ ✓ tests/handoff.spec.ts (4 tests) 36ms
+ ✓ tests/quiescence.spec.ts (14 tests) 4548ms
+   ✓ T18 — pendingWork derives in-flight work from the run directory > a ZERO-BYTE reply is not a submission — still pending 390ms
+   ✓ T18 — lockArtifact refuses to lock with work in flight > the refusal is a CODED, routed sentence (T24 registry) 335ms
+   ✓ T18 — lockArtifact refuses to lock with work in flight > the SAME lock succeeds once the reply lands 381ms
+   ✓ T18 — lockArtifact refuses to lock with work in flight > a run with nothing in flight locks normally 522ms
+   ✓ T18 — lockArtifact refuses to lock with work in flight > an empty reply still refuses — a 0-byte submission is not a reply 420ms
+   ✓ T18 — the pending set is visible, not just enforced > recursive_status carries pendingWork so a human sees why a lock is refused 433ms
+   ✓ T18 — the pending set is visible, not just enforced > an empty pending set is still present and empty, so consumers need no null dance 430ms
+ ✓ tests/use-live.spec.ts (2 tests) 63ms
+stdout | tests/lint-parity.spec.ts > R4 — golden-fixture lint parity (ts-lint.ts == canonical, python-free) > lintRun reproduces the canonical FAIL verdicts on the golden fixture
+Linting run: g-run
+Path: D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run
+Workflow Profile: recursive-mode-audit-v2
+
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\00-worktree.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\01-as-is.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\01.5-root-cause.md
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Requirement Mapping
+Remediation (copy/paste):
+  ## Requirement Mapping
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Playwright Plan (if applicable)
+Remediation (copy/paste):
+  ## Playwright Plan (if applicable)
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Manual QA Scenarios
+Remediation (copy/paste):
+  ## Manual QA Scenarios
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Idempotence and Recovery
+Remediation (copy/paste):
+  ## Idempotence and Recovery
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Implementation Sub-phases
+Remediation (copy/paste):
+  ## Implementation Sub-phases
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Plan Drift Check
+Remediation (copy/paste):
+  ## Plan Drift Check
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Traceability
+Remediation (copy/paste):
+  ## Traceability
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Audit Context
+Remediation (copy/paste):
+  ## Audit Context
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Effective Inputs Re-read
+Remediation (copy/paste):
+  ## Effective Inputs Re-read
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Earlier Phase Reconciliation
+Remediation (copy/paste):
+  ## Earlier Phase Reconciliation
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Subagent Contribution Verification
+Remediation (copy/paste):
+  ## Subagent Contribution Verification
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Worktree Diff Audit
+Remediation (copy/paste):
+  ## Worktree Diff Audit
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Gaps Found
+Remediation (copy/paste):
+  ## Gaps Found
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Repair Work Performed
+Remediation (copy/paste):
+  ## Repair Work Performed
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Requirement Completion Status
+Remediation (copy/paste):
+  ## Requirement Completion Status
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Audit Verdict
+Remediation (copy/paste):
+  ## Audit Verdict
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Prior Recursive Evidence Reviewed
+Remediation (copy/paste):
+  ## Prior Recursive Evidence Reviewed
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing Traceability section content
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required audit verdict line: Audit: PASS|FAIL
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Audit Context section is empty
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Audit Context
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Effective Inputs Re-read
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Earlier Phase Reconciliation
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Subagent Contribution Verification
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Worktree Diff Audit
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Gaps Found
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Repair Work Performed
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Requirement Completion Status
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Audit Verdict
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Baseline type:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Baseline reference:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Comparison reference:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Normalized baseline:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Normalized comparison:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Normalized diff command:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty section: ## Plan Drift Check
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty section: ## Prior Recursive Evidence Reviewed
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty section: ## Requirement Completion Status
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty section: ## Subagent Contribution Verification
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Requirement Mapping requires existing 00-requirements.md and 01-as-is.md inputs
+
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\03-implementation-summary.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\03.5-code-review.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\04-test-summary.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\05-manual-qa.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\06-decisions-update.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\07-state-update.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\08-memory-impact.md
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Phase-sequence violation: '02-to-be-plan.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\MEMORY.md: Memory router file is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\domains: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\patterns: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\incidents: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\episodes: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\archive: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\skills: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\skills\SKILLS.md: Skill memory router file is missing
+
+----
+
+Summary
+- FAIL: 42
+- WARN: 17
+
+[FAIL] Lint failed
+
+stdout | tests/lint-parity.spec.ts > R4 — golden-fixture lint parity (ts-lint.ts == canonical, python-free) > lintRun reproduces the canonical WARN verdicts on the golden fixture
+Linting run: g-run
+Path: D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run
+Workflow Profile: recursive-mode-audit-v2
+
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\00-worktree.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\01-as-is.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\01.5-root-cause.md
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Requirement Mapping
+Remediation (copy/paste):
+  ## Requirement Mapping
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Playwright Plan (if applicable)
+Remediation (copy/paste):
+  ## Playwright Plan (if applicable)
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Manual QA Scenarios
+Remediation (copy/paste):
+  ## Manual QA Scenarios
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Idempotence and Recovery
+Remediation (copy/paste):
+  ## Idempotence and Recovery
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Implementation Sub-phases
+Remediation (copy/paste):
+  ## Implementation Sub-phases
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Plan Drift Check
+Remediation (copy/paste):
+  ## Plan Drift Check
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Traceability
+Remediation (copy/paste):
+  ## Traceability
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Audit Context
+Remediation (copy/paste):
+  ## Audit Context
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Effective Inputs Re-read
+Remediation (copy/paste):
+  ## Effective Inputs Re-read
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Earlier Phase Reconciliation
+Remediation (copy/paste):
+  ## Earlier Phase Reconciliation
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Subagent Contribution Verification
+Remediation (copy/paste):
+  ## Subagent Contribution Verification
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Worktree Diff Audit
+Remediation (copy/paste):
+  ## Worktree Diff Audit
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Gaps Found
+Remediation (copy/paste):
+  ## Gaps Found
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Repair Work Performed
+Remediation (copy/paste):
+  ## Repair Work Performed
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Requirement Completion Status
+Remediation (copy/paste):
+  ## Requirement Completion Status
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Audit Verdict
+Remediation (copy/paste):
+  ## Audit Verdict
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Prior Recursive Evidence Reviewed
+Remediation (copy/paste):
+  ## Prior Recursive Evidence Reviewed
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing Traceability section content
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required audit verdict line: Audit: PASS|FAIL
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Audit Context section is empty
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Audit Context
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Effective Inputs Re-read
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Earlier Phase Reconciliation
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Subagent Contribution Verification
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Worktree Diff Audit
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Gaps Found
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Repair Work Performed
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Requirement Completion Status
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Audit Verdict
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Baseline type:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Baseline reference:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Comparison reference:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Normalized baseline:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Normalized comparison:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Normalized diff command:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty section: ## Plan Drift Check
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty section: ## Prior Recursive Evidence Reviewed
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty section: ## Requirement Completion Status
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty section: ## Subagent Contribution Verification
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Requirement Mapping requires existing 00-requirements.md and 01-as-is.md inputs
+
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\03-implementation-summary.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\03.5-code-review.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\04-test-summary.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\05-manual-qa.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\06-decisions-update.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\07-state-update.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\08-memory-impact.md
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Phase-sequence violation: '02-to-be-plan.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\MEMORY.md: Memory router file is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\domains: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\patterns: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\incidents: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\episodes: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\archive: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\skills: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\skills\SKILLS.md: Skill memory router file is missing
+
+----
+
+Summary
+- FAIL: 42
+- WARN: 17
+
+[FAIL] Lint failed
+
+stdout | tests/lint-parity.spec.ts > R4 — golden-fixture lint parity (ts-lint.ts == canonical, python-free) > lintRun verdict matches the canonical exit (FAIL because fixture is DRAFT/incomplete)
+Linting run: g-run
+Path: D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run
+Workflow Profile: recursive-mode-audit-v2
+
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\00-worktree.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\01-as-is.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\01.5-root-cause.md
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Requirement Mapping
+Remediation (copy/paste):
+  ## Requirement Mapping
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Playwright Plan (if applicable)
+Remediation (copy/paste):
+  ## Playwright Plan (if applicable)
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Manual QA Scenarios
+Remediation (copy/paste):
+  ## Manual QA Scenarios
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Idempotence and Recovery
+Remediation (copy/paste):
+  ## Idempotence and Recovery
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Implementation Sub-phases
+Remediation (copy/paste):
+  ## Implementation Sub-phases
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Plan Drift Check
+Remediation (copy/paste):
+  ## Plan Drift Check
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Traceability
+Remediation (copy/paste):
+  ## Traceability
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Audit Context
+Remediation (copy/paste):
+  ## Audit Context
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Effective Inputs Re-read
+Remediation (copy/paste):
+  ## Effective Inputs Re-read
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Earlier Phase Reconciliation
+Remediation (copy/paste):
+  ## Earlier Phase Reconciliation
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Subagent Contribution Verification
+Remediation (copy/paste):
+  ## Subagent Contribution Verification
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Worktree Diff Audit
+Remediation (copy/paste):
+  ## Worktree Diff Audit
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Gaps Found
+Remediation (copy/paste):
+  ## Gaps Found
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Repair Work Performed
+Remediation (copy/paste):
+  ## Repair Work Performed
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Requirement Completion Status
+Remediation (copy/paste):
+  ## Requirement Completion Status
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Audit Verdict
+Remediation (copy/paste):
+  ## Audit Verdict
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required section heading: ## Prior Recursive Evidence Reviewed
+Remediation (copy/paste):
+  ## Prior Recursive Evidence Reviewed
+  
+  <content>
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing Traceability section content
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing required audit verdict line: Audit: PASS|FAIL
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Audit Context section is empty
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Audit Context
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Effective Inputs Re-read
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Earlier Phase Reconciliation
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Subagent Contribution Verification
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Worktree Diff Audit
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Gaps Found
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Repair Work Performed
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Requirement Completion Status
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty audited-phase section: ## Audit Verdict
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Baseline type:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Baseline reference:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Comparison reference:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Normalized baseline:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Normalized comparison:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Worktree Diff Audit is missing: Normalized diff command:
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty section: ## Plan Drift Check
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty section: ## Prior Recursive Evidence Reviewed
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty section: ## Requirement Completion Status
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Missing or empty section: ## Subagent Contribution Verification
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Requirement Mapping requires existing 00-requirements.md and 01-as-is.md inputs
+
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\03-implementation-summary.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\03.5-code-review.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\04-test-summary.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\05-manual-qa.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\06-decisions-update.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\07-state-update.md
+[WARN] Missing artifact (ok if not reached yet): D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\08-memory-impact.md
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\run\g-run\02-to-be-plan.md: Phase-sequence violation: '02-to-be-plan.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\MEMORY.md: Memory router file is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\domains: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\patterns: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\incidents: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\episodes: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\archive: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\skills: Memory subdirectory is missing
+
+[WARN] D:\DEV\dsh-recursive-mode\tests\fixtures\lint-golden\.recursive\memory\skills\SKILLS.md: Skill memory router file is missing
+
+----
+
+Summary
+- FAIL: 42
+- WARN: 17
+
+[FAIL] Lint failed
+
+ ✓ tests/lint-parity.spec.ts (3 tests) 137ms
+ ✓ tests/preset.spec.ts (7 tests) 21ms
+ ✓ tests/workspace.spec.ts (5 tests) 23ms
+ ✓ tests/doc-viewer.spec.ts (5 tests) 21ms
+ ✓ tests/scratch.spec.ts (7 tests) 89ms
+ ✓ tests/closeout.spec.ts (4 tests) 81ms
+ ✓ tests/bootstrap.spec.ts (5 tests) 431ms
+ ✓ tests/styles.spec.ts (1 test) 12ms
+ ✓ tests/reminder-gate.spec.ts (4 tests) 12ms
+ ✓ tests/patch.spec.ts (3 tests) 13ms
+ ✓ tests/theme.spec.ts (3 tests) 51ms
+ ✓ tests/smoke.spec.ts (3 tests) 212ms
+ ✓ tests/open-state.spec.ts (5 tests) 18ms
+ ✓ tests/run.parity.spec.ts (4 tests) 22ms
+ ✓ tests/guard-log.spec.ts (4 tests) 5019ms
+   ✓ guard-log.ts — the T15 evidence trace > is bounded: over the cap it keeps only the newest records 4952ms
+stdout | tests/r5-parity.spec.ts > R5 — canonical init/lint/policy/pre-step parity > lintArtifact runs the in-process ts-lint port (no python shell)
+Linting run: r5-lint
+Path: E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint
+Workflow Profile: recursive-mode-audit-v2
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Traceability is missing explicit coverage for: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Traceability is vague and does not mention any requirement IDs
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Missing required audit verdict line: Audit: PASS|FAIL
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Audit Context is missing a valid Audit Execution Mode: subagent|self-audit
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Audit Context is missing a valid Subagent Availability: available|unavailable
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Audit Context is missing Subagent Capability Probe
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Audit Context is missing Delegation Decision Basis
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Audit Context is missing Audit Inputs Provided
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Worktree Diff Audit is missing: Baseline type:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Worktree Diff Audit is missing: Baseline reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Worktree Diff Audit is missing: Comparison reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Worktree Diff Audit is missing: Normalized baseline:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Worktree Diff Audit is missing: Normalized comparison:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Worktree Diff Audit is missing: Normalized diff command:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Prior Recursive Evidence Reviewed must contain structured run/memory paths or an explicit no-relevant-evidence justification
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Requirement Completion Status is missing in-scope requirements: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Source Requirement Inventory must contain at least one requirement inventory entry
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Traceability is missing explicit coverage for: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Traceability is vague and does not mention any requirement IDs
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Missing required audit verdict line: Audit: PASS|FAIL
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Audit Context is missing a valid Audit Execution Mode: subagent|self-audit
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Audit Context is missing a valid Subagent Availability: available|unavailable
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Audit Context is missing Subagent Capability Probe
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Audit Context is missing Delegation Decision Basis
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Audit Context is missing Audit Inputs Provided
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Worktree Diff Audit is missing: Baseline type:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Worktree Diff Audit is missing: Baseline reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Worktree Diff Audit is missing: Comparison reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Worktree Diff Audit is missing: Normalized baseline:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Worktree Diff Audit is missing: Normalized comparison:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Worktree Diff Audit is missing: Normalized diff command:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Requirement Completion Status is missing in-scope requirements: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Traceability is missing explicit coverage for: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Traceability is vague and does not mention any requirement IDs
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Missing required audit verdict line: Audit: PASS|FAIL
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Audit Context is missing a valid Audit Execution Mode: subagent|self-audit
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Audit Context is missing a valid Subagent Availability: available|unavailable
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Audit Context is missing Subagent Capability Probe
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Audit Context is missing Delegation Decision Basis
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Audit Context is missing Audit Inputs Provided
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Worktree Diff Audit is missing: Baseline type:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Worktree Diff Audit is missing: Baseline reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Worktree Diff Audit is missing: Comparison reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Worktree Diff Audit is missing: Normalized baseline:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Worktree Diff Audit is missing: Normalized comparison:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Worktree Diff Audit is missing: Normalized diff command:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Prior Recursive Evidence Reviewed must contain structured run/memory paths or an explicit no-relevant-evidence justification
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Requirement Completion Status is missing in-scope requirements: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Traceability is missing explicit coverage for: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Traceability is vague and does not mention any requirement IDs
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Missing required audit verdict line: Audit: PASS|FAIL
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Audit Context is missing a valid Audit Execution Mode: subagent|self-audit
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Audit Context is missing a valid Subagent Availability: available|unavailable
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Audit Context is missing Subagent Capability Probe
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Audit Context is missing Delegation Decision Basis
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Audit Context is missing Audit Inputs Provided
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Worktree Diff Audit is missing: Baseline type:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Worktree Diff Audit is missing: Baseline reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Worktree Diff Audit is missing: Comparison reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Worktree Diff Audit is missing: Normalized baseline:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Worktree Diff Audit is missing: Normalized comparison:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Worktree Diff Audit is missing: Normalized diff command:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Missing required gate line: TDD Compliance: PASS|FAIL
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Requirement Completion Status is missing in-scope requirements: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: TDD Compliance Log is missing TDD Mode: strict|pragmatic
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Traceability is missing explicit coverage for: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Traceability is vague and does not mention any requirement IDs
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Missing required audit verdict line: Audit: PASS|FAIL
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Audit Context is missing a valid Audit Execution Mode: subagent|self-audit
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Audit Context is missing a valid Subagent Availability: available|unavailable
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Audit Context is missing Subagent Capability Probe
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Audit Context is missing Delegation Decision Basis
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Audit Context is missing Audit Inputs Provided
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Worktree Diff Audit is missing: Baseline type:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Worktree Diff Audit is missing: Baseline reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Worktree Diff Audit is missing: Comparison reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Worktree Diff Audit is missing: Normalized baseline:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Worktree Diff Audit is missing: Normalized comparison:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Worktree Diff Audit is missing: Normalized diff command:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Requirement Completion Status is missing in-scope requirements: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Review Metadata is missing Review Bundle Path
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Traceability is missing explicit coverage for: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Traceability is vague and does not mention any requirement IDs
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Missing required audit verdict line: Audit: PASS|FAIL
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Audit Context is missing a valid Audit Execution Mode: subagent|self-audit
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Audit Context is missing a valid Subagent Availability: available|unavailable
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Audit Context is missing Subagent Capability Probe
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Audit Context is missing Delegation Decision Basis
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Audit Context is missing Audit Inputs Provided
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Worktree Diff Audit is missing: Baseline type:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Worktree Diff Audit is missing: Baseline reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Worktree Diff Audit is missing: Comparison reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Worktree Diff Audit is missing: Normalized baseline:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Worktree Diff Audit is missing: Normalized comparison:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Worktree Diff Audit is missing: Normalized diff command:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Prior Recursive Evidence Reviewed must contain structured run/memory paths or an explicit no-relevant-evidence justification
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Requirement Completion Status is missing in-scope requirements: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\05-manual-qa.md: Traceability is missing explicit coverage for: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\05-manual-qa.md: Traceability is vague and does not mention any requirement IDs
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\05-manual-qa.md: QA Execution Record is missing QA Execution Mode: human|agent-operated|hybrid
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Traceability is missing explicit coverage for: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Traceability is vague and does not mention any requirement IDs
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Missing required audit verdict line: Audit: PASS|FAIL
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Audit Context is missing a valid Audit Execution Mode: subagent|self-audit
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Audit Context is missing a valid Subagent Availability: available|unavailable
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Audit Context is missing Subagent Capability Probe
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Audit Context is missing Delegation Decision Basis
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Audit Context is missing Audit Inputs Provided
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Worktree Diff Audit is missing: Baseline type:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Worktree Diff Audit is missing: Baseline reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Worktree Diff Audit is missing: Comparison reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Worktree Diff Audit is missing: Normalized baseline:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Worktree Diff Audit is missing: Normalized comparison:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Worktree Diff Audit is missing: Normalized diff command:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Requirement Completion Status is missing in-scope requirements: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Traceability is missing explicit coverage for: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Traceability is vague and does not mention any requirement IDs
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Missing required audit verdict line: Audit: PASS|FAIL
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Audit Context is missing a valid Audit Execution Mode: subagent|self-audit
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Audit Context is missing a valid Subagent Availability: available|unavailable
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Audit Context is missing Subagent Capability Probe
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Audit Context is missing Delegation Decision Basis
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Audit Context is missing Audit Inputs Provided
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Worktree Diff Audit is missing: Baseline type:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Worktree Diff Audit is missing: Baseline reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Worktree Diff Audit is missing: Comparison reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Worktree Diff Audit is missing: Normalized baseline:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Worktree Diff Audit is missing: Normalized comparison:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Worktree Diff Audit is missing: Normalized diff command:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Prior Recursive Evidence Reviewed must contain structured run/memory paths or an explicit no-relevant-evidence justification
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Requirement Completion Status is missing in-scope requirements: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Traceability is missing explicit coverage for: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Traceability is vague and does not mention any requirement IDs
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Missing required audit verdict line: Audit: PASS|FAIL
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Audit Context is missing a valid Audit Execution Mode: subagent|self-audit
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Audit Context is missing a valid Subagent Availability: available|unavailable
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Audit Context is missing Subagent Capability Probe
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Audit Context is missing Delegation Decision Basis
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Audit Context is missing Audit Inputs Provided
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Worktree Diff Audit is missing: Baseline type:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Worktree Diff Audit is missing: Baseline reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Worktree Diff Audit is missing: Comparison reference:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Worktree Diff Audit is missing: Normalized baseline:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Worktree Diff Audit is missing: Normalized comparison:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Worktree Diff Audit is missing: Normalized diff command:
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Prior Recursive Evidence Reviewed must contain structured run/memory paths or an explicit no-relevant-evidence justification
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Requirement Completion Status is missing in-scope requirements: R1
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Run-Local Skill Usage Capture is missing Available Skills
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Run-Local Skill Usage Capture is missing Future Guidance
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Run-Local Skill Usage Capture is missing Issues Encountered
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Run-Local Skill Usage Capture is missing Promotion Candidates
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Run-Local Skill Usage Capture is missing Skill Usage Relevance
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Run-Local Skill Usage Capture is missing Skills Attempted
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Run-Local Skill Usage Capture is missing Skills Sought
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Run-Local Skill Usage Capture is missing Skills Used
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Run-Local Skill Usage Capture is missing Worked Well
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Run-Local Skill Usage Capture must declare Skill Usage Relevance: relevant|not-relevant
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\00-worktree.md: Phase-sequence violation: '00-worktree.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Phase-sequence violation: '01-as-is.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01-as-is.md: Phase-sequence violation: '01-as-is.md' exists but prerequisite '00-worktree.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Phase-sequence violation: '01.5-root-cause.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Phase-sequence violation: '01.5-root-cause.md' exists but prerequisite '00-worktree.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\01.5-root-cause.md: Phase-sequence violation: '01.5-root-cause.md' exists but prerequisite '01-as-is.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Phase-sequence violation: '02-to-be-plan.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Phase-sequence violation: '02-to-be-plan.md' exists but prerequisite '00-worktree.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Phase-sequence violation: '02-to-be-plan.md' exists but prerequisite '01-as-is.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\02-to-be-plan.md: Phase-sequence violation: '02-to-be-plan.md' exists but prerequisite '01.5-root-cause.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Phase-sequence violation: '03-implementation-summary.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Phase-sequence violation: '03-implementation-summary.md' exists but prerequisite '00-worktree.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Phase-sequence violation: '03-implementation-summary.md' exists but prerequisite '01-as-is.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Phase-sequence violation: '03-implementation-summary.md' exists but prerequisite '01.5-root-cause.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03-implementation-summary.md: Phase-sequence violation: '03-implementation-summary.md' exists but prerequisite '02-to-be-plan.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Phase-sequence violation: '03.5-code-review.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Phase-sequence violation: '03.5-code-review.md' exists but prerequisite '00-worktree.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Phase-sequence violation: '03.5-code-review.md' exists but prerequisite '01-as-is.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Phase-sequence violation: '03.5-code-review.md' exists but prerequisite '01.5-root-cause.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Phase-sequence violation: '03.5-code-review.md' exists but prerequisite '02-to-be-plan.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\03.5-code-review.md: Phase-sequence violation: '03.5-code-review.md' exists but prerequisite '03-implementation-summary.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Phase-sequence violation: '04-test-summary.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Phase-sequence violation: '04-test-summary.md' exists but prerequisite '00-worktree.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Phase-sequence violation: '04-test-summary.md' exists but prerequisite '01-as-is.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Phase-sequence violation: '04-test-summary.md' exists but prerequisite '01.5-root-cause.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Phase-sequence violation: '04-test-summary.md' exists but prerequisite '02-to-be-plan.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Phase-sequence violation: '04-test-summary.md' exists but prerequisite '03-implementation-summary.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\04-test-summary.md: Phase-sequence violation: '04-test-summary.md' exists but prerequisite '03.5-code-review.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\05-manual-qa.md: Phase-sequence violation: '05-manual-qa.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\05-manual-qa.md: Phase-sequence violation: '05-manual-qa.md' exists but prerequisite '00-worktree.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\05-manual-qa.md: Phase-sequence violation: '05-manual-qa.md' exists but prerequisite '01-as-is.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\05-manual-qa.md: Phase-sequence violation: '05-manual-qa.md' exists but prerequisite '01.5-root-cause.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\05-manual-qa.md: Phase-sequence violation: '05-manual-qa.md' exists but prerequisite '02-to-be-plan.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\05-manual-qa.md: Phase-sequence violation: '05-manual-qa.md' exists but prerequisite '03-implementation-summary.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\05-manual-qa.md: Phase-sequence violation: '05-manual-qa.md' exists but prerequisite '03.5-code-review.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\05-manual-qa.md: Phase-sequence violation: '05-manual-qa.md' exists but prerequisite '04-test-summary.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Phase-sequence violation: '06-decisions-update.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Phase-sequence violation: '06-decisions-update.md' exists but prerequisite '00-worktree.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Phase-sequence violation: '06-decisions-update.md' exists but prerequisite '01-as-is.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Phase-sequence violation: '06-decisions-update.md' exists but prerequisite '01.5-root-cause.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Phase-sequence violation: '06-decisions-update.md' exists but prerequisite '02-to-be-plan.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Phase-sequence violation: '06-decisions-update.md' exists but prerequisite '03-implementation-summary.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Phase-sequence violation: '06-decisions-update.md' exists but prerequisite '03.5-code-review.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Phase-sequence violation: '06-decisions-update.md' exists but prerequisite '04-test-summary.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\06-decisions-update.md: Phase-sequence violation: '06-decisions-update.md' exists but prerequisite '05-manual-qa.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Phase-sequence violation: '07-state-update.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Phase-sequence violation: '07-state-update.md' exists but prerequisite '00-worktree.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Phase-sequence violation: '07-state-update.md' exists but prerequisite '01-as-is.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Phase-sequence violation: '07-state-update.md' exists but prerequisite '01.5-root-cause.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Phase-sequence violation: '07-state-update.md' exists but prerequisite '02-to-be-plan.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Phase-sequence violation: '07-state-update.md' exists but prerequisite '03-implementation-summary.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Phase-sequence violation: '07-state-update.md' exists but prerequisite '03.5-code-review.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Phase-sequence violation: '07-state-update.md' exists but prerequisite '04-test-summary.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Phase-sequence violation: '07-state-update.md' exists but prerequisite '05-manual-qa.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\07-state-update.md: Phase-sequence violation: '07-state-update.md' exists but prerequisite '06-decisions-update.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Phase-sequence violation: '08-memory-impact.md' exists but prerequisite '00-requirements.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Phase-sequence violation: '08-memory-impact.md' exists but prerequisite '00-worktree.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Phase-sequence violation: '08-memory-impact.md' exists but prerequisite '01-as-is.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Phase-sequence violation: '08-memory-impact.md' exists but prerequisite '01.5-root-cause.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Phase-sequence violation: '08-memory-impact.md' exists but prerequisite '02-to-be-plan.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Phase-sequence violation: '08-memory-impact.md' exists but prerequisite '03-implementation-summary.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Phase-sequence violation: '08-memory-impact.md' exists but prerequisite '03.5-code-review.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Phase-sequence violation: '08-memory-impact.md' exists but prerequisite '04-test-summary.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Phase-sequence violation: '08-memory-impact.md' exists but prerequisite '05-manual-qa.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Phase-sequence violation: '08-memory-impact.md' exists but prerequisite '06-decisions-update.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\run\r5-lint\08-memory-impact.md: Phase-sequence violation: '08-memory-impact.md' exists but prerequisite '07-state-update.md' is DRAFT (must be LOCKED first)
+
+[FAIL] E:\tmp\r5-lint-B1zj66\.recursive\memory: Memory plane directory is missing
+
+----
+
+Summary
+- FAIL: 224
+- WARN: 0
+
+[FAIL] Lint failed
+
+ ✓ tests/r5-parity.spec.ts (9 tests) 9996ms
+   ✓ R5 — canonical init/lint/policy/pre-step parity > initRun scaffolds 00 templates byte-identical to the canonical init golden (python-free) 2685ms
+   ✓ R5 — canonical init/lint/policy/pre-step parity > initRun scaffolds later-phase templates with required sections + gates 2704ms
+   ✓ R5 — canonical init/lint/policy/pre-step parity > lintArtifact runs the in-process ts-lint port (no python shell) 3548ms
+   ✓ R5 — canonical init/lint/policy/pre-step parity > renderRecursivePolicy surfaces current phase required sections + gates 1050ms
+ ✓ tests/worktree.spec.ts (8 tests) 15161ms
+   ✓ worktree.ts — createLinkedWorktree > creates a linked worktree on a recursive/<runId> branch 2749ms
+   ✓ worktree.ts — createLinkedWorktree > refuses to create a worktree over an existing run directory 1729ms
+   ✓ worktree.ts — promoteBranch (dev/stage/main fast-forward) > creates the target branch on first promotion 2416ms
+   ✓ worktree.ts — promoteBranch (dev/stage/main fast-forward) > fast-forwards the target branch when it is behind the source 1982ms
+   ✓ worktree.ts — promoteBranch (dev/stage/main fast-forward) > fails (not a fast-forward) when the target is not an ancestor of the source 1652ms
+   ✓ worktree.ts — promoteBranch (dev/stage/main fast-forward) > fast-forwards the target branch when it is checked out in a linked worktree 2428ms
+   ✓ recursive_worktree tool > create action resolves the workspace root and creates a worktree 918ms
+   ✓ recursive_init + worktree — scaffold a run inside its own worktree > createWorktree scaffolds the run in .worktrees/<runId>/ and records the worktree branch 1281ms
+ ✓ tests/git-context.spec.ts (9 tests) 16967ms
+   ✓ git-context.ts — worktree + branch facts > main checkout: isWorktree=false, branch resolves 2241ms
+   ✓ git-context.ts — worktree + branch facts > linked worktree: isWorktree=true, distinct branch 3926ms
+   ✓ git-context.ts — worktree + branch facts > resolveBaseBranch infers the upstream promotion source (dev/stage/main) 3197ms
+   ✓ git-context.ts — worktree + branch facts > detectGitContext records distinct base vs worktree branch in a worktree 1688ms
+   ✓ git-context.ts — worktree + branch facts > verifyWorktreeBranch fails when the recorded branch does not match live HEAD 1387ms
+   ✓ git-context.ts — worktree + branch facts > verifyBranchBase fails when the worktree branch is not based on the recorded base 2144ms
+   ✓ ts-lint verifyRecordedBranches — lint-time worktree/branch guard > emits FAIL when recorded worktree branch mismatches live checkout 1024ms
+   ✓ ts-lint verifyRecordedBranches — lint-time worktree/branch guard > passes when recorded worktree + base branch match live git 945ms
+   ✓ ts-lint verifyRecordedBranches — lint-time worktree/branch guard > no branch fields recorded -> defer, no FAIL 409ms
+
+ Test Files  54 passed (54)
+      Tests  405 passed (405)
+   Start at  09:28:28
+   Duration  19.37s (transform 8.95s, setup 0ms, collect 25.77s, tests 63.12s, environment 41ms, prepare 28.98s)
+
+

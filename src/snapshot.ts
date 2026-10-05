@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { discoverRuns } from './run.ts'
 import { foldRun, pendingWork } from './status.ts'
 import { getLockStatus, receiptPath, readReceipt } from './lock.ts'
-import type { RecursiveProjection, RecursiveRunCard, RecursivePhaseRow, RecursiveRunState, RecursiveTamper } from './types.ts'
+import type { PhasePosition, RecursiveProjection, RecursiveRunCard, RecursivePhaseRow, RecursiveRunState, RecursiveTamper } from './types.ts'
 
 /** One locked-phase fact from a lock receipt (artifacts/<file>.receipt.json). */
 interface LockFacts {
@@ -41,8 +41,11 @@ function lockFactsOf(runDir: string, artifact: string): LockFacts {
 }
 
 /** One phase row from a run's folded status (locked facts enriched). */
-function phaseRowOf(runDir: string, key: string, file: string, status: string): RecursivePhaseRow {
+function phaseRowOf(runDir: string, key: string, file: string, status: string, position?: PhasePosition): RecursivePhaseRow {
   const row: RecursivePhaseRow = { phase: key, status }
+  // T21: carry the server's single derived position onto the wire so the board
+  // reads ONE value instead of recombining status/gates/lock fields itself.
+  if (position !== undefined) row.position = position
   if (status === 'LOCKED') {
     const facts = lockFactsOf(runDir, file)
     if (facts.lockedAt !== undefined) row.lockedAt = facts.lockedAt
@@ -63,7 +66,7 @@ export function foldRunCard(runDir: string, runId: string, worktreeRoot: string)
   // would never match the filename regex and would break columnForRun/cardFacts.
   const phases: Record<string, RecursivePhaseRow> = {}
   for (const phase of status.phases) {
-    if (phase.exists) phases[phase.file] = phaseRowOf(runDir, phase.file, phase.file, phase.status)
+    if (phase.exists) phases[phase.file] = phaseRowOf(runDir, phase.file, phase.file, phase.status, phase.position)
   }
   const state = runStateOf(status)
   return {

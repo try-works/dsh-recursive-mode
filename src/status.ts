@@ -1,7 +1,32 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ArtifactState, PendingWorkItem, PhaseDef, PhaseState, RecursiveStatusResult } from './types.ts'
+import type { ArtifactState, PendingWorkItem, PhaseDef, PhasePosition, PhaseState, RecursiveStatusResult } from './types.ts'
+import { PHASE_POSITIONS } from './types.ts'
+
+export { PHASE_POSITIONS }
+export type { ArtifactState, PhasePosition }
+
+/**
+ * T21 — derive the ONE named position of a phase from the fields consumers
+ * currently recombine for themselves. Total and disjoint: every reachable shape
+ * returns exactly one member of {@link PHASE_POSITIONS}, so two consumers cannot
+ * read the same phase and disagree.
+ *
+ * Order is the whole design. `tampered` outranks every other lock problem
+ * because a content/hash divergence is the more serious fact — a locked artifact
+ * whose bytes changed invalidates everything that cited it, whereas a failed gate
+ * on an otherwise-intact artifact is a fixable omission.
+ */
+export function phasePosition(state: ArtifactState): PhasePosition {
+  if (state.status === 'SKIPPED') return 'skipped'
+  if (!state.exists) return 'absent'
+  if (state.status === 'LOCKED') {
+    if (state.lockValid) return 'locked'
+    return state.lockProblems.includes('LockHash mismatch') ? 'tampered' : 'invalid-lock'
+  }
+  return state.blockers.length > 0 ? 'blocked' : 'draft'
+}
 
 export const RUN_ARTIFACT_SEQUENCE = [
   '00-requirements.md',
@@ -249,27 +274,126 @@ export function getArtifactState(artifactPath: string, workflowProfile: string):
   return { exists: true, status, lockValid, lockProblems, blockers: dedupedBlockers, lockedAt, storedHash, actualHash, coverage, approval, audit, todoHasSection: todo.hasTodo, todoUnchecked: todo.unchecked }
 }
 
+/**
+ * T21 — the fold frame: a PURE CACHE of one run's folded state, always
+ * rebuildable from the artifacts, so losing it costs time and never correctness
+ * (plan §4.0: a cache, not a store).
+ *
+ * `stamps` records a cheap per-artifact fingerprint (`size:mtimeMs`, or `null`
+ * for absent) at the moment that artifact was folded. Opening a `size:mtimeMs`
+ * file is orders of magnitude cheaper than reading and parsing 126 KB of lint
+ * input, which is what `snapshotWorkspace` currently does per run, per request.
+ */
+interface FoldFrame {
+  profile: string
+  stamps: Record<string, string | null>
+  states: Map<string, ArtifactState>
+  result: RecursiveStatusResult
+}
+
+const foldFrames = new Map<string, FoldFrame>()
+
+/** Counters so a caller can see whether the cache is doing anything. */
+const foldStats = { folds: 0, reuses: 0, reparsed: 0 }
+
+/**
+ * Fold-cache diagnostics. Read-only observation, kept in the shipped API because
+ * "is the frame hitting?" is the first question when the board feels slow, and a
+ * counter is cheaper than guessing. `reparsed` counts EXISTING artifacts re-read
+ * (an absent one costs only an existsSync).
+ */
+export function foldDiagnostics(): { folds: number; reuses: number; reparsed: number } {
+  return { ...foldStats }
+}
+
+/** Drop every frame and counter. For tests, and for a caller that knows the tree changed underneath. */
+export function resetFoldCache(): void {
+  foldFrames.clear()
+  foldStats.folds = 0
+  foldStats.reuses = 0
+  foldStats.reparsed = 0
+}
+
+/** `size:mtimeMs`, or null when the artifact does not exist. Never throws. */
+function stampOf(path: string): string | null {
+  try {
+    const s = statSync(path)
+    return s.size + ':' + s.mtimeMs
+  } catch {
+    return null
+  }
+}
+
 export function foldRun(runDir: string, runId: string): RecursiveStatusResult {
+  foldStats.folds += 1
   const workflowProfile = getWorkflowProfile(runDir)
+
+  const stamps: Record<string, string | null> = {}
+  for (const phase of PHASES) stamps[phase.key] = stampOf(join(runDir, phase.file))
+
+  const frame = foldFrames.get(runDir)
+  if (frame) {
+    // APPEND-ONLY ASSERTION. Tardigrade's atom throws when its source shrinks;
+    // here the artifacts are the run's evidence — a hash chain and receipts cite
+    // them — so an artifact that a previous fold saw and the tree no longer has
+    // is an anomaly, not an edit. Reporting it beats quietly returning a shorter
+    // state. Scoped to the CACHE on purpose: a cold fold (below) still reports
+    // the honest current tree, so recovery is not blocked by this check.
+    for (const key of Object.keys(frame.stamps)) {
+      if (frame.stamps[key] !== null && stamps[key] === null) {
+        const file = PHASES.find((p) => p.key === key)?.file ?? key
+        throw new Error(
+          'fold frame is append-only: ' + file + ' was present at the last fold and is now missing under ' + runDir +
+          ' - a run artifact is evidence and the chain should only grow',
+        )
+      }
+    }
+    const sameProfile = frame.profile === workflowProfile
+    const unchanged = sameProfile && PHASES.every((p) => frame.stamps[p.key] === stamps[p.key])
+    if (unchanged) {
+      foldStats.reuses += 1
+      return frame.result
+    }
+  }
+
   const states = new Map<string, ArtifactState>()
   for (const phase of PHASES) {
+    const stamp = stamps[phase.key] ?? null
+    const reusable = frame && frame.profile === workflowProfile && frame.stamps[phase.key] === stamp
+      ? frame.states.get(phase.key)
+      : undefined
+    if (reusable) {
+      states.set(phase.key, reusable)
+      continue
+    }
     const state = getArtifactState(join(runDir, phase.file), workflowProfile)
+    if (stamp !== null) foldStats.reparsed += 1
     if (phase.optional && !state.exists) state.status = 'SKIPPED'
     else if (workflowProfile === 'legacy' && LATE_PHASE_KEYS.has(phase.key) && !state.exists) state.status = 'SKIPPED'
     states.set(phase.key, state)
   }
+
   let currentPhase: RecursiveStatusResult['currentPhase'] = null
   for (const phase of PHASES) {
     const state = states.get(phase.key)!
     if (state.status === 'SKIPPED') continue
     if (!state.exists || !state.lockValid) {
+      // `currentPhase` keeps its pinned four-field shape: status.parity deep-equals
+      // it, and T21 must not move a parity-asserted contract.
       currentPhase = { key: phase.key, label: phase.label, phaseName: phase.phaseName, status: state.status }
       break
     }
   }
   const phases: PhaseState[] = PHASES.map(phase => {
     const state = states.get(phase.key)!
-    return { key: phase.key, label: phase.label, file: phase.file, optional: phase.optional, exists: state.exists, status: state.status, lockValid: state.lockValid, lockProblems: state.lockProblems, blockers: state.blockers }
+    return {
+      key: phase.key, label: phase.label, file: phase.file, optional: phase.optional,
+      exists: state.exists, status: state.status, lockValid: state.lockValid,
+      lockProblems: state.lockProblems, blockers: state.blockers,
+      position: phasePosition(state),
+    }
   })
-  return { runId, currentPhase, phases, workflowProfile }
+  const result: RecursiveStatusResult = { runId, currentPhase, phases, workflowProfile }
+  foldFrames.set(runDir, { profile: workflowProfile, stamps, states, result })
+  return result
 }

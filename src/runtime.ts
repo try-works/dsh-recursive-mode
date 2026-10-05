@@ -355,6 +355,11 @@ export class RecursiveRuntime extends Service {
     let result: SubagentResultLike | null = null
     let error: string | null = null
     let continuable: ContinuableDelegationLike | null = null
+    // T36: a parked round is NOT an error — it means the child has not settled yet.
+    // Kept apart from `error` so a turn-shaped caller can resume instead of treating
+    // an ordinary wait as a failure of the delegation.
+    let parked = false
+    let parkedReason: string | null = null
     if (decision.tier === 'native' || decision.tier === 'external-cli') {
       if (!input.subagents) {
         error = 'no ctx.subagents runtime available (self-audit fallback)'
@@ -373,7 +378,14 @@ export class RecursiveRuntime extends Service {
           awaitRoundResult: input.awaitRoundResult,
           parent: input.parent,
         })
-        if (continuable.fellBackToOneShot) {
+        if (continuable.parked === true) {
+          // T36: no settlement has landed for this round yet. The child is still
+          // working (or a repair was just sent), so the caller resumes on a later
+          // turn with the SAME child id. `accepted` stays false, and no `result` is
+          // fabricated — an unobserved round is never an approval.
+          parked = true
+          parkedReason = continuable.reason ?? null
+        } else if (continuable.fellBackToOneShot) {
           // The seam has no continuable capability — keep the one-shot result.
           result = continuable.rounds[0]?.result ?? null
           if (!result) error = 'continuable fallback produced no result'
@@ -449,7 +461,14 @@ export class RecursiveRuntime extends Service {
       error,
       /** T35: which child lifecycle actually carried this delegation. */
       delegationMode,
-      continuable: continuable ? { rounds: continuable.rounds, childId: continuable.childId, fellBackToOneShot: continuable.fellBackToOneShot } : null,
+      /**
+       * T36: true when the round has NOT settled yet, so the caller resumes with
+       * `continuable.childId` on a later turn. `parkedReason` carries the loop's own
+       * sentence ("the child is still working") without it being an `error`.
+       */
+      parked,
+      parkedReason,
+      continuable: continuable ? { rounds: continuable.rounds, childId: continuable.childId, fellBackToOneShot: continuable.fellBackToOneShot, parked: continuable.parked === true } : null,
     }
   }
 

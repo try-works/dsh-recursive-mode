@@ -7,9 +7,11 @@
  * disclosure** (never the whole plane).
  */
 import { describe, it, expect } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { Context } from '@deepseek-ai/cordis'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { RecursiveRuntime } from '../src/runtime.ts'
 import { loadMemoryIndex, selectMemory, MAX_MEMORY_DOCS } from '../src/memory.ts'
 
 /** A plane with one shard per kind; `body` is the shard's markdown. */
@@ -134,6 +136,56 @@ describe('T29 — progressive disclosure: router first, then at most maxDocs', (
       expect(capped.reason).toContain('capped at maxDocs')
     } finally {
       rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * T29 — THE INJECTION RIDES THE EXISTING ONCE-GATE.
+ *
+ * ⚠ The item is explicit that there must be ONE dedupe mechanism, not two. `recursive.phaseRules` is
+ * the call `recursive_phase` makes once per phase entry, so the memory section rides ITS return rather
+ * than a mechanism added beside it — asserted here on the runtime call a tool actually makes.
+ */
+describe('T29 — the injection point is the phase-entry call, and it injects nothing when nothing matches', () => {
+  async function mount(): Promise<{ runtime: RecursiveRuntime; root: string; dispose: () => Promise<void> }> {
+    const root = mkdtempSync(join(tmpdir(), 'rm-t29i-'))
+    const ctx = new Context()
+    const runtime = new RecursiveRuntime(ctx, { repoRoot: root })
+    await runtime.initRun('r1')
+    return { runtime, root, dispose: async () => { await ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) } }
+  }
+
+  it('returns an EMPTY memory section when the plane has nothing relevant', async () => {
+    const m = await mount()
+    try {
+      const rules = await m.runtime.phaseRules('r1')
+      expect(rules).not.toBeNull()
+      // No section, and a reason that says why — rather than a section that fabricates relevance.
+      expect(rules?.memory).toBe('')
+      expect(rules?.memoryReason).toContain('empty')
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('carries a rendered section ON THE SAME CALL once the plane has something relevant', async () => {
+    const m = await mount()
+    try {
+      // A plane entry matching the run's own requirements text, which is the injection query.
+      mkdirSync(join(m.root, 'memory', 'domains'), { recursive: true })
+      const requirements = readFileSync(join(m.root, '.recursive', 'run', 'r1', '00-requirements.md'), 'utf8')
+      const term = requirements.split(/\s+/).filter((word) => word.length > 5)[0] ?? 'requirements'
+      writeFileSync(
+        join(m.root, 'memory', 'domains', 'shard.md'),
+        '## Prior learning\n\nThis run concerns ' + term + ' and its ordering rules.\n',
+        'utf8',
+      )
+      const rules = await m.runtime.phaseRules('r1')
+      expect(rules?.memoryReason).toContain('injected 1')
+      expect(rules?.memory).toContain('Prior learning')
+    } finally {
+      await m.dispose()
     }
   })
 })

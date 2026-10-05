@@ -28,7 +28,7 @@ import { phaseRulesFor, type PhaseRules } from './phase-rules.ts'
 import { closeoutPhase } from './closeout.ts'
 import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './scratch.ts'
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
-import { readMemoryEntries, retrieveMemory, renderMemorySection } from './memory.ts'
+import { readMemoryEntries, retrieveMemory, renderMemorySection, selectMemory } from './memory.ts'
 import { contractDigest } from './policy.ts'
 import type { WorkflowEngineLike } from './workflow-audit.ts'
 import { createHandoff, createChildBrief, replyPath, childScratchPath, buildDelegationPrompt, type HandoffInput, type ChildBriefInput } from './handoff.ts'
@@ -939,14 +939,40 @@ export class RecursiveRuntime extends Service {
    * rules + instructions. Returns null when no active phase exists. This is the
    * canonical data source for the recursive_phase tool.
    */
-  async phaseRules(runId?: string, agent?: { session?: { header?: { cwd?: string } } } | null): Promise<(PhaseRules & { runId: string; phase: string }) | null> {
+  async phaseRules(runId?: string, agent?: { session?: { header?: { cwd?: string } } } | null, files?: readonly string[]): Promise<(PhaseRules & { runId: string; phase: string; memory: string; memoryReason: string }) | null> {
     const root = await this.resolveRootFor(agent)
     if (!root) return null
     const resolved = resolveRunDir(root, runId)
     if (!resolved) return null
     const phase = getNextLegalPhase(resolved.runDir)
     if (!phase) return null
-    return { runId: resolved.runId, phase, ...phaseRulesFor(phase) }
+    // T29 — MEMORY AT RUN ENTRY, ON THIS CALL AND NOWHERE ELSE.
+    //
+    // ⚠ THE ONCE-GATE IS THIS FUNCTION, not a mechanism added beside it: `recursive_phase` calls it
+    // once per phase entry, so riding the injection on its EXISTING return is what keeps it
+    // once-per-run instead of once-per-turn. A second dedupe would be a second thing to get wrong.
+    //
+    // ⚠ AND NOTHING RELEVANT INJECTS NOTHING — `memory` is the empty string, with the reason saying
+    // why, rather than a section that fabricates relevance the plane does not have.
+    const requirements = (() => {
+      try {
+        return readFileSync(join(resolved.runDir, '00-requirements.md'), 'utf8')
+      } catch {
+        // A run with no requirements yet has a weaker query, not an error: the paths still count.
+        return ''
+      }
+    })()
+    const selection = selectMemory(root, {
+      query: requirements.slice(0, 4000),
+      ...(files === undefined ? {} : { files }),
+    })
+    return {
+      runId: resolved.runId,
+      phase,
+      ...phaseRulesFor(phase),
+      memory: selection.injected ? renderMemorySection(selection.shards.map((shard) => shard.entry)) : '',
+      memoryReason: selection.reason,
+    }
   }
 
   /**

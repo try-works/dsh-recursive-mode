@@ -1,0 +1,23 @@
+run 1 exit=0 | Tests  510 passed (510)
+run 2 exit=0 | Tests  510 passed (510)
+run 3 exit=1 | Tests  1 failed | 509 passed (510)  FAILING: ❯ tests/identity.spec.ts (20 tests | 1 failed) 3493ms
+× T19 — reopen identity at the real seam > BOUNDARY, documented: reopening an UNCHANGED re-locked artifact is a repeat 1017ms
+→ promise resolved "{ artifact: '00-requirements.md', …(5) }" instead of rejecting
+run 4 exit=1 | Tests  1 failed | 509 passed (510)  FAILING: ❯ tests/identity.spec.ts (20 tests | 1 failed) 4495ms
+× T19 — reopen identity at the real seam > BOUNDARY, documented: reopening an UNCHANGED re-locked artifact is a repeat 936ms
+→ promise resolved "{ artifact: '00-requirements.md', …(5) }" instead of rejecting
+run 5 exit=0 | Tests  510 passed (510)
+run 6 exit=0 | Tests  510 passed (510)
+run 7 exit=0 | Tests  510 passed (510)
+run 8 exit=1 | Tests  1 failed | 509 passed (510)  FAILING: ❯ tests/identity.spec.ts (20 tests | 1 failed) 4410ms
+× T19 — reopen identity at the real seam > BOUNDARY, documented: reopening an UNCHANGED re-locked artifact is a repeat 1146ms
+→ promise resolved "{ artifact: '00-requirements.md', …(5) }" instead of rejecting
+run 9 exit=0 | Tests  510 passed (510)
+run 10 exit=1 | Tests  1 failed | 509 passed (510)  FAILING: ❯ tests/identity.spec.ts (20 tests | 1 failed) 3183ms
+× T19 — reopen identity at the real seam > BOUNDARY, documented: reopening an UNCHANGED re-locked artifact is a repeat 852ms
+→ promise resolved "{ artifact: '00-requirements.md', …(5) }" instead of rejecting
+run 11 exit=0 | Tests  510 passed (510)
+run 12 exit=1 | Tests  1 failed | 509 passed (510)  FAILING: ❯ tests/identity.spec.ts (20 tests | 1 failed) 4325ms
+× T19 — reopen identity at the real seam > BOUNDARY, documented: reopening an UNCHANGED re-locked artifact is a repeat 1161ms
+→ promise resolved "{ artifact: '00-requirements.md', …(5) }" instead of rejecting
+hunt complete

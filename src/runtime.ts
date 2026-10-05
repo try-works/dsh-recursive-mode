@@ -759,18 +759,28 @@ export class RecursiveRuntime extends Service {
     // receipt, so running it twice by accident destroys evidence. A retry after a
     // partial failure was previously indistinguishable from a fresh request.
     //
-    // The id covers the INPUTS plus the STATE BEING REOPENED (the current LockHash),
-    // and that third component is what makes the rule correct rather than merely
-    // present:
-    //   - a retry after a FAILED reopen still sees the same LockHash, because a
-    //     failed reopen leaves the artifact locked — so the retry IS recognised,
-    //     which is the case the item exists for;
-    //   - a DELIBERATE second reopen after re-locking sees a DIFFERENT LockHash, so
-    //     it is a different operation and runs — the legitimate workflow is intact.
+    // The id covers the INPUTS plus the STATE BEING REOPENED, and that third
+    // component is what makes the rule correct rather than merely present:
+    //   - a retry after a FAILED reopen still sees the same state, because a failed
+    //     reopen leaves the artifact locked — so the retry IS recognised, which is
+    //     the case the item exists for;
+    //   - a DELIBERATE second reopen after a REPAIR sees a different state, so it is
+    //     a different operation and runs — the legitimate workflow stays intact.
     // Keying on `{runId, artifact}` alone would have made the second reopen a no-op
     // and quietly broken reopen→fix→lock→reopen.
-    const lockHashAtEntry = getMdFieldValue(content, 'LockHash') ?? getMdFieldValue(content, 'LockedAt') ?? null
-    const operation = operationId({ act: 'reopen', input: { runId, artifact, lockHash: lockHashAtEntry } })
+    //
+    // The state is the artifact's BODY — its content with the lock fields normalised
+    // out — and NOT its `LockHash`. That distinction is a bug fix, found by T37's
+    // flake hunt: `LockHash` covers `LockedAt`, which is wall-clock truncated to the
+    // SECOND, so two locks of byte-identical content hash differently whenever the
+    // clock crosses a second boundary. Keying on it made this guard fire or not
+    // depending on timing — it failed 6 of 12 measured runs. The body is stable
+    // across a re-lock of identical content and differs as soon as the author
+    // changes anything that matters.
+    const bodyAtEntry = lockHashFromContent(
+      content.replace(/^[ \t]*Status:.*$/m, '').replace(/^[ \t]*LockedAt:.*\n?/m, ''),
+    )
+    const operation = operationId({ act: 'reopen', input: { runId, artifact, body: bodyAtEntry } })
     if (findOperation(runDir, operation)?.outcome === 'applied') {
       // This exact operation already completed on this exact state. Reported as a
       // recognised repeat rather than executed again — a second strip-and-invalidate

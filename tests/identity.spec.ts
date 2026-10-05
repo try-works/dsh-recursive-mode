@@ -31,6 +31,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RecursiveRuntime } from '../src/runtime.ts'
+import { lockHashFromContent } from '../src/lock.ts'
 import {
   canonicalInput,
   idempotencyKey,
@@ -226,8 +227,13 @@ describe('T19 — reopen identity at the real seam', () => {
   /** The id the runtime will compute for reopening the artifact's CURRENT state. */
   function currentReopenId(dir: string): string {
     const content = readFileSync(join(dir, ARTIFACT), 'utf8')
-    const hash = /^[ \t]*LockHash:\s*(?:`|")?([a-fA-F0-9]{64})/m.exec(content)?.[1] ?? null
-    return operationId({ act: 'reopen', input: { runId: RUN, artifact: ARTIFACT, lockHash: hash } })
+    // The state is the artifact's BODY (lock fields normalised out), not its
+    // LockHash — which covers the wall-clock LockedAt and so is not stable across a
+    // re-lock of identical content. See the T37 note in runtime.ts.
+    const body = lockHashFromContent(
+      content.replace(/^[ \t]*Status:.*$/m, '').replace(/^[ \t]*LockedAt:.*\n?/m, ''),
+    )
+    return operationId({ act: 'reopen', input: { runId: RUN, artifact: ARTIFACT, body } })
   }
 
   it('a completed reopen is RECORDED, so a retry is recognisable', async () => {

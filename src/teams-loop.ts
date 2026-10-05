@@ -3,8 +3,7 @@
  *
  * The recursion concept's core state machine, expressed over the native
  * `agentTeams` service: ONE durable task per phase carries the loop —
- * createTask (pending) → claim (in_progress) → audit round → on REVISE
- * updateTask(edit, repair instruction) → re-audit the SAME task → on APPROVE
+ * createTask (pending) → claim (in_progress) → audit round → on REVISE* updateTask(edit, repair instruction) → re-audit the SAME task → on APPROVE
  * updateTask(complete) → lock. A stuck reviewer is interrupted through the
  * team's own kill switch; a REJECT or round-cap releases the task and fails
  * loud — a lock NEVER happens before an APPROVE verdict.
@@ -27,6 +26,15 @@ export interface TeamCallerHandle {
   readonly id?: string
   readonly session?: { readonly header?: { readonly cwd?: string } }
 }
+
+/**
+ * T19: the ONLY import this module takes. Everything else it needs arrives through
+ * its injected seams, which is what keeps the loop drivable by fakes — but operation
+ * identity must be computed with the SAME canonical rule as every other operation in
+ * the plugin, so it comes from the shared module rather than a local copy. That would
+ * be the one place two implementations could silently disagree.
+ */
+import { operationId } from './identity.ts'
 
 /** Minimal cancellation shape (a live AbortSignal satisfies it). */
 export interface TeamAbortSignalLike {
@@ -124,6 +132,28 @@ export interface AuditToPassResult {
   readonly locked: boolean
   /** Latest task view (board-facing per-phase history). */
   readonly taskView?: TeamTaskViewLike
+  /**
+   * T19: true when this call was recognised as a repeat of an audit-to-pass that had
+   * already completed for this run and phase, so no second task was created. The
+   * caller must read the PHASE's lock state itself — this result cannot claim the
+   * artifact is locked, because a recognised repeat performs no locking.
+   */
+  readonly recognisedRepeat?: boolean
+}
+
+/**
+ * T19: the operation-index seam.
+ *
+ * INJECTED, not imported. `auditToPass` is pure over its seams — it has no `runDir`
+ * and no filesystem access, which is exactly what lets the whole loop be driven by
+ * fakes in tests. Reaching for `recordOperation` directly would have traded that away
+ * for one line of convenience, so the caller supplies persistence instead.
+ */
+export interface AuditOperationsSeamLike {
+  /** The previously recorded attempt for an id, or null when it is new. */
+  find?: (id: string) => { id: string; outcome?: string } | null
+  /** Record one attempt. Best-effort: a failed write must not change the loop's outcome. */
+  record?: (record: { id: string; act: string; at: string; outcome?: string }) => void
 }
 
 /** Inputs for one audit-to-pass loop. */
@@ -139,6 +169,11 @@ export interface AuditToPassInput {
   readonly blockedBy?: readonly TeamTaskIdLike[]
   /** Write scopes for the phase artifact (advisory, overlap-warned). */
   readonly writeScopes?: readonly string[]
+  /**
+   * T19: the operation index, injected. Absent it, the loop runs exactly as before —
+   * no pre-check, no records, no behaviour change.
+   */
+  readonly operations?: AuditOperationsSeamLike
   /** Run ONE audit round for the current task; live usage delegates (T4). */
   readonly runAuditRound: (round: number, task: TeamTaskViewLike) => Promise<AuditRoundOutcome>
   /** Lock the phase artifact — called ONLY after an APPROVE verdict. */
@@ -181,7 +216,55 @@ export function renderTaskHistory(task: TeamTaskViewLike | undefined, rounds: re
  *   → APPROVE: updateTask(complete) → lockPhase()
  *   → REJECT / cap / stuck: updateTask(release) + interrupt, NO lock.
  */
+/**
+ * T19 wrapper: recognise a repeat, then record what happened.
+ *
+ * The identity covers this run and phase. A call whose operation was already recorded
+ * as APPLIED returns immediately without creating a second task — the acceptance's
+ * "recognised no-op rather than a second execution". Every other outcome (rejected,
+ * capped, errored) records as `unaccepted`, so a retry still runs: a failed audit must
+ * stay retryable, and only a COMPLETED one is a repeat.
+ *
+ * Per-round entries are recorded after the loop from the result's own round trail.
+ * That is one write per call instead of one per round, and it keeps the loop body
+ * free of persistence — but it does mean a crash MID-loop leaves the whole operation
+ * unrecorded, which is the honest trade for not threading a writer through every
+ * branch.
+ */
 export async function auditToPass(input: AuditToPassInput): Promise<AuditToPassResult> {
+  const operation = operationId({ act: 'audit-to-pass', input: { runId: input.runId, phase: input.phase } })
+  const prior = input.operations?.find?.(operation) ?? null
+  if (prior?.outcome === 'applied') {
+    return {
+      ok: true,
+      reason: 'recognised repeat: an audit-to-pass for ' + input.runId + ' ' + input.phase +
+        ' already completed, so no second task was created',
+      rounds: [],
+      locked: false,
+      recognisedRepeat: true,
+    }
+  }
+
+  const result = await runAuditToPass(input)
+  const at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  input.operations?.record?.({
+    id: operation,
+    act: 'audit-to-pass',
+    at,
+    outcome: result.ok && result.locked ? 'applied' : 'unaccepted',
+  })
+  for (const round of result.rounds) {
+    input.operations?.record?.({
+      id: operationId({ act: 'audit-round', input: { runId: input.runId, phase: input.phase, round: round.round } }),
+      act: 'audit-round',
+      at,
+      outcome: round.verdict,
+    })
+  }
+  return result
+}
+
+async function runAuditToPass(input: AuditToPassInput): Promise<AuditToPassResult> {
   const { teams, caller, runId, phase, runAuditRound, lockPhase } = input
   const maxRounds = input.maxRounds ?? 3
   const waitTimeoutMs = input.waitTimeoutMs ?? 30_000

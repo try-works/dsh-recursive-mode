@@ -224,3 +224,116 @@ describe('teams-loop.ts — T3 audit-to-pass task loop', () => {
     expect(isTaskClaimedBy({ ...claimed, status: 'pending' }, 'me')).toBe(false)
   })
 })
+
+/**
+ * T19 — operation identity for the audit loop, through an INJECTED seam.
+ *
+ * The seam is injected rather than imported because `auditToPass` is pure over its
+ * seams — no `runDir`, no filesystem — which is what lets the whole loop be driven by
+ * fakes. These cases are the acceptance in executable form: a COMPLETED audit-to-pass
+ * is a recognised no-op rather than a second task, while a rejected or capped one
+ * stays retryable, because only a finished operation is a repeat.
+ */
+describe('auditToPass — T19 operation identity', () => {
+  /** An index that records in memory and answers lookups. */
+  function memoryIndex(seed: Array<{ id: string; outcome?: string }> = []) {
+    const records: Array<{ id: string; act: string; at: string; outcome?: string }> = []
+    return {
+      records,
+      seam: {
+        find: (id: string) => seed.find((r) => r.id === id) ?? records.find((r) => r.id === id) ?? null,
+        record: (record: { id: string; act: string; at: string; outcome?: string }) => { records.push(record) },
+      },
+    }
+  }
+
+  async function run(index: ReturnType<typeof memoryIndex>, script: FakeTeamOptions['script']) {
+    const fake = fakeTeam({ script })
+    const result = await auditToPass({
+      teams: fake.runtime,
+      caller: { id: 'lead' },
+      runId: 'run-9',
+      phase: '04',
+      runAuditRound: fake.runAuditRound,
+      lockPhase: async () => {},
+      operations: index.seam,
+    })
+    return { result, calls: fake.calls }
+  }
+
+  it('RECORDS the operation and one entry per round', async () => {
+    const index = memoryIndex()
+    const { result } = await run(index, [
+      { verdict: 'REVISE', accepted: false, repair: 'fix it' },
+      { verdict: 'APPROVE', accepted: true },
+    ])
+    expect(result.locked).toBe(true)
+    const whole = index.records.find((r) => r.act === 'audit-to-pass')
+    expect(whole).toBeDefined()
+    expect(whole!.outcome).toBe('applied')
+    // One entry per round, each with its own deterministic id and its verdict.
+    const roundRecords = index.records.filter((r) => r.act === 'audit-round')
+    expect(roundRecords.map((r) => r.outcome)).toEqual(['REVISE', 'REVISE', 'APPROVE'])
+    expect(new Set(roundRecords.map((r) => r.id)).size).toBe(3)
+  })
+
+  it('a COMPLETED audit-to-pass is a recognised no-op — no second task', async () => {
+    const first = memoryIndex()
+    await run(first, [{ verdict: 'APPROVE', accepted: true }])
+    const applied = first.records.find((r) => r.act === 'audit-to-pass')!
+    // Second call, same run and phase, index carrying the completed operation.
+    const second = memoryIndex([{ id: applied.id, outcome: 'applied' }])
+    const { result, calls } = await run(second, [{ verdict: 'APPROVE', accepted: true }])
+    expect(result.recognisedRepeat).toBe(true)
+    expect(result.ok).toBe(true)
+    // No task was created on the repeat — that is the whole point.
+    expect(calls.filter((c) => c.startsWith('createTask'))).toEqual([])
+    expect(result.rounds).toEqual([])
+  })
+
+  it('BUT a rejected or capped audit stays retryable (only a finished op is a repeat)', async () => {
+    const index = memoryIndex()
+    const { result, calls } = await run(index, [{ verdict: 'REJECT', accepted: false }])
+    expect(result.ok).toBe(false)
+    const whole = index.records.find((r) => r.act === 'audit-to-pass')!
+    expect(whole.outcome).toBe('unaccepted')
+    // A retry with that record present must RUN, not short-circuit.
+    const retry = memoryIndex([{ id: whole.id, outcome: 'unaccepted' }])
+    const again = await run(retry, [{ verdict: 'APPROVE', accepted: true }])
+    expect(again.result.recognisedRepeat).toBeUndefined()
+    expect(again.calls.some((c) => c.startsWith('createTask'))).toBe(true)
+  })
+
+  it('a DIFFERENT phase is a different operation, so it is never mistaken for a repeat', async () => {
+    const index = memoryIndex()
+    await run(index, [{ verdict: 'APPROVE', accepted: true }])
+    const applied = index.records.find((r) => r.act === 'audit-to-pass')!
+    const other = memoryIndex([{ id: applied.id, outcome: 'applied' }])
+    const fake = fakeTeam({ script: [{ verdict: 'APPROVE', accepted: true }] })
+    const result = await auditToPass({
+      teams: fake.runtime,
+      caller: { id: 'lead' },
+      runId: 'run-9',
+      phase: '05',
+      runAuditRound: fake.runAuditRound,
+      lockPhase: async () => {},
+      operations: other.seam,
+    })
+    expect(result.recognisedRepeat).toBeUndefined()
+    expect(fake.calls.some((c) => c.startsWith('createTask'))).toBe(true)
+  })
+
+  it('WITHOUT the seam the loop behaves exactly as before', async () => {
+    const fake = fakeTeam({ script: [{ verdict: 'APPROVE', accepted: true }] })
+    const result = await auditToPass({
+      teams: fake.runtime,
+      caller: { id: 'lead' },
+      runId: 'run-9',
+      phase: '04',
+      runAuditRound: fake.runAuditRound,
+      lockPhase: async () => {},
+    })
+    expect(result.locked).toBe(true)
+    expect(result.recognisedRepeat).toBeUndefined()
+  })
+})

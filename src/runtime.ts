@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { lintRun } from './ts-lint.ts'
 import { requirementsContent, worktreeContent, laterPhaseContent, detectGitContext, RUN_SCAFFOLD_DIRS, type GitContext } from './init-templates.ts'
-import { foldRun, pendingWork, resolveRunDir } from './status.ts'
+import { foldRun, getMdFieldValue, pendingWork, resolveRunDir } from './status.ts'
 import {
   getLockStatus,
   getNextLegalPhase,
@@ -16,6 +16,7 @@ import {
   type ReceiptChainResult,
 } from './lock.ts'
 import type { PendingWorkItem, RecursiveStatusResult } from './types.ts'
+import { findOperation, operationId, recordOperation } from './identity.ts'
 import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
 import { resolveControlPlaneRoot, type WorkspaceRegistryLike } from './workspace.ts'
@@ -752,10 +753,41 @@ export class RecursiveRuntime extends Service {
   private reopenArtifact(root: string, runDir: string, runId: string, artifact: string, artifactPath: string, agent?: { session?: { header?: { cwd?: string } } } | null): LockArtifactResult {
     if (!existsSync(artifactPath)) throw new Error('Artifact not found: ' + artifact)
     let content = readFileSync(artifactPath, 'utf8')
+
+    // T19 — DETERMINISTIC OPERATION IDENTITY. Reopen is the one genuinely DESTRUCTIVE
+    // operation here: it strips the lock fields and invalidates every downstream
+    // receipt, so running it twice by accident destroys evidence. A retry after a
+    // partial failure was previously indistinguishable from a fresh request.
+    //
+    // The id covers the INPUTS plus the STATE BEING REOPENED (the current LockHash),
+    // and that third component is what makes the rule correct rather than merely
+    // present:
+    //   - a retry after a FAILED reopen still sees the same LockHash, because a
+    //     failed reopen leaves the artifact locked — so the retry IS recognised,
+    //     which is the case the item exists for;
+    //   - a DELIBERATE second reopen after re-locking sees a DIFFERENT LockHash, so
+    //     it is a different operation and runs — the legitimate workflow is intact.
+    // Keying on `{runId, artifact}` alone would have made the second reopen a no-op
+    // and quietly broken reopen→fix→lock→reopen.
+    const lockHashAtEntry = getMdFieldValue(content, 'LockHash') ?? getMdFieldValue(content, 'LockedAt') ?? null
+    const operation = operationId({ act: 'reopen', input: { runId, artifact, lockHash: lockHashAtEntry } })
+    if (findOperation(runDir, operation)?.outcome === 'applied') {
+      // This exact operation already completed on this exact state. Reported as a
+      // recognised repeat rather than executed again — a second strip-and-invalidate
+      // would destroy whatever the first one left behind.
+      throw new Error(
+        'reopen ' + artifact + ' is a recognised repeat of an operation already applied (operation ' +
+        operation + '); refusing to reopen it a second time',
+      )
+    }
+
     content = content.replace(/^[ \t]*Status:.*$/m, 'Status: `DRAFT`')
     content = content.replace(/^[ \t]*LockedAt:.*\n?/m, '')
     content = content.replace(/^[ \t]*LockHash:.*\n?/m, '')
     writeFileSync(artifactPath, content, 'utf8')
+    // Record the attempt AFTER it succeeded, best-effort: a failed index write must
+    // never change the outcome of an operation the caller already performed.
+    recordOperation(runDir, { id: operation, act: 'reopen', at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'), outcome: 'applied' })
     const hadReceipt = invalidateReceipt(runDir, artifact)
     const stale = getStaleDownstreamPhases(runDir, artifact)
     for (const entry of stale) invalidateReceipt(runDir, entry.artifact)

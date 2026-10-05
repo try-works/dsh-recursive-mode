@@ -1,0 +1,19 @@
+
+ RUN  v2.1.9 D:/DEV/dsh-recursive-mode
+
+ ❯ tests/identity.spec.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/identity.spec.ts [ tests/identity.spec.ts ]
+Error: Failed to load url ../src/identity.ts (resolved id: ../src/identity.ts) in D:/DEV/dsh-recursive-mode/tests/identity.spec.ts. Does the file exist?
+ ❯ loadAndTransform node_modules/.pnpm/vite@5.4.21_@types+node@20.19.43/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:51969:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  10:41:59
+   Duration  2.03s (transform 236ms, setup 0ms, collect 0ms, tests 0ms, environment 1ms, prepare 553ms)
+
+

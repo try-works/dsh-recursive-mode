@@ -4,6 +4,7 @@ import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { RecursiveRuntime } from './runtime.ts'
+import type { RecursiveModeConfig } from './config.ts'
 import { createRecursiveStatusTool } from './recursive_status.tool.ts'
 import { createRecursiveInitTool } from './recursive_init.tool.ts'
 import { createRecursiveLockTool } from './recursive_lock.tool.ts'
@@ -56,6 +57,14 @@ declare module '@deepseek-ai/dsh-llm' {
 const REMINDER_SOURCE = { kind: 'recursive-mode' } as const
 
 export const name = '@try-works/dsh-recursive-mode'
+
+/**
+ * T7: the plugin's Config schema, which the settings service DISCOVERS (see `src/config.ts`
+ * for why declaring it is the registration). Re-exported from the entry because the Loader
+ * reads it from the plugin module.
+ */
+export { Config } from './config.ts'
+export type { RecursiveModeConfig } from './config.ts'
 
 export { RecursiveRuntime } from './runtime.ts'
 export { createRecursiveStatusTool } from './recursive_status.tool.ts'
@@ -173,7 +182,7 @@ function runToolGuard(
   return final
 }
 
-export function apply(ctx: Context, config?: { shellOnly?: boolean; repoRoot?: string }) {
+export function apply(ctx: Context, config?: RecursiveModeConfig) {
   // R4 shell split (02-to-be-plan.addendum-r4-r2-mount-resolution.md): the
   // global bare-name row in cordis.patch.yml mounts with config.shellOnly=true
   // to expose ONLY the client bundle for client discovery. It must register
@@ -193,6 +202,18 @@ export function apply(ctx: Context, config?: { shellOnly?: boolean; repoRoot?: s
     // run projection treats null as "no goal backing" and never throws.
     const goals = ctx.get('goals') as GoalServiceLike | null
     const recursive = new RecursiveRuntime(ctx, { repoRoot: config?.repoRoot ?? process.cwd(), workspaceRegistry, goals })
+
+    // T7 — THE SETTINGS NAMESPACE, APPLIED ON EVERY APPLY. The settings service edits the
+    // Loader entry's config and the Loader RE-APPLIES this plugin, so a toggle in the UI
+    // lands on this line: the re-application IS the hot reload, and there is deliberately
+    // no watcher or file poller here to drift out of sync with it.
+    //
+    // Guarded on PRESENCE rather than truthiness: `enforcement: undefined` means "the
+    // caller said nothing", which must leave the runtime's own default alone, while an
+    // explicit object — including one whose fields the schema defaulted — is a decision.
+    // Validation stays in `resolveEnforcementConfig` (strict, fail-loud), so a bad value
+    // from any source is refused rather than coerced.
+    if (config?.enforcement !== undefined) recursive.setEnforcementConfig(config.enforcement)
 
     const repairedRoots = new Set<string>()
     const reminderGate = new ReminderOnceGate()

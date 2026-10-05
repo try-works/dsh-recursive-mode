@@ -110,6 +110,16 @@ export function isCoreArtifact(artifactFile: string): boolean {
  * Mirrors: [phase for phase in PHASE_SEQUENCE[:idx] if (run_dir / phase).exists()]
  */
 export function getPrerequisites(runDir: string, artifactFile: string): string[] {
+  // T17 — DELEGATION ATTEMPTED AND REVERTED, because the parity golden caught a real behaviour
+  // change. The graph's nodes are the artifacts PRESENT on disk (which is what the item specifies),
+  // so a query about an artifact that does not exist yet has no in-edges and returned `[]` — while
+  // the shipped version answers from the artifact's POSITION in the sequence. Checking prerequisites
+  // BEFORE creating the artifact is the normal case, so that difference is not a detail: it would
+  // have made every pre-write check silently vacuous.
+  //
+  // ⚠ WHAT THE MODEL NEEDS FIRST: a distinction between present NODES and the QUERIED artifact, so
+  // the graph can answer about a node that is not on disk without pretending it is. Until then this
+  // stays as it is, and the graph is used where its model genuinely fits.
   const idx = phaseIndex(artifactFile)
   if (idx <= 0) return []
   const prereqs: string[] = []

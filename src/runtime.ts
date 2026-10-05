@@ -16,7 +16,7 @@ import {
   type ReceiptChainResult,
 } from './lock.ts'
 import type { PendingWorkItem, RecursiveStatusResult } from './types.ts'
-import { findOperation, operationId, recordOperation } from './identity.ts'
+import { findOperation, countOperations, operationId, recordOperation } from './identity.ts'
 import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
 import { resolveControlPlaneRoot, type WorkspaceRegistryLike } from './workspace.ts'
@@ -26,7 +26,7 @@ import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
 import { createHandoff, createChildBrief, replyPath, childScratchPath, buildDelegationPrompt, type HandoffInput, type ChildBriefInput } from './handoff.ts'
 import { loadRouterPolicy, routerPolicyPath, resolveRole, capabilityProbe, delegationDecisionBasis, type RouterPolicy, type SubagentProviderLike, type RouteDecision, type CapabilityProbe } from './router.ts'
-import { delegate, delegateContinuable, validateReferences, writeActionRecord, evaluateDelegationResult, reviewOutputSchema, defaultReviewToolFilter, type SubagentsRuntimeLike, type SubagentStartRequestLike, type SubagentResultLike, type Reference, type ActionRecordInput, type ContinuableDelegationLike, type SubagentParentHandle } from './delegation.ts'
+import { delegate, delegateContinuable, remainingDepthFor, validateReferences, writeActionRecord, evaluateDelegationResult, reviewOutputSchema, defaultReviewToolFilter, type SubagentsRuntimeLike, type SubagentStartRequestLike, type SubagentResultLike, type Reference, type ActionRecordInput, type ContinuableDelegationLike, type SubagentParentHandle } from './delegation.ts'
 import { validateTransition, coupleGateBlockToGoal, type PhaseTransitionIntent, type RecursivePhaseState, type GateCheckResult } from './lifecycle.ts'
 import { resolveEnforcementConfig, DEFAULT_ENFORCEMENT, evaluateToolGuard, detectTamper, type EnforcementConfig, type ToolGuardDecision, type ToolExecLike } from './enforcement.ts'
 import type { Session } from '@deepseek-ai/dsh-session'
@@ -86,6 +86,17 @@ export type RecursiveStatusWithGuardDecisions = RecursiveStatusResult & {
 
 /** How many recent decisions to read from the log before scoping to one run. */
 const GUARD_DECISION_READ_LIMIT = 200
+
+/**
+ * T28: the delegating agent's own delegation depth, read structurally rather than by
+ * importing the harness's `delegationDepthOf`. The plugin already models every
+ * harness touchpoint as a minimal structural seam, and this keeps that convention —
+ * an absent depth means top level, which is the safe reading for a budget.
+ */
+function parentDepthOf(parent: unknown): number {
+  const depth = (parent as { options?: { subagentDepth?: unknown } } | null | undefined)?.options?.subagentDepth
+  return typeof depth === 'number' && Number.isSafeInteger(depth) && depth > 0 ? depth : 0
+}
 
 /** How many of that run's decisions the status surface carries. */
 const GUARD_DECISION_SURFACE_LIMIT = 20
@@ -353,12 +364,16 @@ export class RecursiveRuntime extends Service {
     // R4: plugin-driven delegation with the full request shape. `parent` is the
     // exact live direct-parent Agent (object-identity authority in the live
     // subagent service); absent it, the live start() rejects the request.
+    // T28: the depth budget replaces the hardcoded `?? 2`. The parent's own depth is
+    // read structurally (the plugin's seam style) and SUBTRACTED, so the configured
+    // ceiling bounds the whole recursion rather than being re-granted at every level
+    // — a "depth 2" budget that resets per level bounds nothing.
     const request: SubagentStartRequestLike = {
       prompt: [{ type: 'text', text: prompt }],
       label: input.delegationId + '/' + input.childId,
       outputSchema: reviewOutputSchema(),
       toolFilter: input.toolFilter ?? defaultReviewToolFilter(),
-      maxDepth: input.maxDepth ?? 2,
+      maxDepth: remainingDepthFor(this.enforcementConfig.budgets, parentDepthOf(input.parent), input.maxDepth),
     }
     if (input.parent !== undefined) request.parent = input.parent
 
@@ -410,11 +425,24 @@ export class RecursiveRuntime extends Service {
     // because its body is part of the id. Without this the same review could spawn a
     // second reviewer for an artifact that has not changed.
     const prior = operationsDir === '' ? null : findOperation(operationsDir, operation)
-    if (prior?.outcome === 'accepted') {
-      throw new Error(
+    if (prior?.outcome === 'accepted') {      throw new Error(
         'review of ' + input.phase + ' is a recognised repeat of an operation already accepted (operation ' +
         operation + '); the artifact has not changed since it passed',
       )
+    }
+
+    // T28 — THE CHILDREN BUDGET, counted FROM the index rather than tracked beside it,
+    // so the bound cannot drift from the operations it bounds. Distinct operations,
+    // not records: a resumed turn re-enters here with the same id and must not be
+    // counted as another child.
+    if (operationsDir !== '') {
+      const started = countOperations(operationsDir, 'delegate-review', input.phase)
+      if (started >= this.enforcementConfig.budgets.maxChildrenPerPhase) {
+        throw new Error(
+          'children budget reached: phase ' + input.phase + ' has already started ' + started +
+          ' delegation(s), and the configured cap is ' + this.enforcementConfig.budgets.maxChildrenPerPhase,
+        )
+      }
     }
 
     if (decision.tier === 'native' || decision.tier === 'external-cli') {
@@ -429,7 +457,7 @@ export class RecursiveRuntime extends Service {
           label: input.delegationId + '/' + input.childId,
           prompt,
           childId: input.childId,
-          maxDepth: input.maxDepth ?? 2,
+          maxDepth: remainingDepthFor(this.enforcementConfig.budgets, parentDepthOf(input.parent), input.maxDepth),
           toolFilter: input.toolFilter ?? defaultReviewToolFilter(),
           maxRounds: input.maxRounds ?? 3,
           awaitRoundResult: input.awaitRoundResult,
@@ -479,6 +507,7 @@ export class RecursiveRuntime extends Service {
         act: 'delegate-review',
         at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
         outcome: evaluation.accepted ? 'accepted' : 'unaccepted',
+        phase: input.phase,
       })
     }
 

@@ -46,6 +46,64 @@ export interface ElideResult {
   meta: ElisionMeta | null
 }
 
+/** The payload shape the byte budget knows how to trim. */
+export interface CappedPayload {
+  errors: string[]
+  warnings: string[]
+  elided: ElisionMeta[]
+}
+
+/** Serialized size of a payload, measured the way the byte budget is enforced. */
+export function payloadBytes(value: unknown): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8')
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * T28 — cap a payload by BYTES, which T24's count cap cannot do.
+ *
+ * `MAX_FINDINGS_FULL` bounds HOW MANY findings come back; it cannot see SIZE, so a
+ * handful of enormous findings still passes. This trims the longer list repeatedly
+ * until the payload fits, and reports every trim through the same `ElisionMeta` T24
+ * established — a silent truncation is worse than no cap, because the reader cannot
+ * tell a complete result from a clipped one.
+ *
+ * Terminates: each pass at least halves the longer list, and an empty pair of lists
+ * ends the loop. A payload that still exceeds the budget once both lists are empty is
+ * returned as-is — the alternative would be deleting fields the caller needs.
+ */
+export function capPayloadBytes<T extends CappedPayload>(payload: T, maxBytes: number): T {
+  let current = payload
+  let bytes = payloadBytes(current)
+  if (bytes <= maxBytes) return current
+
+  for (let attempt = 0; attempt < 16 && bytes > maxBytes; attempt += 1) {
+    const { errors, warnings } = current
+    if (errors.length === 0 && warnings.length === 0) break
+    const trimErrors = errors.length >= warnings.length
+    const from = trimErrors ? errors : warnings
+    const keep = Math.floor(from.length / 2)
+    current = {
+      ...current,
+      errors: trimErrors ? from.slice(0, keep) : errors,
+      warnings: trimErrors ? warnings : from.slice(0, keep),
+      elided: [...current.elided, {
+        kind: trimErrors ? 'errors' : 'warnings',
+        total: from.length,
+        shown: keep,
+        omitted: from.length - keep,
+        hint: 'trimmed to fit the configured result byte budget (maxResultBytes); '
+          + 'fix the findings shown and re-run to see the next batch',
+      }],
+    }
+    bytes = payloadBytes(current)
+  }
+  return current
+}
+
 /**
  * Keep at most `max` findings. Clipping is reported, never silent.
  * A `max` of 0 or less is treated as "keep nothing" but still reports honestly.

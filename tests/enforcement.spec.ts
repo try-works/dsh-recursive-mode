@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
-  resolveEnforcementConfig, DEFAULT_ENFORCEMENT,
+  resolveEnforcementConfig, DEFAULT_ENFORCEMENT, DEFAULT_BUDGETS,
   evaluateToolGuard, detectTamper, coerceAskToDecision, type EnforcementConfig,
 } from '../src/enforcement.ts'
 import { lockHashFromContent } from '../src/lock.ts'
@@ -11,7 +11,16 @@ import { lockHashFromContent } from '../src/lock.ts'
 describe('enforcement.ts — gates + config (R3/R4/R7/R8)', () => {
   it('resolveEnforcementConfig defaults advisory and rejects unknown keys', () => {
     expect(resolveEnforcementConfig(undefined)).toEqual(DEFAULT_ENFORCEMENT)
-    expect(resolveEnforcementConfig({ preStep: 'strict' })).toEqual({ preStep: 'strict', toolGuards: 'advisory', tamper: 'advisory' })
+    // T28 added `budgets` to the shape, so the expected object carries it: the
+    // assertion is about resolveEnforcementConfig filling in defaults, and the
+    // defaults now include the caps. Pinned explicitly rather than relaxed to a
+    // partial match, so a future shape change still fails here loudly.
+    expect(resolveEnforcementConfig({ preStep: 'strict' })).toEqual({
+      preStep: 'strict',
+      toolGuards: 'advisory',
+      tamper: 'advisory',
+      budgets: DEFAULT_BUDGETS,
+    })
     expect(() => resolveEnforcementConfig({ bogus: 'x' })).toThrow(/unknown key/)
   })
 

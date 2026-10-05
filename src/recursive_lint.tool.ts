@@ -20,7 +20,8 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RecursiveRuntime } from './runtime.ts'
 import { codeRuntimeRefusal, toolError } from './errors.ts'
-import { MAX_FINDINGS_FULL, MAX_FINDINGS_SUMMARY, elideFindings, type ElisionMeta } from './result-cap.ts'
+import { DEFAULT_BUDGETS } from './enforcement.ts'
+import { MAX_FINDINGS_FULL, MAX_FINDINGS_SUMMARY, elideFindings, capPayloadBytes, type ElisionMeta } from './result-cap.ts'
 
 type LintMode = 'summary' | 'full'
 
@@ -80,7 +81,21 @@ export function createRecursiveLintTool(recursive: RecursiveRuntime) {
           warnings: warnings.kept,
           elided,
         }
-        return bounded as unknown as JsonValue
+        // T28: the BYTE budget, applied after the count budget. T24's cap bounds how
+        // MANY findings come back and cannot see size, so one enormous finding passes
+        // it; this bounds the serialized payload. Both report through `elided[]`, so a
+        // reader can always tell a complete result from a clipped one.
+        // T28: the byte budget comes from the config, so it is reviewable and
+        // configurable rather than another hardcoded constant.
+        //
+        // Read DEFENSIVELY: this tool only needs `lintArtifact`, and a caller that
+        // supplies a narrower runtime (a test stub, a host that mounts the tool
+        // without the full service) must still get a bounded result. An unavailable
+        // config falls back to the documented default instead of throwing — the cap
+        // is a safety bound, and a safety bound that can be disabled by an absent
+        // config is not one.
+        const maxResultBytes = recursive.enforcementConfig?.budgets?.maxResultBytes ?? DEFAULT_BUDGETS.maxResultBytes
+        return capPayloadBytes(bounded, maxResultBytes) as unknown as JsonValue
       } catch (err) {
         return { error: codeRuntimeRefusal(err instanceof Error ? err.message : String(err)) } as const
       }

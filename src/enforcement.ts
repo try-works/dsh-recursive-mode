@@ -28,28 +28,101 @@ export const builtInToolPolicy = builtInToolPolicyDefault
 
 export type EnforcementMode = 'strict' | 'advisory'
 
+/**
+ * T28 — the budgets. Every unbounded loop and every unbounded result gets a named,
+ * configurable cap, because a bound that is not named cannot be reviewed and a bound
+ * that is not configurable gets hardcoded per call site (which is exactly what
+ * happened to `maxDepth`).
+ */
+export interface BudgetConfig {
+  /** Rounds ONE phase's audit loop may run, even when every round makes progress. */
+  maxAuditRounds: number
+  /**
+   * How many times a phase may be sent back for repair. Distinct from T20's
+   * no-progress bound: that one stops a loop REPEATING a finding, this one bounds a
+   * loop that keeps finding genuinely NEW things — the case the no-progress bound
+   * deliberately lets run.
+   */
+  maxRepairAttempts: number
+  /** The ceiling for the WHOLE recursion, not a fresh allowance at each level. */
+  maxDelegationDepth: number
+  /** Delegated children one phase may start. */
+  maxChildrenPerPhase: number
+  /** Byte ceiling for one tool result. T24's caps bound the COUNT of findings; a few enormous findings need this. */
+  maxResultBytes: number
+}
+
+export const DEFAULT_BUDGETS: BudgetConfig = {
+  // Matches the historical `maxRounds ?? 3`, so adding the config changes no default.
+  maxAuditRounds: 3,
+  maxRepairAttempts: 3,
+  // Matches the hardcoded `maxDepth ?? 2` this replaces, for the same reason.
+  maxDelegationDepth: 2,
+  maxChildrenPerPhase: 4,
+  maxResultBytes: 65_536,
+}
+
 export interface EnforcementConfig {
   preStep: EnforcementMode
   toolGuards: EnforcementMode
   tamper: EnforcementMode
+  /** T28: the caps. Always present, so a caller never has to guess a default. */
+  budgets: BudgetConfig
 }
 
-/** Validate the enforcement config shape (unknown keys fail at plugin load). */
+const CONFIG_KEYS = ['preStep', 'toolGuards', 'tamper', 'budgets']
+const BUDGET_KEYS: ReadonlyArray<keyof BudgetConfig> = [
+  'maxAuditRounds', 'maxRepairAttempts', 'maxDelegationDepth', 'maxChildrenPerPhase', 'maxResultBytes',
+]
+
+/**
+ * Validate the enforcement config shape (unknown keys fail at plugin load).
+ *
+ * A budget must be a POSITIVE INTEGER. Zero and negatives are rejected rather than
+ * coerced: `0` would mean "never allowed", which bricks the phase it was meant to
+ * bound, and a negative would read as already-exceeded everywhere it is compared.
+ * A config error is loud at load, not mysterious later.
+ */
 export function resolveEnforcementConfig(config: unknown): EnforcementConfig {
   const raw = (config ?? {}) as Record<string, unknown>
-  const unknown = Object.keys(raw).filter((k) => !['preStep', 'toolGuards', 'tamper'].includes(k))
+  const unknown = Object.keys(raw).filter((k) => !CONFIG_KEYS.includes(k))
   if (unknown.length > 0) {
-    throw new Error('EnforcementConfig has unknown key(s) ' + unknown.join(', ') + ' - config is { preStep, toolGuards, tamper }')
+    throw new Error('EnforcementConfig has unknown key(s) ' + unknown.join(', ') + ' - config is { preStep, toolGuards, tamper, budgets }')
   }
   const mode = (value: unknown): EnforcementMode => (value === 'strict' ? 'strict' : 'advisory')
+
+  const rawBudgets = (raw.budgets ?? {}) as Record<string, unknown>
+  if (typeof raw.budgets !== 'undefined' && (raw.budgets === null || typeof raw.budgets !== 'object')) {
+    throw new Error('EnforcementConfig budgets must be an object of caps')
+  }
+  const unknownBudget = Object.keys(rawBudgets).filter((k) => !BUDGET_KEYS.includes(k as keyof BudgetConfig))
+  if (unknownBudget.length > 0) {
+    throw new Error('EnforcementConfig budgets has unknown key(s) ' + unknownBudget.join(', ') + ' - budgets are { ' + BUDGET_KEYS.join(', ') + ' }')
+  }
+  const budgets = { ...DEFAULT_BUDGETS }
+  for (const key of BUDGET_KEYS) {
+    const value = rawBudgets[key]
+    if (value === undefined) continue
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+      throw new Error('EnforcementConfig budgets.' + key + ' must be a positive integer (got ' + JSON.stringify(value) + ')')
+    }
+    budgets[key] = value
+  }
+
   return {
     preStep: mode(raw.preStep),
     toolGuards: mode(raw.toolGuards),
     tamper: mode(raw.tamper),
+    budgets,
   }
 }
 
-export const DEFAULT_ENFORCEMENT: EnforcementConfig = { preStep: 'advisory', toolGuards: 'advisory', tamper: 'advisory' }
+export const DEFAULT_ENFORCEMENT: EnforcementConfig = {
+  preStep: 'advisory',
+  toolGuards: 'advisory',
+  tamper: 'advisory',
+  budgets: DEFAULT_BUDGETS,
+}
 
 /**
  * T15: the rule that produced a guard decision (a machine-readable reason for

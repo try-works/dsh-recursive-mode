@@ -153,6 +153,8 @@ export interface AuditToPassResult {
   readonly consecutiveNoProgress?: number
   /** T20: the last round's progress cursor — what the round said was wrong. */
   readonly progressCursor?: string
+  /** T28: how many repairs were requested before the loop stopped. */
+  readonly repairAttempts?: number
   /**
    * T20: true when the loop stopped in a state that must NOT be retried
    * automatically — no progress, or the attempt cap. The caller has to decide to
@@ -210,6 +212,14 @@ export interface AuditToPassInput {
    * budget — a round count indulges a loop while cutting off genuine progress.
    */
   readonly maxNoProgress?: number
+  /**
+   * T28: the configurable caps. `maxAuditRounds` is the absolute round ceiling and
+   * `maxRepairAttempts` bounds how many times a phase may be sent back for repair
+   * even when every round finds something NEW — the case T20's no-progress bound
+   * deliberately lets run. Both are optional so an existing caller keeps its
+   * behaviour, with the round cap falling back to `maxRounds ?? 3`.
+   */
+  readonly budgets?: { readonly maxAuditRounds?: number; readonly maxRepairAttempts?: number }
   /** Per-round wait timeout before the audit round runs (skipped without the seam). */
   readonly waitTimeoutMs?: number
 }
@@ -300,7 +310,12 @@ export async function auditToPass(input: AuditToPassInput): Promise<AuditToPassR
 
 async function runAuditToPass(input: AuditToPassInput): Promise<AuditToPassResult> {
   const { teams, caller, runId, phase, runAuditRound, lockPhase } = input
-  const maxRounds = input.maxRounds ?? 3
+  const maxRounds = input.maxRounds ?? input.budgets?.maxAuditRounds ?? 3
+  // T28: the repair budget. Absent a configured cap, repairs are unbounded here on
+  // purpose — the round cap and the no-progress bound still apply, and inventing a
+  // silent default would change the behaviour of every existing caller.
+  const maxRepairAttempts = input.budgets?.maxRepairAttempts ?? Number.POSITIVE_INFINITY
+  let repairAttempts = 0
   // T20: the no-progress bound, and the counters that make it visible.
   const maxNoProgress = input.maxNoProgress ?? 2
   let consecutiveNoProgress = 0
@@ -369,7 +384,29 @@ async function runAuditToPass(input: AuditToPassInput): Promise<AuditToPassResul
         description: current.description + '\nround ' + round + ' repair: ' + repair,
       })
       current = edited
+      repairAttempts += 1
       rounds.push({ round, verdict: 'REVISE', repair, taskRevision: edited.revision, ...(repeated ? { noProgress: true } : {}) })
+
+      // T28 — THE REPAIR BUDGET. Checked before the no-progress bound because it is
+      // the wider stopping condition: a repair budget catches a loop that keeps
+      // finding NEW things, which is precisely the loop the no-progress bound is
+      // designed not to stop.
+      if (repairAttempts >= maxRepairAttempts) {
+        const released = await teams.updateTask(caller, { taskId: task.id, expectedRevision: current.revision, action: 'release' })
+        return {
+          ok: false,
+          reason: 'repair budget reached: ' + repairAttempts + ' repair attempt(s) without an APPROVE',
+          taskId: task.id,
+          rounds,
+          locked: false,
+          taskView: released,
+          attempts,
+          repairAttempts,
+          consecutiveNoProgress,
+          progressCursor,
+          resumeRequired: true,
+        }
+      }
 
       // T20 — STOP THE LOOP, DO NOT SPEND THE CAP ON IT. A phase that restates the
       // same finding has not been repaired, and more rounds will not repair it. The

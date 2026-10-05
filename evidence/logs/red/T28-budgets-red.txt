@@ -1,0 +1,157 @@
+
+ RUN  v2.1.9 D:/DEV/dsh-recursive-mode
+
+ ❯ tests/budgets.spec.ts (11 tests | 9 failed) 83ms
+   × T28 — the budget block is part of the config and is validated > ships defaults for every cap, so no cap is left implicit 19ms
+     → Cannot read properties of undefined (reading 'maxAuditRounds')
+   × T28 — the budget block is part of the config and is validated > accepts a partial override and keeps the rest of the defaults 3ms
+     → parseEnforcementConfig is not a function
+   × T28 — the budget block is part of the config and is validated > REJECTS a non-positive or non-integer cap rather than silently accepting it 18ms
+     → expected [Function] to throw error matching /maxAuditRounds/ but got 'parseEnforcemen…'
+   × T28 — the budget block is part of the config and is validated > still rejects an unknown key, including inside budgets 3ms
+     → expected [Function] to throw error matching /unknown key/ but got 'parseEnforcemen…'
+   × T28 — the audit loop honours its two bounds > maxRepairAttempts stops a loop that keeps making progress 9ms
+     → expected 'max rounds reached without an APPROVE' to contain 'repair'
+   × T28 — a child may NARROW a budget, never widen it > reports the remaining depth from a parent already partway down 2ms
+     → remainingDepthFor is not a function
+   × T28 — a child may NARROW a budget, never widen it > NEVER returns a negative remaining depth for a parent already past the cap 2ms
+     → remainingDepthFor is not a function
+   × T28 — a child may NARROW a budget, never widen it > a NARROWER request from the caller is respected over the remaining budget 2ms
+     → remainingDepthFor is not a function
+   × T28 — the budgets reach the enforcement config the plugin ships > a config parsed from disk carries the budgets, so the caps are configurable 2ms
+     → parseEnforcementConfig is not a function
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/budgets.spec.ts > T28 — the budget block is part of the config and is validated > ships defaults for every cap, so no cap is left implicit
+TypeError: Cannot read properties of undefined (reading 'maxAuditRounds')
+ ❯ tests/budgets.spec.ts:78:20
+     76|   it('ships defaults for every cap, so no cap is left implicit', () =>…
+     77|     const budgets = DEFAULT_ENFORCEMENT.budgets
+     78|     expect(budgets.maxAuditRounds).toBeGreaterThan(0)
+       |                    ^
+     79|     expect(budgets.maxRepairAttempts).toBeGreaterThan(0)
+     80|     expect(budgets.maxDelegationDepth).toBeGreaterThan(0)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  tests/budgets.spec.ts > T28 — the budget block is part of the config and is validated > accepts a partial override and keeps the rest of the defaults
+TypeError: parseEnforcementConfig is not a function
+ ❯ tests/budgets.spec.ts:86:20
+     84| 
+     85|   it('accepts a partial override and keeps the rest of the defaults', …
+     86|     const config = parseEnforcementConfig({ budgets: { maxAuditRounds:…
+       |                    ^
+     87|     expect(config.budgets.maxAuditRounds).toBe(7)
+     88|     expect(config.budgets.maxDelegationDepth).toBe(DEFAULT_ENFORCEMENT…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  tests/budgets.spec.ts > T28 — the budget block is part of the config and is validated > REJECTS a non-positive or non-integer cap rather than silently accepting it
+AssertionError: expected [Function] to throw error matching /maxAuditRounds/ but got 'parseEnforcemen…'
+
+- Expected: 
+/maxAuditRounds/
+
++ Received: 
+"__vite_ssr_import_1__.parseEnforcementConfig is not a function"
+
+ ❯ tests/budgets.spec.ts:94:78
+     92|     // A budget of 0 or -1 would mean "never" or "already exceeded" — …
+     93|     // budget, and both would brick a phase. Fail loud at config time.
+     94|     expect(() => parseEnforcementConfig({ budgets: { maxAuditRounds: 0…
+       |                                                                              ^
+     95|     expect(() => parseEnforcementConfig({ budgets: { maxDelegationDept…
+     96|     expect(() => parseEnforcementConfig({ budgets: { maxResultBytes: 1…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  tests/budgets.spec.ts > T28 — the budget block is part of the config and is validated > still rejects an unknown key, including inside budgets
+AssertionError: expected [Function] to throw error matching /unknown key/ but got 'parseEnforcemen…'
+
+- Expected: 
+/unknown key/
+
++ Received: 
+"__vite_ssr_import_1__.parseEnforcementConfig is not a function"
+
+ ❯ tests/budgets.spec.ts:100:55
+     98| 
+     99|   it('still rejects an unknown key, including inside budgets', () => {
+    100|     expect(() => parseEnforcementConfig({ nope: 1 })).toThrow(/unknown…
+       |                                                       ^
+    101|     expect(() => parseEnforcementConfig({ budgets: { nope: 1 } })).toT…
+    102|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  tests/budgets.spec.ts > T28 — the audit loop honours its two bounds > maxRepairAttempts stops a loop that keeps making progress
+AssertionError: expected 'max rounds reached without an APPROVE' to contain 'repair'
+
+Expected: "repair"
+Received: "max rounds reached without an APPROVE"
+
+ ❯ tests/budgets.spec.ts:128:27
+    126|     })
+    127|     expect(result.ok).toBe(false)
+    128|     expect(result.reason).toContain('repair')
+       |                           ^
+    129|     expect(result.repairAttempts).toBe(2)
+    130|     // It stopped on the REPAIR budget, not on the round cap.
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  tests/budgets.spec.ts > T28 — a child may NARROW a budget, never widen it > reports the remaining depth from a parent already partway down
+TypeError: remainingDepthFor is not a function
+ ❯ tests/budgets.spec.ts:150:12
+    148|     // The configured maximum is a ceiling for the WHOLE recursion, no…
+    149|     // allowance at every level: otherwise a bound of 3 permits 3^dept…
+    150|     expect(remainingDepthFor({ maxDelegationDepth: 3 }, 0)).toBe(3)
+       |            ^
+    151|     expect(remainingDepthFor({ maxDelegationDepth: 3 }, 2)).toBe(1)
+    152|     expect(remainingDepthFor({ maxDelegationDepth: 3 }, 3)).toBe(0)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  tests/budgets.spec.ts > T28 — a child may NARROW a budget, never widen it > NEVER returns a negative remaining depth for a parent already past the cap
+TypeError: remainingDepthFor is not a function
+ ❯ tests/budgets.spec.ts:159:12
+    157|     // must yield 0 — "delegate no further" — not a negative number th…
+    158|     // read as permission somewhere downstream.
+    159|     expect(remainingDepthFor({ maxDelegationDepth: 2 }, 5)).toBe(0)
+       |            ^
+    160|   })
+    161| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+ FAIL  tests/budgets.spec.ts > T28 — a child may NARROW a budget, never widen it > a NARROWER request from the caller is respected over the remaining budget
+TypeError: remainingDepthFor is not a function
+ ❯ tests/budgets.spec.ts:164:12
+    162|   it('a NARROWER request from the caller is respected over the remaini…
+    163|     // min(remaining, requested): the caller may ask for less, never f…
+    164|     expect(remainingDepthFor({ maxDelegationDepth: 5 }, 0, 2)).toBe(2)
+       |            ^
+    165|     expect(remainingDepthFor({ maxDelegationDepth: 5 }, 4, 9)).toBe(1)
+    166|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/9]⎯
+
+ FAIL  tests/budgets.spec.ts > T28 — the budgets reach the enforcement config the plugin ships > a config parsed from disk carries the budgets, so the caps are configurable
+TypeError: parseEnforcementConfig is not a function
+ ❯ tests/budgets.spec.ts:171:39
+    169| describe('T28 — the budgets reach the enforcement config the plugin sh…
+    170|   it('a config parsed from disk carries the budgets, so the caps are c…
+    171|     const parsed: EnforcementConfig = parseEnforcementConfig({ budgets…
+       |                                       ^
+    172|     expect(parsed.budgets.maxChildrenPerPhase).toBe(1)
+    173|     expect(parsed.budgets.maxResultBytes).toBe(4096)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/9]⎯
+
+ Test Files  1 failed (1)
+      Tests  9 failed | 2 passed (11)
+   Start at  11:34:56
+   Duration  3.25s (transform 641ms, setup 0ms, collect 628ms, tests 83ms, environment 1ms, prepare 591ms)
+
+

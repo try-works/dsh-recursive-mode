@@ -137,6 +137,14 @@ export interface OperationRecord {
   at: string
   /** What happened, when the caller knows: e.g. `applied`, `refused`, `interrupted`. */
   outcome?: string
+  /**
+   * T28: the phase this operation belongs to, when it has one.
+   *
+   * Recorded so a budget can be counted FROM the index rather than tracked
+   * separately — the children-per-phase cap is `readOperations(...)` filtered by
+   * phase, which needs no new state and cannot drift from the operations it counts.
+   */
+  phase?: string
 }
 
 /** The run-scoped, append-only operation index. Bounded by use, git-ignored with the run. */
@@ -166,6 +174,7 @@ export function readOperations(runDir: string): OperationRecord[] {
         at: typeof parsed.at === 'string' ? parsed.at : '',
       }
       if (typeof parsed.outcome === 'string') record.outcome = parsed.outcome
+      if (typeof parsed.phase === 'string') record.phase = parsed.phase
       out.push(record)
     } catch {
       // A partially written line must not make the run unreadable.
@@ -200,4 +209,22 @@ export function wasAttempted(runDir: string, id: string): boolean {
 /** True when the index exists at all — lets a caller distinguish "no retry" from "no index". */
 export function hasIndex(runDir: string): boolean {
   return existsSync(operationsPath(runDir))
+}
+
+/**
+ * T28: how many DISTINCT operations of one act have been recorded for one phase.
+ *
+ * Counted from the index rather than tracked in parallel, so a budget cannot drift
+ * away from the operations it bounds. DISTINCT ids, not records, because a resumed
+ * turn re-records the SAME operation: counting records would make a long review look
+ * like many children and fire the cap on legitimate work, while a genuine new
+ * operation (a repaired artifact changes the body, hence the id) still counts.
+ */
+export function countOperations(runDir: string, act: string, phase: string): number {
+  const ids = new Set(
+    readOperations(runDir)
+      .filter((record) => record.act === act && record.phase === phase)
+      .map((record) => record.id),
+  )
+  return ids.size
 }

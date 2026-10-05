@@ -247,6 +247,30 @@ export interface ContinuableDelegationLike {
 /** Verdict vocabulary shared by T3/T4 (matches the delegated review schema). */
 export type DelegationVerdict = 'APPROVE' | 'REVISE' | 'REJECT'
 
+/**
+ * T28 — how much delegation depth is left for a child of a parent at `parentDepth`.
+ *
+ * The configured maximum is a ceiling for the WHOLE recursion, not a fresh allowance
+ * at every level. Passing the configured maximum down unchanged at each level is how
+ * a "depth 3" budget silently permits 3^depth children, which bounds nothing.
+ *
+ * A caller may ask for LESS than what remains (`requested`) and never for more:
+ * `min(remaining, requested)`. A parent already at or past the cap yields **0** —
+ * "delegate no further" — never a negative that some downstream comparison could read
+ * as permission.
+ */
+export function remainingDepthFor(
+  budgets: { maxDelegationDepth: number },
+  parentDepth: number,
+  requested?: number,
+): number {
+  const depth = Number.isSafeInteger(parentDepth) && parentDepth > 0 ? parentDepth : 0
+  const remaining = Math.max(0, budgets.maxDelegationDepth - depth)
+  if (requested === undefined) return remaining
+  const want = Number.isSafeInteger(requested) && requested > 0 ? requested : 0
+  return Math.max(0, Math.min(remaining, want))
+}
+
 /** Read the verdict from a review-schema structured result (pure). */
 export function readVerdictFromStructured(result: SubagentResultLike): DelegationVerdict {
   // SAFETY: reviewOutputSchema() defines verdict as a string enum; the cast reads

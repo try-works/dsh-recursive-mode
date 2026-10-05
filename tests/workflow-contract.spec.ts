@@ -195,6 +195,36 @@ describe('T2 — the request the engine is asked to start', () => {
     expect(auditWorkflowRequest(PLAN, { parent: {} }).signal).toBeUndefined()
     expect(auditWorkflowRequest(PLAN, { parent: {}, signal: 'sig' }).signal).toBe('sig')
   })
+
+  /**
+   * FU-11 — THE DEFECT THIS PINS, found by READING the engine rather than by a test.
+   *
+   * `WorkflowStartRequest.meta` is REQUIRED and engine-validated, and the README lists *"a malformed meta
+   * block"* among the rejections — yet the request carried none, because T2's acceptance ran against a
+   * scripted engine that validated nothing. These assertions exist so the gap cannot reopen: a live engine
+   * would refuse a request whose meta is missing or empty.
+   */
+  it('FU-11: carries the REQUIRED, non-empty meta block the engine validates', () => {
+    const request = auditWorkflowRequest(PLAN, { parent: {} })
+    expect(request.meta).toBeDefined()
+    expect(request.meta.name.length, 'an empty name is a malformed meta block').toBeGreaterThan(0)
+    expect(request.meta.description.length).toBeGreaterThan(0)
+    // The phases are DERIVED from the plan, so the two cannot disagree about what the run will do.
+    expect(request.meta.phases?.length).toBe(PLAN.phases.length)
+    expect(request.meta.phases?.map((phase) => phase.title)).toEqual(PLAN.phases.map((phase) => phase.title))
+    // And they name the reviewers, which is what a reader of the run needs.
+    expect(request.meta.phases?.[0]?.detail).toContain(PLAN.phases[0].items[0].label)
+  })
+
+  it('FU-11: passes the engine' + '’s own child controls through when a host sets them', () => {
+    const bare = auditWorkflowRequest(PLAN, { parent: {} })
+    expect(bare.subagentProvider).toBeUndefined()
+    expect(bare.maxTotalAgents).toBeUndefined()
+    const capped = auditWorkflowRequest(PLAN, { parent: {}, subagentProvider: 'spawn', maxTotalAgents: 3 })
+    // A fan-out that dropped a host's ceiling would exceed it silently.
+    expect(capped.subagentProvider).toBe('spawn')
+    expect(capped.maxTotalAgents).toBe(3)
+  })
 })
 
 /**

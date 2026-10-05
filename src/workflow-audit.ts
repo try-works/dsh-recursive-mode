@@ -187,12 +187,32 @@ export const AUDIT_FANOUT_SCRIPT = [
   'return args.plan.runId',
 ].join('\n')
 
-/** What the engine needs to start an audit fan-out. Mirrors `WorkflowStartRequest` structurally. */
+/**
+ * What the engine needs to start an audit fan-out. Mirrors `WorkflowStartRequest` structurally.
+ *
+ * ⚠ `meta` IS REQUIRED BY THE ENGINE, and this type originally omitted it — a defect found by READING the
+ * engine's declarations rather than by any test (T2's acceptance ran against a scripted engine that
+ * validated nothing). `packages/workflow/workflow/lib/types/runtime-types.d.ts` states the field is
+ * non-optional and its README lists *"a malformed meta block"* among the rejections, so a live engine
+ * would have refused this fan-out outright. `subagentProvider` and `maxTotalAgents` are carried too, since
+ * they are the engine's own child controls and a fan-out that ignores them cannot honour a host's limits.
+ */
 export interface AuditWorkflowRequest {
   script: string
+  /** The engine-validated identity block: name, description, and one phase per reviewer role. */
+  meta: {
+    name: string
+    description: string
+    whenToUse?: string
+    phases?: Array<{ title: string; detail?: string; provider?: string; model?: string }>
+  }
   args: { plan: AuditFanOutPlan }
   parent: unknown
   signal?: unknown
+  /** Optional engine-wide child-provider override for this run. */
+  subagentProvider?: string
+  /** Optional per-run total-child ceiling, so a host's cap is respected rather than exceeded. */
+  maxTotalAgents?: number
 }
 
 /**
@@ -200,16 +220,37 @@ export interface AuditWorkflowRequest {
  *
  * `parent` is the exact live Agent, as the engine requires for child authority; it passes through
  * untouched rather than reshaped, because the engine authenticates by object identity.
+ *
+ * ⚠ THE META IS DERIVED FROM THE PLAN, not hand-written: the engine's `phases` are `{title, detail?,
+ * provider?, model?}` and the plan already holds exactly that per reviewer role, so deriving it means the
+ * two can never disagree about what the run will do.
  */
 export function auditWorkflowRequest(
   plan: AuditFanOutPlan,
-  options: { parent: unknown; signal?: unknown },
+  options: {
+    parent: unknown
+    signal?: unknown
+    /** Overrides the derived identity block; the phases still come from the plan unless given. */
+    meta?: { name?: string; description?: string; whenToUse?: string }
+    subagentProvider?: string
+    maxTotalAgents?: number
+  },
 ): AuditWorkflowRequest {
+  const reviewers = plan.phases.reduce((total, phase) => total + phase.items.length, 0)
   return {
     script: AUDIT_FANOUT_SCRIPT,
+    meta: {
+      name: options.meta?.name ?? 'recursive-audit-fan-out',
+      description: options.meta?.description
+        ?? 'Fan an audit out to ' + reviewers + ' reviewer(s) across ' + plan.phases.length + ' role phase(s) and aggregate ONE verdict.',
+      ...(options.meta?.whenToUse === undefined ? {} : { whenToUse: options.meta.whenToUse }),
+      phases: plan.phases.map((phase) => ({ title: phase.title, detail: phase.items.map((item) => item.label).join(', ') })),
+    },
     args: { plan },
     parent: options.parent,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.subagentProvider === undefined ? {} : { subagentProvider: options.subagentProvider }),
+    ...(options.maxTotalAgents === undefined ? {} : { maxTotalAgents: options.maxTotalAgents }),
   }
 }
 

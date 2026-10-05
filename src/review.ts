@@ -33,6 +33,15 @@ export interface ReviewBundleInput {
   addenda?: string[]
   priorEvidence?: string[]
   memoryRefs?: string[]
+  /**
+   * T14 — the RETRIEVED prior-run memory, rendered, written into the bundle body.
+   *
+   * ⚠ `memoryRefs` above is the slot the bundle already had, and nothing ever filled it — so the
+   * memory section a reviewer was supposed to see did not exist. The two are complementary, not
+   * duplicates: `memoryRefs` is WHERE the memory lives (traceability), and this is the CONTENT,
+   * because a reviewer cannot cite a path whose contents it was never given.
+   */
+  memory?: string
   changedFiles?: string[]
 }
 
@@ -79,8 +88,7 @@ function pathList(title: string, values: string[]): string[] {
  * when a path would escape the workspace root (fail loud, never a silent
  * bundle).
  */
-export function buildReviewBundle(input: ReviewBundleInput): ReviewBundleResult {
-  const { root, runId, phase, role } = input
+export function buildReviewBundle(input: ReviewBundleInput): ReviewBundleResult {  const { root, runId, phase, role } = input
   const runDir = resolveUnderRoot(root, '.recursive/run/' + runId)
   if (!existsSync(runDir)) {
     throw new Error('Run directory does not exist: ' + runId)
@@ -162,7 +170,13 @@ export function buildReviewBundle(input: ReviewBundleInput): ReviewBundleResult 
   ]
 
   const markdown = lines.join('\n')
-  writeFileSync(bundlePath, markdown, 'utf8')
+  // T14: the retrieved prior-run memory goes INTO the bundle, because the prompt references the
+  // bundle by PATH — a section appended to the prompt instead would sit outside the document the
+  // reviewer is told to read, and a reviewer that cites memory must be citing what it was given.
+  const withMemory = input.memory === undefined || input.memory.trim() === ''
+    ? markdown
+    : markdown + '\n\n## Prior-run memory\n\n' + input.memory.trim() + '\n'
+  writeFileSync(bundlePath, withMemory, 'utf8')
 
   return {
     bundlePath,

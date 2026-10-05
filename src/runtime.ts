@@ -17,6 +17,7 @@ import {
 } from './lock.ts'
 import type { PendingWorkItem, RecursiveStatusResult } from './types.ts'
 import { findOperation, countOperations, operationId, recordOperation } from './identity.ts'
+import { createHookRegistry, type HookRegistry } from './hooks.ts'
 import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
 import { resolveControlPlaneRoot, type WorkspaceRegistryLike } from './workspace.ts'
@@ -127,6 +128,22 @@ export class RecursiveRuntime extends Service {
   private readonly repoRoot: string
   private readonly workspaceRegistry: WorkspaceRegistryLike | null
   private readonly goalsService: GoalServiceLike | null
+  /**
+   * T27 — the hook registry, EXPOSED so a sibling plugin can participate in a run
+   * without patching this one:
+   *
+   *     ctx.recursive.hooks.register('pre_trigger', { name: 'my-check', priority: 10, run })
+   *
+   * That is the whole point of the item: the plugin's own enforcement will be
+   * re-expressed as built-in hooks on this same registry, so a sibling and a built-in
+   * are peers — same ordering rules, same failure policy, same audit trail — rather
+   * than one being privileged code and the other a guest.
+   *
+   * Public and created eagerly: a registry that has to be "got" before it can be used
+   * is a registry whose ordering depends on when someone remembered to fetch it.
+   */
+  readonly hooks: HookRegistry = createHookRegistry()
+
   private _enforcementConfig: EnforcementConfig | null = null
 
   /**

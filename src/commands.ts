@@ -17,6 +17,7 @@ import { bootstrapScaffold } from './bootstrap.ts'
 import { loadMemoryIndex } from './memory.ts'
 import { explainMemorySelection } from './memory-select.ts'
 import { readFeedback } from './memory-feedback.ts'
+import { closeoutReport } from './closeout-report.ts'
 
 export type RecursiveVerb = 'status' | 'spec' | 'worktree' | 'init' | 'lock' | 'qa' | 'closeout' | 'addendum' | 'review' | 'scratch' | 'memory' | 'bootstrap' | 'list' | 'help'
 
@@ -113,7 +114,29 @@ export function executeRecursiveCommand(root: string, rawInput: string): Recursi
       if (!phase || !runId) return { kind: 'error', text: 'closeout requires <run-id> --phase 04|05|06|07|08' }
       const runDir = join(runRoot, runId)
       if (!existsSync(runDir)) return { kind: 'error', text: 'Run not found in current workspace: ' + runId }
-      return { kind: 'success', text: 'closeout scaffolded for ' + runId + ' phase ' + phase }
+      // ⚠ THIS BRANCH USED TO LIE. It returned "closeout scaffolded for <run> phase <n>" having read nothing,
+      // written nothing and checked nothing — a command that reported success for work it never did. It now
+      // runs the LINTER the closeout actually is: it reads the phase artifact and reports what is missing,
+      // and WRITES NOTHING, which is the design the user specified ("like a linter checking if the agent
+      // missed anything; it is not supposed to edit files by itself").
+      try {
+        const report = closeoutReport(runDir, phase)
+        const lines = [
+          report.artifact + ' — ' + (report.exists ? report.status : 'ABSENT'),
+          report.findings.length === 0
+            ? 'fits the required standard.'
+            : report.findings.length + ' finding(s) before it can lock:',
+        ]
+        for (const finding of report.findings.slice(0, 12)) lines.push('- ' + finding.detail)
+        if (report.prerequisites.length > 0) {
+          lines.push('Advisory — earlier phases not yet LOCKED: '
+            + report.prerequisites.map((p) => p.artifact + ' (' + p.status + ')').join(', '))
+        }
+        if (report.addenda.length > 0) lines.push('Addenda cited: ' + report.addenda.length)
+        return { kind: 'success', text: lines.join('\n') }
+      } catch (err) {
+        return { kind: 'error', text: err instanceof Error ? err.message : String(err) }
+      }
     }
     case 'worktree': {
       // /recursive worktree create <runId> [--base <branch>]

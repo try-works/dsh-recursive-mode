@@ -970,13 +970,17 @@ export class RecursiveRuntime extends Service {
       failure: evaluation.accepted
         ? undefined
         : result == null
-          // ⚠ THE TIER AND PROVIDER NAME ARE IN THE MESSAGE ON PURPOSE. `delegate` calls
-          // `subagents.start(provider, request)` — the provider is a NAME, and the router picks it from the map
-          // this plugin builds. A name that the host does not know is the difference between a child that runs
-          // and a start that produces nothing, and the record should not make me guess which was chosen.
-          ? 'no delegate result was produced (the provider never started, or returned nothing); tier '
-            + decision.tier + ', provider ' + (decision.provider ?? 'none chosen')
-            + ', names on offer [' + (this.lastProviderNames.join(', ') || 'none') + ']'
+          // ⚠ THE TWO STATES ARE NOT THE SAME AND THE MESSAGE USED TO CONFLATE THEM. The one-shot path cannot
+          // resolve to nothing — the host's `start` returns a run or throws (assertCapabilities, expectProvider)
+          // — so a null result on the CONTINUABLE path means the opposite of what I first wrote: the start WAS
+          // made and NO SETTLEMENT ARRIVED within the wait. That distinction cost me two rounds of looking at
+          // provider names, so the record now states which path a run took and what it was waiting for.
+          ? (input.mode !== 'one-shot'
+            ? 'the continuable start was made and NO SETTLEMENT arrived within the wait (the child never reported,'
+              + ' or never ran); tier ' + decision.tier + ', provider ' + (decision.provider ?? 'none chosen')
+              + ', names on offer [' + (this.lastProviderNames.join(', ') || 'none') + ']'
+            : 'no delegate result was produced by the one-shot path; tier ' + decision.tier
+              + ', provider ' + (decision.provider ?? 'none chosen'))
           : 'the delegation returned without acceptance; stop reason ' + (result.stopReason ?? 'none reported'),
     })
 

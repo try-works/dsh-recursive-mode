@@ -18,10 +18,12 @@ import { loadMemoryIndex } from './memory.ts'
 import { explainMemorySelection } from './memory-select.ts'
 import { readFeedback } from './memory-feedback.ts'
 import { closeoutReport } from './closeout-report.ts'
+import { loadRouterPolicy, routerPolicyPath } from './router.ts'
+import { resolveSubagentTarget } from './role-route.ts'
 
-export type RecursiveVerb = 'status' | 'spec' | 'worktree' | 'init' | 'lock' | 'qa' | 'closeout' | 'addendum' | 'review' | 'scratch' | 'memory' | 'bootstrap' | 'list' | 'help'
+export type RecursiveVerb = 'status' | 'spec' | 'worktree' | 'init' | 'lock' | 'qa' | 'closeout' | 'addendum' | 'review' | 'scratch' | 'memory' | 'model' | 'bootstrap' | 'list' | 'help'
 
-export const PRESET_VERBS: RecursiveVerb[] = ['status', 'spec', 'worktree', 'init', 'lock', 'qa', 'closeout', 'addendum', 'review', 'scratch', 'memory']
+export const PRESET_VERBS: RecursiveVerb[] = ['status', 'spec', 'worktree', 'init', 'lock', 'qa', 'closeout', 'addendum', 'review', 'scratch', 'memory', 'model']
 export const GLOBAL_VERBS: RecursiveVerb[] = ['bootstrap', 'list', 'help']
 export const ALL_VERBS: RecursiveVerb[] = [...PRESET_VERBS, ...GLOBAL_VERBS]
 
@@ -136,6 +138,36 @@ export function executeRecursiveCommand(root: string, rawInput: string): Recursi
         return { kind: 'success', text: lines.join('\n') }
       } catch (err) {
         return { kind: 'error', text: err instanceof Error ? err.message : String(err) }
+      }
+    }
+    case 'model': {
+      // ⚠ FU-19 — THE EFFECTIVE PROVIDER AND MODEL FOR A PHASE, WITH ITS PROVENANCE, and no agent loop. The same
+      // shape as `/recursive memory`: the workflow's own resolution, printed, so "why did this child run on that
+      // model" is answerable without reading the code or starting anything.
+      const phaseMatch = arg.match(/--phase\s+(\S+)/)
+      const roleMatch = arg.match(/--role\s+(\S+)/)
+      const phase = phaseMatch?.[1] ?? ''
+      const role = roleMatch?.[1] ?? ''
+      const policy = loadRouterPolicy(routerPolicyPath(root))
+      // `ladderProvider: null` on purpose: this verb reports what is CONFIGURED, and the provider ladder needs a
+      // live host's registered providers to answer. A caller wanting the full answer gets it from a delegation's
+      // routing notes, which is where the resolved ladder actually appears.
+      const target = resolveSubagentTarget({ role, phase, policy, ladderProvider: null })
+      const general = policy.defaults.subagent
+      return {
+        kind: 'success',
+        text: [
+          'effective selection for role ' + (role === '' ? '(none given)' : role) + (phase === '' ? '' : ' in phase ' + phase) + ':',
+          '- subagent provider, who creates the child: ' + (target.provider ?? 'none configured') + '  [from ' + target.chosen.provider + ']',
+          '- model, what the child runs on: ' + (target.model ?? 'inherited — no model is sent') + '  [from ' + target.chosen.model + ']',
+          target.reason,
+          'configured: general ' + (general === undefined ? 'unset' : JSON.stringify(general))
+            + ', phase routes ' + Object.keys(policy.phase_routes ?? {}).length
+            + ', role routes ' + Object.keys(policy.role_routes ?? {}).length,
+          'a model chosen here is checked against what DSH has when a delegation runs: available is applied, missing'
+            + ' is reported and NOT substituted, and unverified means there was no inventory to ask.',
+          '⚠ changing a default applies to FUTURE delegations only — it never rewrites a run\'s recorded history.',
+        ].join('\n'),
       }
     }
     case 'worktree': {

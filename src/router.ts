@@ -24,15 +24,28 @@ import { modelForRole } from './role-route.ts'
  * present and silently shadow the role routes and phase routes forever.
  */
 export interface SubagentDefault {
+  /** The SUBAGENT provider — who creates the child (`spawn`, `fork`). NOT the LLM provider; see below. */
   provider?: string | null
+  /** The model id to ask for. */
   model?: string | null
+  /**
+   * ⚠ THE LLM PROVIDER — WHO SERVES THE MODEL (`deepseek-official`), which is a DIFFERENT thing from the
+   * `provider` field above. Conflating the two was a real defect in this feature's first schema: a plain
+   * `provider` could mean either, and a user setting it had no way to know which.
+   *
+   * Optional: when only a model is named, the plugin looks its provider up from the inventory DSH exposes.
+   */
+  modelProvider?: string | null
 }
 
 /** Per-phase overrides — the narrowest level, and the one that answers "this phase needs a stronger model". */
 export interface PhaseRoute {
   role?: string
+  /** The subagent provider, as above. */
   provider?: string | null
   model?: string | null
+  /** The LLM provider serving `model`, as above. */
+  modelProvider?: string | null
 }
 
 export interface RouterDefaults {
@@ -54,8 +67,13 @@ export interface RoleRoute {
   /**
    * FU-19: the provider this role should be served by, when the user has chosen one. Absent means "let the tier
    * ladder decide", which is what every policy scaffolded before this field did.
+   *
+   * This is the SUBAGENT provider — who creates the child. The LLM provider that serves the model is its own
+   * field below, because one name for two ideas is how a configuration becomes a guess.
    */
   provider?: string | null
+  /** FU-19: the LLM provider serving this role's `model`. Optional; looked up from the inventory when omitted. */
+  modelProvider?: string | null
   fallback: string
 }
 

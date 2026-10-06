@@ -1,23 +1,27 @@
 /**
- * T9 — per-role model routing: the REVIEW role and the REPAIR role are different jobs.
+ * T9 → FU-19 — per-role model routing, and now a full provider/model ladder.
  *
- * WHY. A delegation currently runs on whatever model the child inherits: the reviewer that must
- * be rigorous and the repairer that will iterate many times are the same choice by accident. The
- * item asks for them to differ.
+ * WHY. A delegation would otherwise run on whatever model the child inherits: the reviewer that must be rigorous
+ * and the repairer that will iterate many times become the same choice by accident. The item asks for them to
+ * differ — and FU-19 extends that to a general default, per-phase overrides, and a per-call choice.
  *
- * ⚠ WHAT I MEASURED, AND IT CHANGES WHAT THIS MODULE CAN PROMISE (15th premise correction in this
- * plan). The router policy ALREADY declares a per-role `model` (`RouterPolicy.role_routes[role]
- * .model`, and every scaffolded route sets it), but **nothing reads it**: `RouteDecision` carries
- * only `{tier, provider?, reason}`, so the field is parsed and dropped. And the plugin's
- * `SubagentStartRequestLike` has **no model field at all** — the harness addresses subagent model
- * selection through its own `subagent-model-selection` settings namespace, which is a HOST
- * concern. So the plugin cannot by itself force a child onto a model, and a module that claimed to
- * would be lying about where the choice is made.
+ * ⚠ THE PARAGRAPH THAT USED TO BE HERE WAS TRUE WHEN WRITTEN AND IS NOW FALSE, so it is replaced rather than
+ * left to mislead. It said the plugin "cannot by itself force a child onto a model", because
+ * `SubagentStartRequestLike` had no model field and model selection was the host's concern. Both halves changed:
+ * the harness accepts `agentOptions` on a start, and `delegateReview` now sets `request.agentOptions = { model }`
+ * — but ONLY for a provider that declares the `agentOptions` capability, because the harness REJECTS such a start
+ * otherwise.
  *
- * WHAT THE PLUGIN CAN HONESTLY DO, and what this module does: make the per-role choice EXPLICIT,
- * TESTED and VISIBLE — name the role's kind, resolve the policy's model for it, and say plainly
- * when the policy leaves it unset. That turns a dead config field into a decision a reader can
- * act on, and it gives the caller something to honour instead of a null nobody notices.
+ * SO WHAT THIS MODULE PROMISES TODAY, precisely:
+ *   - it resolves WHICH provider and model a child should get, from the ladder in `resolveSubagentTarget`, and it
+ *     reports which level chose each value;
+ *   - the caller (not this module) applies them, because applying is a decision with consequences — a model on a
+ *     provider that cannot take overrides is NOT applied and is REPORTED rather than silently dropped;
+ *   - and the model is checked against what DSH actually has (`model-inventory.ts`), with an `unverified` verdict
+ *     when there is no inventory to ask, so a choice is never silently approved OR silently replaced.
+ *
+ * A module that claimed more than that would be lying about where the choice is made. The comment above is the
+ * second half of that lesson: a stale rationale is how a working feature gets deleted by accident.
  */
 import type { RouterPolicy } from './router.ts'
 

@@ -186,5 +186,89 @@ export function writeCloseoutReceipt(runDir: string, phase: string, options: Clo
   const path = closeoutReceiptPath(runDir, phase)
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, JSON.stringify(report, null, 2) + '\n', 'utf8')
+  // ⚠ PHASE 08 IS THE RUN'S LAST PHASE, so its receipt is also where the RUN-level receipt belongs: a receipt
+  // that "represents what was done in the run" has to cover the whole run, and the early artifacts are most
+  // of what was done. The per-phase receipt above stays as it was; this one is the run's.
+  const runReceipt = isFinalPhase(phase) ? writeRunCloseoutReceipt(runDir, options) : null
+  return { path, report, runReceipt }
+}
+
+/** Whether this phase is the run's final one — where the run-level receipt is written. */
+function isFinalPhase(phase: string): boolean {
+  return phase === '08' || phase === '08-memory-impact.md'
+}
+
+/** Where the RUN-level closeout receipt lives: the run root, one per run. */
+export function runCloseoutReceiptPath(runDir: string): string {
+  return join(runDir, 'closeout.receipt.json')
+}
+
+/** One artifact's line in the run-level receipt. */
+export interface RunArtifactState {
+  artifact: string
+  exists: boolean
+  /** `LOCKED`, `DRAFT`, `STALE_LOCK` — or `ABSENT` when the artifact was never written. */
+  status: string
+  /** Empty when this artifact fits the standard. */
+  findings: CloseoutFinding[]
+}
+
+export interface RunCloseoutReport {
+  /** Every artifact in the run's sequence, in order — 00 through 08, not only the closeout phases. */
+  artifacts: RunArtifactState[]
+  /** How many of them fit the standard, for a one-line summary. */
+  conforming: number
+}
+
+/**
+ * The RUN-level report: every artifact in the run, not just the phases the closeout reports on.
+ *
+ * ⚠ WHY IT SPANS 00–08: the user's point, and it is the right one — a receipt *"represents what was done in
+ * the run"*, so it must include the early artifacts. The earlier correction still holds and is not undone by
+ * this: the closeout must never WRITE those documents (`recursive_init` owns them). It READS them, holds them
+ * to the same standard, and records their state. Reading a broad set and writing a narrow one is exactly the
+ * distinction that was missing.
+ */
+export function runCloseoutReport(runDir: string, options: CloseoutReportOptions = {}): RunCloseoutReport {
+  const profile = options.workflowProfile ?? CURRENT_WORKFLOW_PROFILE
+  const artifacts: RunArtifactState[] = []
+
+  for (const artifact of RUN_ARTIFACT_SEQUENCE) {
+    const path = join(runDir, artifact)
+    if (!existsSync(path)) {
+      artifacts.push({ artifact, exists: false, status: 'ABSENT', findings: [] })
+      continue
+    }
+    const findings: CloseoutFinding[] = []
+    let content = ''
+    try { content = readFileSync(path, 'utf8') } catch { content = '' }
+    for (const heading of requiredSectionsFor(artifact, profile)) {
+      if (!hasHeading(content, heading)) {
+        findings.push({ kind: 'missing-section', detail: 'missing required section: ## ' + heading })
+      }
+    }
+    for (const gate of UNIVERSAL_GATES) {
+      const gateStatus = getGateStatus(content, gate)
+      if (gateStatus !== 'PASS') {
+        findings.push({ kind: 'gate-not-passing', detail: gate + ': ' + gateStatus })
+      }
+    }
+    artifacts.push({ artifact, exists: true, status: getLockStatus(path), findings })
+  }
+
+  return { artifacts, conforming: artifacts.filter((a) => a.exists && a.findings.length === 0).length }
+}
+
+/**
+ * Record the run-level receipt. **Its own file at the run root**, never a phase document.
+ *
+ * The JSON is a pure projection of the run state — no timestamp — so two calls on the same run produce
+ * identical bytes, which is what makes it comparable between runs.
+ */
+export function writeRunCloseoutReceipt(runDir: string, options: CloseoutReportOptions = {}) {
+  const report = runCloseoutReport(runDir, options)
+  const path = runCloseoutReceiptPath(runDir)
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, JSON.stringify(report, null, 2) + '\n', 'utf8')
   return { path, report }
 }

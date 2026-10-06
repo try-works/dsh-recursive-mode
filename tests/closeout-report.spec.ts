@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { closeoutReport } from '../src/closeout-report.ts'
+import { closeoutReport, runCloseoutReport, writeCloseoutReceipt } from '../src/closeout-report.ts'
 import { getLockStatus, lockHashFromContent } from '../src/lock.ts'
 
 /**
@@ -101,5 +101,54 @@ describe('FU-12: the closeout report', () => {
     expect(report.addenda).toEqual(['02-to-be-plan.addendum-r4-mount.md', 'addenda/01-as-is.addendum-r1.md'])
     expect(tree()).toEqual(before)
     expect(() => closeoutReport(runDir, '03')).toThrow(/Unsupported closeout phase/)
+  })
+
+  /**
+   * ⚠ THE RUN-LEVEL RECEIPT COVERS 00–03. User's point, and it is the right one: a receipt represents what
+   * was done IN THE RUN, so it must include the early artifacts. This does NOT undo the earlier correction -
+   * the closeout still never WRITES those documents; it reads them and records their state. Reading broadly
+   * and writing narrowly is the distinction that was missing.
+   */
+  it('the RUN receipt covers every artifact, 00 through 08, not just the closeout phases', () => {
+    // A run with only the early artifacts present: they must still appear, with their state recorded.
+    writeFileSync(join(runDir, '00-requirements.md'), 'Status: `DRAFT`\n\n## TODO\n', 'utf8')
+    writeFileSync(join(runDir, '01-as-is.md'), 'Status: `DRAFT`\n\n## TODO\n', 'utf8')
+
+    const run = runCloseoutReport(runDir)
+    const names = run.artifacts.map((a) => a.artifact)
+    expect(names).toContain('00-requirements.md')
+    expect(names).toContain('00-worktree.md')
+    expect(names).toContain('01-as-is.md')
+    expect(names).toContain('02-to-be-plan.md')
+    expect(names).toContain('03-implementation-summary.md')
+    // …and it reaches the late phases too, so one receipt describes the whole run.
+    expect(names).toContain('08-memory-impact.md')
+    // The two seeded artifacts are recorded with their status and their gaps.
+    const early = run.artifacts.find((a) => a.artifact === '00-requirements.md')
+    expect(early?.exists).toBe(true)
+    expect(early?.status).toBe('DRAFT')
+    expect(early?.findings.length).toBeGreaterThan(0)
+    // The untouched ones are ABSENT rather than violations.
+    const absent = run.artifacts.find((a) => a.artifact === '00-worktree.md')
+    expect(absent?.exists).toBe(false)
+    expect(absent?.status).toBe('ABSENT')
+    expect(absent?.findings).toEqual([])
+  })
+
+  it('writes the run receipt at the run root when the FINAL phase is closed out, and only then', () => {
+    writeFileSync(join(runDir, '00-requirements.md'), 'Status: `DRAFT`\n\n## TODO\n', 'utf8')
+
+    // A mid-run phase writes only its own per-phase receipt.
+    const mid = writeCloseoutReceipt(runDir, '05')
+    expect(mid.runReceipt).toBeNull()
+    expect(existsSync(join(runDir, 'closeout.receipt.json'))).toBe(false)
+
+    // Phase 08 is the run's last phase, so that is where the run's own receipt belongs.
+    const final = writeCloseoutReceipt(runDir, '08')
+    expect(final.runReceipt?.path).toBe(join(runDir, 'closeout.receipt.json'))
+    const recorded = JSON.parse(readFileSync(join(runDir, 'closeout.receipt.json'), 'utf8'))
+    expect(recorded.artifacts.some((a: { artifact: string }) => a.artifact === '00-requirements.md')).toBe(true)
+    // And neither receipt is a phase document.
+    expect(readFileSync(join(runDir, '00-requirements.md'), 'utf8')).toBe('Status: `DRAFT`\n\n## TODO\n')
   })
 })

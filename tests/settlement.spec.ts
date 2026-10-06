@@ -145,11 +145,11 @@ describe('T36 — the settlement is recorded in the run\'s own state', () => {
   })
 })
 
-describe('T36 — the observer parks instead of blocking, and never fabricates approval', () => {
+describe('T36/FU-9 — the observer WAITS, then parks, and never fabricates approval', () => {
   it('returns null while no settlement has landed (the loop\'s "not yet" signal)', async () => {
     const runDir = runRoot()
     try {
-      const observe = settlementRoundObserver(runDir)
+      const observe = settlementRoundObserver(runDir, { timeoutMs: 0 })
       expect(await observe(CHILD, 'm1')).toBeNull()
     } finally {
       rmSync(runDir, { recursive: true, force: true })
@@ -160,7 +160,7 @@ describe('T36 — the observer parks instead of blocking, and never fabricates a
     const runDir = runRoot()
     try {
       captureSettlement(runDir, settlementEvent())
-      const observe = settlementRoundObserver(runDir)
+      const observe = settlementRoundObserver(runDir, { timeoutMs: 0 })
       const first = await observe(CHILD, 'm1')
       expect(first).not.toBeNull()
       // The child id is stable across rounds, so a LATER followup can reach it.
@@ -268,7 +268,7 @@ describe('T36 — the run that owns a child is resolved from the disk', () => {
       expect(observed).not.toBeNull()
       const elsewhere = mkdtempSync(join(tmpdir(), 'rm-other-'))
       try {
-        expect(await settlementRoundObserver(elsewhere)('abc', 'm1')).toBeNull()
+        expect(await settlementRoundObserver(elsewhere, { timeoutMs: 0 })('abc', 'm1')).toBeNull()
       } finally {
         rmSync(elsewhere, { recursive: true, force: true })
       }

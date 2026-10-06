@@ -210,22 +210,39 @@ export function settlementResult(notice: SettlementNotice): SubagentResultLike {
 }
 
 /**
- * Build the `awaitRoundResult` observer the continuable loop injects: it reports a
- * settlement ONLY once the listener has recorded one, and returns null while the
- * child is still working — which is the loop's documented "no settlement yet"
- * signal, not a failure to observe.
+ * Build the `awaitRoundResult` observer the continuable loop injects.
  *
- * This is the whole point of parking rather than blocking: there is no
- * parent-side promise to await, so an observer that cannot see a settlement must
- * say so and let the caller resume on a later turn with the SAME child id (the
- * loop preserves it for exactly that reason).
+ * ⚠ IT NOW WAITS, AND THAT IS THE FU-9 DECISION (option a, chosen by the user). It used to read the
+ * settlement log ONCE and return null immediately, which the loop reports as `parked` — a correct signal, but
+ * it meant the parent returned before the child had run at all. The control that shows why that matters: the
+ * harness's own team fixture, same recipe, completed two teammates while this plugin's delegated child never
+ * got a turn — and the engine's contract explains it, `submitAdmitted` *"crosses the final admission cutoff
+ * and submits without yielding"*, so a parent that returns lets the host go idle, and an idle one-shot session
+ * never pumps the child's inbox.
+ *
+ * ⚠ THE PARK IS KEPT, as the fallback it always was. The wait is bounded by `timeoutMs`; when the deadline
+ * passes the observer STILL returns null, so the caller still parks, still resumes on a later turn with the
+ * SAME child id, and still never treats an unobserved round as approval — the T36 rules are intact. What
+ * changed is that parking is now what happens AFTER a real wait rather than INSTEAD of one.
+ *
+ * `sleep` is injectable so a test asserts the waiting without spending wall-clock time, and `timeoutMs: 0`
+ * reproduces the old read-once behaviour exactly — which is what the tests that assert a park use.
  */
 export function settlementRoundObserver(
   runDir: string,
+  options: { timeoutMs?: number; pollMs?: number; sleep?: (ms: number) => Promise<void> } = {},
 ): (childId: ContinuableChildId, messageId: ContinuableMessageId) => Promise<SubagentResultLike | null> {
+  const timeoutMs = options.timeoutMs ?? 30_000
+  const pollMs = options.pollMs ?? 250
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
   return async (childId: ContinuableChildId) => {
-    const notice = readSettlement(runDir, String(childId))
-    return notice === null ? null : settlementResult(notice)
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      const notice = readSettlement(runDir, String(childId))
+      if (notice !== null) return settlementResult(notice)
+      if (Date.now() >= deadline) return null
+      await sleep(pollMs)
+    }
   }
 }
 

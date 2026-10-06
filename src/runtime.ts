@@ -203,7 +203,30 @@ export class RecursiveRuntime extends Service {
    * in fact mounted. Resolving the seam here fixes the wiring without asking every call site to
    * remember, while an explicit `input.subagents` still wins for a test or a narrower caller.
    */
-  private readonly subagentsSeam: SubagentsRuntimeLike | null
+  private subagentsSeam: SubagentsRuntimeLike | null
+
+  /**
+   * ⚠ FU-9 — ATTACH THE SEAM WHEN THE SERVICE APPEARS, not only when this plugin happens to apply.
+   *
+   * The composition resolved the seam with a ONE-SHOT `ctx.get('subagents')` at apply time, and a live run
+   * showed what that costs: the review fell back to self-audit, the action record said
+   * `Execution Mode: self-audit (continuable)` and `Status: failed`, and **no child was ever started** — while
+   * the child DIRECTORY existed all along, because the plugin writes its own brief before calling any service.
+   * I read the directory and built a host-limitation story on top of it; the record said otherwise.
+   *
+   * If the subagents service is mounted by a later loader layer, a one-shot get returns undefined and nothing
+   * re-resolves it. `ctx.inject(['subagents'], …)` is the harness's own pattern for exactly this, and calling
+   * this method from there makes the seam arrive whenever it arrives. Idempotent: the last attach wins, which
+   * is what a re-apply after a reload wants.
+   */
+  attachSubagents(seam: SubagentsRuntimeLike | null): void {
+    this.subagentsSeam = seam
+  }
+
+  /** What the composition attached, for a caller that needs to report or assert it. */
+  attachedSubagents(): SubagentsRuntimeLike | null {
+    return this.subagentsSeam
+  }
 
   private readonly repoRoot: string
   private readonly workspaceRegistry: WorkspaceRegistryLike | null

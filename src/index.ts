@@ -217,6 +217,15 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     // "no ctx.subagents runtime available" on a host that had mounted it all along.
     const subagentsSeamForRuntime = ctx.get('subagents') as SubagentsRuntimeLike | undefined
     const recursive = new RecursiveRuntime(ctx, { repoRoot: config?.repoRoot ?? process.cwd(), workspaceRegistry, goals, jobs, subagents: subagentsSeamForRuntime ?? null, workflow: ctx.get('workflow') as WorkflowEngineLike | undefined ?? null })
+    // ⚠ FU-9 — AND RESOLVE IT AGAIN WHENEVER THE SERVICE APPEARS, because the one-shot get above is only a
+    // fast path. A live run proved the cost of relying on it: the review fell back to self-audit and reported
+    // `Status: failed` while a child DIRECTORY sat there — written by this plugin's own brief writer, before
+    // any service call — so the artifact looked like a started child and was not. `ctx.inject` is the
+    // harness's own pattern for a service that may be mounted by a later layer, and it fires immediately when
+    // the service is already present, so this is a guarantee rather than a second chance.
+    ctx.inject(['subagents'], (subagentsCtx: Context) => {
+      recursive.attachSubagents((subagentsCtx.get('subagents') as SubagentsRuntimeLike | undefined) ?? null)
+    })
 
     // T7 — THE SETTINGS NAMESPACE, APPLIED ON EVERY APPLY. The settings service edits the
     // Loader entry's config and the Loader RE-APPLIES this plugin, so a toggle in the UI

@@ -20,7 +20,7 @@ import type { PendingWorkItem, RecursiveStatusResult } from './types.ts'
 import { findOperation, countOperations, operationId, recordOperation } from './identity.ts'
 import { createHookRegistry, type HookRegistry } from './hooks.ts'
 import { runTracked, abortReason, type JobsRegistryLike } from './jobs-runner.ts'
-import { modelForRole } from './role-route.ts'
+import { resolveSubagentTarget } from './role-route.ts'
 import { recordJobRun } from './job-log.ts'
 import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
@@ -586,6 +586,12 @@ export class RecursiveRuntime extends Service {
      * open", which the guard must not refuse — see the guard below for why the obvious alternative is worse.
      */
     continuing?: boolean
+    /**
+     * ⚠ FU-19 — A PER-CALL CHOICE, which is what "change them on demand" means. Both win over every configured
+     * level, and both are optional: absent means "resolve the ladder", NOT "clear".
+     */
+    providerOverride?: string | null
+    modelOverride?: string | null
     mode?: 'one-shot' | 'continuable'
     awaitRoundResult?: (childId: ContinuableChildId, messageId: ContinuableMessageId) => Promise<SubagentResultLike | null>
     /**
@@ -712,23 +718,41 @@ export class RecursiveRuntime extends Service {
     }
     if (input.parent !== undefined) request.parent = input.parent
 
-    // T9 — PER-ROLE MODEL ROUTING, applied only where the provider SAYS it supports it.
+    // ⚠ FU-19 — THE PROVIDER/MODEL LADDER, APPLIED WHERE THE PROVIDER SAYS IT CAN BE.
     //
-    // The harness rejects a start that sends `agentOptions` to a provider without the
-    // `agentOptions` capability, so gating on the model alone would BREAK delegations on
-    // providers that do not accept overrides — a routing feature that takes down the
-    // delegation it was meant to improve. The capability decides, and an unsatisfied model
-    // is reported rather than silently dropped.
-    const roleModel = modelForRole(input.role, policy)
-    if (roleModel !== null) {
-      const target = decision.provider ?? ''
-      const capable = providers[target]?.capabilities?.agentOptions === true
+    // The ladder (per-call → phase → role → general default) is resolved by `resolveSubagentTarget`, which also
+    // reports WHICH LEVEL chose each value — so "why did this child run on that model" is answerable from the
+    // decision rather than by reading this code. `modelForRole` was the single-level version of this and is gone.
+    //
+    // ⚠ THE CAPABILITY GATE STAYS AUTHORITATIVE, unchanged: the harness REJECTS a start that sends `agentOptions`
+    // to a provider without the `agentOptions` capability, so gating on the model alone would BREAK delegations on
+    // providers that do not accept overrides — a routing feature that takes down the delegation it was meant to
+    // improve. A choice that cannot be honoured is REPORTED, never silently dropped.
+    const target = resolveSubagentTarget({
+      role: input.role,
+      phase: input.phase,
+      policy,
+      ...(input.providerOverride === undefined && input.modelOverride === undefined
+        ? {}
+        : { override: { provider: input.providerOverride ?? null, model: input.modelOverride ?? null } }),
+      ladderProvider: decision.provider ?? null,
+    })
+    if (target.provider !== null && target.provider !== decision.provider) {
+      // The user named a provider. The router still says WHICH TIER it resolved, but the name used to create the
+      // child is the user's — and the note states both rather than leaving two answers in the record.
+      routingNotes.push(
+        'provider ' + target.provider + ' chosen from ' + target.chosen.provider
+        + ' (the router tier resolved as ' + decision.tier + ')',
+      )
+    }
+    if (target.model !== null) {
+      const capable = providers[target.provider ?? '']?.capabilities?.agentOptions === true
       if (capable) {
-        request.agentOptions = { model: roleModel }
+        request.agentOptions = { model: target.model }
       } else {
         routingNotes.push(
-          'role ' + input.role + ' names model ' + roleModel + ', but provider ' + (target || '(none)')
-          + ' does not declare the agentOptions capability, so the model was NOT applied',
+          'model ' + target.model + ' was chosen (from ' + target.chosen.model + '), but provider '
+          + (target.provider ?? '(none)') + ' does not declare the agentOptions capability, so the model was NOT applied',
         )
       }
     }

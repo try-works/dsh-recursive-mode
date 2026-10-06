@@ -279,10 +279,11 @@
                   enableRunInBackground: false
                   maxDepth: provider-managed
 
-          - id: workflow-ptc
-            name: '@deepseek-ai/dsh-workflow-ptc'
-            config:
-              provider: spawn
+              - id: workflow-ptc
+                name: '@deepseek-ai/dsh-workflow-ptc'
+                config:
+                  provider: spawn
+
               - id: tool-workflow
                 name: '@deepseek-ai/dsh-tool-workflow'
 

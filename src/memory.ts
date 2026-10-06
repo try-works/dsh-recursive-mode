@@ -252,7 +252,14 @@ export function selectMemory(
     if (RETIRED_MARKER.test(haystack)) continue
     const matchedFiles = files.filter((file) => haystack.includes(file))
     const base = scoreMemoryEntry(entry, options.query)
+    // ⚠ FU-14 — P2's SECOND HALF, which the first attempt silently missed. The constant, the parser and the
+    // `phase` option all landed; THIS LINE did not get the bonus, so production ignored the phase while the
+    // explainer honoured it, and the order-equality test missed it because its phase case had ONE relevant
+    // entry — whose position cannot change however it scores. A test that cannot fail is not a safety net.
+    const phaseApplies = options.phase !== undefined
+      && entryAppliesTo(entry).some((p) => options.phase === p || options.phase?.startsWith(p + '-'))
     const score = base + matchedFiles.length * MEMORY_PATH_MATCH_WEIGHT
+      + (phaseApplies ? MEMORY_PHASE_MATCH_WEIGHT : 0)
     if (score === 0) continue
     const matched = matchedFiles.length > 0
       ? matchedFiles

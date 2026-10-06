@@ -16,6 +16,7 @@
     },
     "./src/*": "./src/*",
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./preset/recursive.patch.yml": "./preset/recursive.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [

@@ -392,6 +392,118 @@ before the field existed.
 
 ---
 
+### The delegation map, phase by phase
+
+§8 above describes *how* a delegation happens. This is *where* it can happen, and what each phase must then
+prove. Three facts shape the picture:
+
+1. **Delegation is per-phase, and so is accountability.** A phase that used a subagent must record what the
+   main agent did with the result — the linter enforces this in strict profiles, and it is the reason a
+   subagent's claim is never taken on trust.
+2. **Not every phase can be delegated into.** `AUDITED_PHASE_FILES` names the nine phases whose artifacts carry
+   the audit contract: `01-as-is`, `01.5-root-cause`, `02-to-be-plan`, `03-implementation-summary`,
+   `03.5-code-review`, `04-test-summary`, `06-decisions-update`, `07-state-update`, `08-memory-impact`.
+   `00-requirements`, `00-worktree` and `05-manual-qa` are not in it.
+3. **`recursive_ask` is not a subagent tool.** It carries the workflow's three **human** gates —
+   `ASK_GATE_IDS = ['tdd-mode', 'qa-signoff', 'gate-block']` — as structured decisions rather than prose, so the
+   answer is validated and citeable.
+
+```mermaid
+flowchart TB
+    subgraph main["the main agent, per phase"]
+        direction TB
+        P00["00 requirements · 00 worktree<br/><i>not audited</i>"]
+        P01["01 as-is · 01.5 root cause<br/><i>audited</i>"]
+        P02["02 to-be plan<br/><i>audited</i>"]
+        P03["03 implementation summary<br/><i>audited</i>"]
+        P035["03.5 code review<br/><i>audited</i>"]
+        P04["04 test summary<br/><i>audited</i>"]
+        P05["05 manual QA<br/><i>not audited</i>"]
+        P06["06 decisions · 07 state<br/><i>audited</i>"]
+        P08["08 memory impact<br/><i>audited</i>"]
+    end
+
+    P00 --> P01 --> P02 --> P03 --> P035 --> P04 --> P05 --> P06 --> P08
+
+    ASK["recursive_ask<br/>HUMAN gates"]
+    P00 -.->|"tdd-mode"| ASK
+    P05 -.->|"qa-signoff"| ASK
+    P02 -.->|"gate-block, when policy says ask"| ASK
+
+    REV["recursive_review(role)<br/>code-reviewer · auditor · reviewer · memory-auditor"]
+    P035 ==>|"the review phase"| REV
+    P08 -.->|"memory-auditor role"| REV
+
+    TEAM["recursive_audit_team<br/>one phase per ROLE, one item per reviewer"]
+    P01 -.-> TEAM
+    P02 -.-> TEAM
+    P03 -.-> TEAM
+    P035 -.-> TEAM
+    P04 -.-> TEAM
+    P08 -.-> TEAM
+
+    subgraph contract["what EVERY audited phase must then record in its own artifact"]
+        direction LR
+        C1["Reviewed<br/>Action Records<br/><i>in-run only</i>"]
+        C2["Main-Agent<br/>Verification<br/>Performed"]
+        C3["Acceptance decision<br/>accepted · partially<br/>accepted · rejected"]
+        C4["Refresh<br/>Handling"]
+        C5["Repair Performed<br/>After Verification"]
+    end
+
+    P01 --> contract
+    P02 --> contract
+    P03 --> contract
+    P035 --> contract
+    P04 --> contract
+    P06 --> contract
+    P08 --> contract
+
+    subgraph train["08 also closes the learning loop"]
+        T1["phase 08 locks"] --> T2["trainingGate"] --> T3["extract · group · write shard<br/>→ memory/MEMORY.md"]
+    end
+    P08 --> T1
+
+    classDef audited fill:#efe,stroke:#484
+    classDef notaudited fill:#f5f5f5,stroke:#999
+    classDef human fill:#eef,stroke:#446
+    class P01,P02,P03,P035,P04,P06,P08 audited
+    class P00,P05 notaudited
+    class ASK human
+```
+
+**Reading it.** The heavy arrow is the one mandatory delegation: **03.5** is the review phase, and
+`recursive_review` routes it by role (default `code-reviewer`). The dotted arrows into `recursive_audit_team` are
+the *optional* fan-out — one phase per role, one item per reviewer, so the engine's progress reads as a per-phase
+per-role review rather than an undifferentiated pile. The dotted arrows into `recursive_ask` are **human**
+decisions, not subagents. Every audited phase feeds the same five-part contract, and **08** additionally triggers
+the training pass from §10.
+
+### What each phase owes after delegating
+
+The contract is enforced, not advisory: in a strict profile (`recursive-mode-audit-v2`, `recursive-mode-audit-v1`)
+every artifact in `AUDITED_PHASE_FILES` is checked for `## Subagent Contribution Verification`, and the section is
+rejected unless it records all five parts:
+
+| Must record | Enforced because | Failure message |
+|---|---|---|
+| **Reviewed Action Records** | a delegation claim must cite the run's own `*-action.md` files | `Subagent Contribution Verification must record Reviewed Action Records` |
+| **Main-Agent Verification Performed** | *the main agent*, not the child, is accountable for what the phase asserts | `… must record Main-Agent Verification Performed` |
+| **Acceptance decision** | `accepted` / `partially accepted` / `rejected` — a decision, not an impression | `… must record an Acceptance Decision` |
+| **Refresh Handling** | work redone after the review must be declared | `… must record Refresh Handling` (`n/a` and `none` are not meaningful values) |
+| **Repair Performed After Verification** | a found defect must be shown repaired | `… must record Repair Performed After Verification` |
+
+Two further rules close the obvious loopholes: an action record cited from **outside the run** is rejected
+(`may only reference action records in this run`), and the section may not be empty. Together they mean a phase
+cannot claim "a subagent did this" without naming the record, stating that the main agent checked it, and saying
+what it decided.
+
+**Why this is the answer to "can I just delegate this phase?"** — you can delegate the *work*, and the phase
+artifact still has to carry the *judgement*. The workflow's position is that delegation moves effort, never
+accountability.
+
+
+
 ## 9. How it works: the memory plane
 
 Memory here is not a vector store; it is **markdown files with a scorer in front of them**, and the scorer's

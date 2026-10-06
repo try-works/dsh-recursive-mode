@@ -855,14 +855,21 @@ export class RecursiveRuntime extends Service {
                     // kill's own outcome with an unrelated error.
                   }
                 }
-                if (signal.aborted) onAbort()
-                else signal.addEventListener('abort', onAbort, { once: true })
+                if (signal?.aborted === true) onAbort()
+                else signal?.addEventListener('abort', onAbort, { once: true })
 
                 try {
-                  if (signal.aborted) throw new Error('the round was cancelled before it was awaited')
+                  // ⚠ FU-9 — THE `?.` IS THE FIX FOR THE WHOLE INVESTIGATION. `signal` is typed as an
+                  // `AbortSignal` but a caller can reach here with nothing, and `signal.aborted` on undefined
+                  // throws `Cannot read properties of undefined (reading 'aborted')` — which the delegation's
+                  // catch recorded as its reason, the driver misread as "no continuable repair path", and which
+                  // therefore meant THE CHILD NEVER STARTED. Every artifact this investigation chased — no child
+                  // session, no reply, no settlement, four brief-only child directories — was downstream of this
+                  // one unguarded property read. An absent signal means "nobody can cancel this", not "crash".
+                  if (signal?.aborted === true) throw new Error('the round was cancelled before it was awaited')
                   return await input.awaitRoundResult!(childId, messageId)
                 } finally {
-                  signal.removeEventListener('abort', onAbort)
+                  signal?.removeEventListener('abort', onAbort)
                 }
               },
             })

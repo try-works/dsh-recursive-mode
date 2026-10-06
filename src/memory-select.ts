@@ -19,6 +19,8 @@
 import {
   type MemoryEntry,
   MEMORY_PATH_MATCH_WEIGHT,
+  MEMORY_PHASE_MATCH_WEIGHT,
+  entryAppliesTo,
   RETIRED_MARKER,
   scoreMemoryEntry,
 } from './memory.ts'
@@ -62,6 +64,8 @@ export interface ExplainOptions {
    * script cannot compute because it runs outside the run.
    */
   files?: readonly string[]
+  /** The phase in play. Mirrors production's own option so both rank identically. */
+  phase?: string
   /** How many entries may be injected. Mirrors `selectMemory`'s own cap, which is docs-and-items bounded. */
   maxItems?: number
   /** Mirrors `selectMemory`'s doc cap; the two caps compose there, so they must compose here. */
@@ -118,6 +122,12 @@ export function explainMemorySelection(
         weight: matchedFiles.length * MEMORY_PATH_MATCH_WEIGHT,
         detail: matchedFiles.slice(0, 3).join(', '),
       })
+    }
+
+    // Production's phase rule, imported rather than re-derived.
+    const declared = entryAppliesTo(entry)
+    if (options.phase !== undefined && declared.some((p) => options.phase === p || options.phase?.startsWith(p + '-'))) {
+      components.push({ name: 'phase-applicable', weight: MEMORY_PHASE_MATCH_WEIGHT, detail: 'declares ' + declared.join(', ') })
     }
 
     const total = components.reduce((sum, c) => sum + c.weight, 0)

@@ -1044,6 +1044,8 @@ export class RecursiveRuntime extends Service {
       // weighting is fed by a real run rather than only by tests. `[]` from a non-git root is fine: the
       // query still ranks, and a memory hint must never be why a phase call fails.
       files: files ?? changedPaths(root),
+      // P2: the phase in play, so an entry declaring it applies here outranks general guidance.
+      phase,
     })
     return {
       runId: resolved.runId,

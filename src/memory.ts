@@ -172,6 +172,24 @@ export const RETIRED_MARKER = /\bStatus:\s*`?(STALE|DEPRECATED)`?/i
  */
 export const MEMORY_PATH_MATCH_WEIGHT = 3
 
+/**
+ * What an entry that declares it applies to THIS phase is worth. Exported for the same reason as the two
+ * constants above: the explainer must add the number production adds.
+ */
+export const MEMORY_PHASE_MATCH_WEIGHT = 2
+
+/**
+ * The phase-applicability convention: an entry declares Applies to: 03, 03.5 in its body.
+ *
+ * Declaring NOTHING means general guidance, which is why the bonus is only ever added and never subtracted:
+ * an entry that names other phases simply earns no bonus, and the ranking order decides.
+ */
+export function entryAppliesTo(entry: MemoryEntry): string[] {
+  const match = /^[ \t>*_-]*applies to[ \t]*:[ \t]*(.+)$/im.exec(entry.body)
+  if (!match || match[1] === undefined) return []
+  return match[1].split(',').map((part) => part.replace(/[^0-9.]/g, '')).filter((part) => part !== '')
+}
+
 /** The registry the loader starts from: the router, not the plane. */
 export const MEMORY_INDEX_FILE = 'memory/MEMORY.md'
 
@@ -218,7 +236,7 @@ export interface MemorySelection {
  */
 export function selectMemory(
   root: string,
-  options: { query: string; files?: readonly string[]; maxDocs?: number; maxItems?: number },
+  options: { query: string; files?: readonly string[]; phase?: string; maxDocs?: number; maxItems?: number },
 ): MemorySelection {
   const maxDocs = options.maxDocs ?? MAX_MEMORY_DOCS
   const maxItems = options.maxItems ?? MAX_MEMORY_ITEMS

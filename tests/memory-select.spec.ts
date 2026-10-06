@@ -41,6 +41,7 @@ describe('FU-13 P1/P2: the explainer describes production', () => {
 
   const plane_ = () => plane([
     { kind: 'domains', file: 'locks.md', text: shardText('Lock chain ordering', 'Receipts are scaffolded after prerequisites lock. See src/locks/chain.ts for the order.') },
+    { kind: 'patterns', file: 'phase35.md', text: shardText('Review round shape', 'Applies to: 03.5\n\nThe review round parks and resumes the same child.') },
     { kind: 'patterns', file: 'retry.md', text: shardText('Retry budget', 'The spawn runner retries twice; the third attempt is dropped. See src/runner.ts.') },
     { kind: 'domains', file: 'billing.md', text: shardText('Unrelated billing note', 'Invoices round per line item.') },
     { kind: 'episodes', file: 'old.md', text: shardText('Retired advice', 'Status: `DEPRECATED`\n\nThe spawn runner retried four times.') },
@@ -56,12 +57,15 @@ describe('FU-13 P1/P2: the explainer describes production', () => {
    */
   it('matches selectMemory ORDER on the same plane, for several option sets', () => {
     plane_()
-    const optionSets: Array<{ query: string; files?: string[] }> = [
+    const optionSets: Array<{ query: string; files?: string[]; phase?: string }> = [
       { query: 'spawn runner retries' },
       { query: 'lock chain ordering', files: ['src/locks/chain.ts'] },
       { query: 'unrelated billing' },
       { query: 'abcdefgh nothing matches', files: ['src/nowhere.ts'] },
       { query: 'ordering note', files: ['src/locks/chain.ts', 'src/runner.ts'] },
+      // P2: the phase signal, checked through the SAME order-equality assertion as everything else.
+      { query: 'review round shape', phase: '03.5' },
+      { query: 'review round shape', phase: '07' },
     ]
     for (const options of optionSets) {
       const production = selectMemory(root, options).shards.map((shard) => shard.entry.title)

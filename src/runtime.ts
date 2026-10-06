@@ -986,6 +986,13 @@ export class RecursiveRuntime extends Service {
             ? 'the continuable start was made and NO SETTLEMENT arrived within the wait (the child never reported,'
               + ' or never ran); tier ' + decision.tier + ', provider ' + (decision.provider ?? 'none chosen')
               + ', names on offer [' + (this.lastProviderNames.join(', ') || 'none') + ']'
+              // ⚠ FU-9 — THE PARENT IDENTITY, because the host refuses a prompt when it cannot resolve the
+              // parent session as a live Agent (`subagent/parent-unavailable`, index.ts L429-436), and the tool
+              // builds this handle with a CAST (`exec.agent as unknown as SubagentParentHandle`). A cast is not
+              // a contract: if the id here is not the one the host looks up, the refusal is real and the
+              // classifier's crash has been hiding it. Printing it here costs nothing and settles the question.
+              + '; parent id ' + ((input.parent as { id?: string } | undefined)?.id ?? 'none')
+              + ', parent session keys [' + (input.parent === undefined ? 'no parent' : Object.keys(input.parent as object).join(', ')) + ']'
             : 'no delegate result was produced by the one-shot path; tier ' + decision.tier
               + ', provider ' + (decision.provider ?? 'none chosen'))
           : 'the delegation returned without acceptance; stop reason ' + (result.stopReason ?? 'none reported'),

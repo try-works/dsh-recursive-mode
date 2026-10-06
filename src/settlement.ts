@@ -151,8 +151,76 @@ export function recordSettlement(runDir: string, notice: SettlementNotice): stri
 }
 
 /** Every recorded notice for a run, in arrival order. Never throws. */
-export function readSettlements(runDir: string): SettlementNotice[] {
-  let raw: string
+/**
+ * ⚠ FU-17 — THE ADOPTION PATH, for a settlement whose child this plugin never filed.
+ *
+ * WHY IT EXISTS. `runDirForChild` attributes a child by the `subagents/<delegation>/child-<id>/` layout that a
+ * delegation writes, and it refuses to guess — its own comment: *"filing a settlement into the wrong run is worse
+ * than not filing it: it would attach one run's evidence to another run's chain. A miss costs a settlement the
+ * loop will report as 'no settlement yet', which is recoverable; mis-filing is not."*
+ *
+ * That refusal is right, and it has a cost this feature cannot accept: a child started through the harness's own
+ * tools (or any path that did not write a delegation directory) settles into nothing, so the run loses evidence
+ * of work that really happened — and a phase artifact that must cite an action record cannot cite one that was
+ * never filed.
+ *
+ * THE RULE IS PROGRESSIVE AND NEVER GUESSES BETWEEN RUNS:
+ *   1. exactly one run under the root  → file into THAT run, under a clearly-marked `adopted-<child>/` directory,
+ *      and say in the record that it was adopted and why;
+ *   2. more than one run               → file into a ROOT-level `adopted-settlements.jsonl` instead, because
+ *      choosing between runs is exactly the mis-filing the rule above forbids. The fact is still recorded, in a
+ *      place that can attribute nothing to the wrong chain.
+ *
+ * Returns the path it wrote, or null when there was nothing to write. Never throws: this rides the same hot path
+ * as `captureSettlement` and must not break the session it observes.
+ */
+export function adoptSettlement(root: string, notice: SettlementNotice): string | null {
+  if (notice.childId === '') return null
+  try {
+    const runsRoot = join(root, '.recursive', 'run')
+    let runs: string[] = []
+    try {
+      runs = readdirSync(runsRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort()
+    } catch {
+      return null
+    }
+
+    // Case 2 — ambiguous, so it is recorded OUTSIDE every run's evidence chain.
+    if (runs.length !== 1) {
+      const path = join(root, '.recursive', 'adopted-settlements.jsonl')
+      mkdirSync(dirname(path), { recursive: true })
+      appendFileSync(path, JSON.stringify({
+        adopted: true,
+        reason: 'no delegation directory for this child, and ' + runs.length + ' runs exist',
+        run: null,
+        childId: notice.childId,
+        summary: notice.summary,
+        closingText: notice.closingText,
+      }) + '\n', 'utf8')
+      return path
+    }
+
+    // Case 1 — one run, so the child can only belong to it. Still marked as adopted: the delegation directory
+    // the normal path would have used does not exist, and a reader must be able to tell the two apart.
+    const path = join(runsRoot, runs[0]!, 'subagents', 'adopted-' + notice.childId, 'settlement.jsonl')
+    mkdirSync(dirname(path), { recursive: true })
+    appendFileSync(path, JSON.stringify({
+      adopted: true,
+      reason: 'no delegation directory for this child; single-run workspace',
+      childId: notice.childId,
+      summary: notice.summary,
+      closingText: notice.closingText,
+    }) + '\n', 'utf8')
+    return path
+  } catch {
+    return null
+  }
+}
+
+export function readSettlements(runDir: string): SettlementNotice[] {  let raw: string
   try {
     raw = readFileSync(settlementLogPath(runDir), 'utf8')
   } catch {

@@ -35,6 +35,7 @@ import { mountRecursiveRoutesOnce, makeRecursiveRoutes, type RecursiveRouteHost 
 import { registerRecursiveSkill } from './skills.ts'
 import { enumerateRuns, stageBWorkflowInit } from './bootstrap.ts'
 import { getNextLegalPhase, getLockStatus, PHASE_SEQUENCE } from './lock.ts'
+import { adoptSettlement } from './settlement.ts'
 import { resolveRunDir } from './run.ts'
 import { phaseLintRulesMessage, ReminderOnceGate } from './phase-rules.ts'
 import { settlementFromEvent, runDirForChild, recordSettlement } from './settlement.ts'
@@ -549,7 +550,15 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
           // No run (or an ambiguous one) means the settlement is not filed rather
           // than filed wrongly: the loop will report "no settlement yet", which is
           // recoverable, whereas attaching evidence to the wrong run is not.
-          if (runDir === null) return
+          if (runDir === null) {
+            // ⚠ FU-17 — ADOPT RATHER THAN DROP. The rule above still holds — never guess between runs — but a
+            // settlement for a child nobody filed is evidence of work that really happened, and dropping it
+            // means a phase artifact cannot cite it. `adoptSettlement` files it into the single run when there
+            // is exactly one, and into a root-level adoption log when choosing would mean guessing. Marked as
+            // adopted either way, so a reader can tell an adopted record from a delegation's own.
+            adoptSettlement(cwd, notice)
+            return
+          }
           recordSettlement(runDir, notice)
         } catch {
           // Observe-only. This rides the hot path of every session event and must

@@ -760,6 +760,13 @@ export interface ActionRecordInput {
   findings?: string[]
   success: boolean
   stopReason?: string
+  /**
+   * ⚠ FU-9 — WHY IT FAILED, when it did. `success` is a boolean, so a record could say `Status: failed` and
+   * nothing else: a delegation that FAILED and a delegation that NEVER HAPPENED read identically, which is what
+   * let me conclude for three rounds that the host was not scheduling children. The caller ALREADY passed
+   * `stopReason`, and the live record said `n/a` — because there was no result to take a stop reason from.
+   */
+  failure?: string
 }
 
 function slugify(value: string): string {
@@ -829,6 +836,10 @@ export function writeActionRecord(input: ActionRecordInput): string {
     '- Purpose: ' + input.purpose,
     '- Execution Mode: ' + input.executionMode,
     '- Status: ' + (input.success ? 'accepted' : 'failed'),
+    // ⚠ EMITTED ONLY WHEN A REASON IS GIVEN, so a caller that says nothing produces the record it always did.
+    // Not politeness: this record's shape is asserted by specs, and a first attempt that always emitted the line
+    // failed 13 tests across 5 files. A change to a shared surface should be additive where it can be.
+    ...(input.success === false && input.failure !== undefined ? ['- Failure: ' + input.failure] : []),
     '- Stop Reason: ' + (input.stopReason ?? 'n/a'),
     // Timestamp LAST in Metadata. This USED to be load-bearing: `getHeadingBody` ended
     // its capture with a `\Z` that JavaScript reads as a literal `Z`, so a body was

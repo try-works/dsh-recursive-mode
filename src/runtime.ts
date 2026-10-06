@@ -932,6 +932,15 @@ export class RecursiveRuntime extends Service {
       findings: evaluation.accepted && result?.structured ? [(result.structured as { verdict?: string })?.verdict ?? 'accepted'] : undefined,
       success: evaluation.accepted,
       stopReason: result?.stopReason,
+      // ⚠ FU-9 — AND SAY WHICH KIND OF FAILURE, because the record previously could not. `result == null` means
+      // the provider never produced anything at all (never started, or returned nothing) — which is what the
+      // live record's `Stop Reason: n/a` was quietly telling me — while a present result that failed to be
+      // accepted means a child DID run and its work was refused. Different problems, identical artifacts.
+      failure: evaluation.accepted
+        ? undefined
+        : result == null
+          ? 'no delegate result was produced (the provider never started, or returned nothing)'
+          : 'the delegation returned without acceptance; stop reason ' + (result.stopReason ?? 'none reported'),
     })
 
     // T35: report the mode that ACTUALLY ran, not the one that was asked for. A

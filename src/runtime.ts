@@ -228,6 +228,33 @@ export class RecursiveRuntime extends Service {
     return this.subagentsSeam
   }
 
+  /**
+   * ⚠ FU-9 — THE ROUTER'S PROVIDER MAP, BUILT FROM THE SEAM THAT IS ALREADY ATTACHED.
+   *
+   * `router.ts` returns the NATIVE tier for the first of `[role, 'spawn', 'fork', 'dsh-sdk']` present in this
+   * map. Handed `{}` it tried the external CLI route (null in the default policy) and fell to the policy
+   * fallback — self-audit — with a message naming neither. The router already preferred native; nobody ever
+   * gave it a name. A live review self-audited for five rounds because of it.
+   *
+   * `SubagentProviderLike` is only a DESCRIPTOR (`{ name, capabilities? }`), so a provider is registered by
+   * ASKING the service for it rather than by wrapping it. A service that cannot enumerate yields an empty map
+   * and the previous behaviour, which is the correct degradation rather than a guess about the shape.
+   */
+  private providerMapFromSeam(): Record<string, SubagentProviderLike> {
+    const seam = this.subagentsSeam
+    if (seam === null || seam.getProvider === undefined) return {}
+    const map: Record<string, SubagentProviderLike> = {}
+    for (const name of ['spawn', 'fork', 'dsh-sdk']) {
+      try {
+        const found = seam.getProvider(name)
+        if (found !== undefined && found !== null) map[name] = found as SubagentProviderLike
+      } catch {
+        // An unavailable name is not an error: the next candidate still gets its turn.
+      }
+    }
+    return map
+  }
+
   private readonly repoRoot: string
   private readonly workspaceRegistry: WorkspaceRegistryLike | null
   private readonly goalsService: GoalServiceLike | null
@@ -516,7 +543,15 @@ export class RecursiveRuntime extends Service {
     parent?: SubagentParentHandle
   }) {
     const policy = loadRouterPolicy(input.policyPath ?? routerPolicyPath(input.root), this._routerOverrides)
-    const providers = input.providers ?? {}
+    // ⚠ FU-9 — THE ROUTER GETS THE SAME SEAM FALLBACK THE DELEGATION ONE LINE BELOW ALREADY HAD, and not
+    // getting it is why a live review self-audited for five rounds of investigation. `resolveRole` tries
+    // `[role, 'spawn', 'fork', 'dsh-sdk']` against this map and returns the NATIVE tier for the first name it
+    // finds; handed `{}` it fell through to an external CLI the policy leaves null and then to the policy
+    // fallback, and its message named none of that. The router already preferred native — it was never given a
+    // name to prefer. `SubagentProviderLike` is only a descriptor (`{ name, capabilities? }`), so a provider is
+    // registered by ASKING the service for it; a service that cannot enumerate yields an empty map and the old
+    // behaviour, which is the correct degradation rather than a guess.
+    const providers = input.providers ?? this.providerMapFromSeam()
     // T39: the seam the caller passed, else the one the COMPOSITION mounted. See the field's
     // comment: without this the review tool's rounds silently self-audited on a host that had
     // the service all along.

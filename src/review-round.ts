@@ -41,10 +41,15 @@ export interface ReviewState {
   rounds: number
   startedAt: string
   lastVerdict?: DelegationVerdict
+  /**
+   * ⚠ FU-17 — whether this round carries a VERDICT (`review`) or a DELIVERABLE (`work`). Optional and defaulted
+   * on read, so a state file written before this field existed still means what it always meant.
+   */
+  kind?: 'review' | 'work'
 }
 
 export interface AdvanceReviewOutcome {
-  status: 'reviewing' | 'revised' | 'approved' | 'rejected' | 'unavailable'
+  status: 'reviewing' | 'revised' | 'approved' | 'rejected' | 'unavailable' | 'submitted'
   childId?: string
   verdict?: DelegationVerdict
   rounds: number
@@ -133,8 +138,24 @@ export async function advanceReview(input: {
    */
   sendRepair?: (childId: string, instruction: string) => Promise<void>
   now?: () => string
+  /**
+   * ⚠ FU-17 — WHICH KIND OF ROUND THIS IS, and it defaults to `'review'`.
+   *
+   * The kind is a PARAMETER rather than a forked code path, so every existing caller and spec keeps the exact
+   * behaviour it had — that is what makes "review is unchanged" a proof instead of a hope. A `'work'` round is
+   * the same round: same child, same state file, same park-and-resume mechanics, same repair delivery. The one
+   * difference is what a settlement MEANS: a work round's settlement is a DELIVERABLE, so the driver must not
+   * read an APPROVE out of prose that was never a verdict.
+   */
+  kind?: 'review' | 'work'
+  /**
+   * The main agent's feedback for a `'work'` round — delivered to the SAME child, which then repairs with its
+   * working set intact. Ignored for reviews, whose repair text is read from the reviewer's own reply.
+   */
+  instruction?: string
 }): Promise<AdvanceReviewOutcome> {
   const { runDir, delegationId } = input
+  const kind = input.kind ?? 'review'
   const state = readReviewState(runDir, delegationId)
   const resumeChild = state?.childId
 
@@ -198,6 +219,45 @@ export async function advanceReview(input: {
         message: 'the review is still running (childId ' + String(childId) + '). No settlement has landed yet; '
           + 'call recursive_review again after it settles.',
       }
+  }
+
+  // ⚠ FU-17 — A WORK ROUND ENDS AT ITS DELIVERABLE, and nothing is read out of it. A review must fail closed
+  // (prose is not an approval); a WORK round has no verdict to fail closed ON, so parsing one would manufacture
+  // a judgement the child never made. The main agent judges — that is the whole point of delegating work to a
+  // child and keeping the decision in the parent.
+  if (kind === 'work') {
+    const childId = result.childId ?? resumeChild
+    const rounds = result.rounds.length
+    // The main agent's feedback, when it has any: delivered to the SAME child so the repair keeps its context.
+    const feedback = input.instruction?.trim() ?? ''
+    if (feedback !== '' && childId !== undefined && input.sendRepair !== undefined) {
+      try {
+        await input.sendRepair(childId, feedback)
+      } catch {
+        // The instruction could not be delivered; the child is still kept, so a later call can retry.
+        return {
+          status: 'unavailable',
+          childId,
+          rounds,
+          message: 'the work round settled, but the feedback could not be delivered to the child ('
+            + String(childId) + '); it is kept, so call again to retry',
+        }
+      }
+      return {
+        status: 'revised',
+        childId,
+        rounds,
+        message: 'feedback was delivered to the SAME child (' + String(childId)
+          + '); call again after its re-submission settles',
+      }
+    }
+    return {
+      status: 'submitted',
+      childId,
+      rounds,
+      message: 'the delegated work is in: read the child\'s reply and judge it. Send feedback with the delegate '
+        + 'tool if it is not good enough — the same child will repair it.',
+    }
   }
 
   // A settled round: read the verdict from the child's own reply, FAIL-CLOSED.

@@ -522,6 +522,15 @@ export async function delegateContinuable(input: {
     provider,
     label,
     request,
+    // ⚠ FU-9 — A SIGNAL IS MANDATORY IN PRACTICE, NOT DECORATION. The host reads `signal.aborted` WITHOUT
+    // optional chaining in `packages/subagent/subagent/src/control.ts:106`, while its own sibling
+    // `list-children.ts:130` guards it with `signal?.aborted`. So a continuable start carrying no signal throws
+    // `Cannot read properties of undefined (reading 'aborted')` — the delegation's catch records that as its
+    // reason, the driver reports "no continuable repair path", and THE CHILD NEVER STARTS. That one chain
+    // produced every artifact this investigation chased: no child session, no reply, no settlement, and four
+    // brief-only child directories. The host should guard its own read (reported as a DSH limitation); supplying
+    // a signal on the SPEC — the request type excludes it deliberately — is this plugin's side of the contract.
+    signal: new AbortController().signal,
   }
   if (input.childId !== undefined) spec.childId = input.childId
   try {

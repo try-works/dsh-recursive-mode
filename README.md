@@ -683,30 +683,85 @@ describes the **linter** behaviour as a contract rather than a detail.
 
 ## 12. How it works: mounting and the preset
 
-The plugin mounts in two halves, and understanding why explains a lot of the file layout.
+The plugin ships **two halves that mount in different planes**, and knowing which is which answers most
+"why isn't this working?" questions:
+
+| Half | Artifact | Plane | What it carries |
+|---|---|---|---|
+| **Bundle** | `cordis.patch.yml` (declared as `dsh.bundle.patch`) | **profile** | one enabled row so the host's ClientModuleRegistry can discover the UI half |
+| **Agent preset** | `preset/recursive/agent.cordis.yml` + `preset/recursive/preset.yml` | **agent plane** | **the entire server surface**: the `RecursiveRuntime` service, the twelve tools, `/recursive`, the policy prompt section |
 
 ```mermaid
 flowchart TB
-    subgraph bundle["cordis.patch.yml (the bundle)"]
-        SHELL["insert: id recursive<br/>config: shellOnly: true"]
+    subgraph profilePlane["PROFILE plane (installed once)"]
+        PKG["@try-works/dsh-recursive-mode<br/>profiles/&lt;profile&gt;/node_modules/…/lib/index.js"]
+        SHELL["cordis.patch.yml<br/>insert: id recursive<br/>config: shellOnly: true"]
         NOOP["apply() is a NO-OP on the server root:<br/>no tools, no command, no projection"]
-        CLIENT["client discovery shell:<br/>the host's ClientModuleRegistry<br/>finds /plugins/&lt;id&gt;/client.js"]
+        CLIENT["client discovery:<br/>/plugins/&lt;id&gt;/client.js"]
+        PKG --> SHELL --> NOOP
+        SHELL --> CLIENT
     end
 
-    subgraph preset["the recursive agent preset (isolated realm)"]
-        FULL["the FULL server surface:<br/>12 tools · /recursive · policy · projections"]
-        ISO["isolated, so a session that does not<br/>opt in is unaffected"]
+    INSTALL["scripts/install-preset.js<br/>--profile web --dsh-home … --force"]
+    HOME["~/.dsh/.agent-presets/recursive/<br/>agent.cordis.yml + preset.yml"]
+    INSTALL -->|"materialize"| HOME
+    PKG -.->|"the preset's server row is an ABSOLUTE file URL<br/>into the profile-installed package,<br/>NOT a vendored copy"| HOME
+
+    subgraph agentPlane["AGENT plane (each session that selects it)"]
+        SEL["session selects the recursive preset<br/>agentPreset.list returns it"]
+        STD["the standard coding agent surface<br/>+ tool-presentation mode: both"]
+        REALM["group recursive-realm<br/>isolate: true"]
+        SURF["RecursiveRuntime + 12 tools<br/>+ /recursive + recursive:policy"]
+        SEL --> STD
+        SEL --> REALM --> SURF
     end
 
-    HOST["Harness profile"] --> SHELL
-    SHELL --> NOOP
-    SHELL --> CLIENT
-    HOST -->|"agent opts into the preset"| FULL
-    FULL --> ISO
+    HOME --> SEL
 
     classDef shell fill:#eef,stroke:#446
     class SHELL,CLIENT shell
+    classDef isolated fill:#efe,stroke:#484
+    class REALM,SURF isolated
 ```
+
+### Installing the preset
+
+The preset is not something a profile mounts by listing it: it is **materialized into the DSH home** so the
+harness's own preset list can see it.
+
+```
+node scripts/install-preset.js --profile web [--dsh-home <dir>] [--force]
+```
+
+Three details in the installer are load-bearing:
+
+- **Destination is `~/.dsh/.agent-presets/recursive/`** — both `agent.cordis.yml` and the `preset.yml` metadata,
+  each written through a temp file and a rename, so a half-written preset never appears.
+- **The preset's server-surface row is an ABSOLUTE file URL** into the **profile-installed package**
+  (`…/profiles/<profile>/node_modules/@try-works/dsh-recursive-mode/lib/index.js`) — **not a vendored copy**.
+  Deliberate: it keeps the nested `@deepseek-ai/cordis` and `@deepseek-ai/dsh-tools` imports resolving through
+  the profile's own `node_modules`. A copy placed anywhere else would fail to resolve them.
+- **`agentPreset.list` then returns `recursive`**, and selecting it mounts the server surface for that session.
+
+### Why the realm is not optional
+
+`agent.cordis.yml` is an **agent-plane composition**, and its own header states the constraint in the strongest
+terms available:
+
+> A service row here **MUST** sit inside a group carrying an `isolate` realm. Without one it publishes into the
+> root realm, where it is process-global — another preset publishing the same name collides, and a host reader
+> would resolve one preset's instance for every session; `dsh-agent-presets` **rejects that at mount**.
+
+So the surface lives inside `- id: recursive-realm` / `name: cordis:group` / `group: true` / `isolate: true` —
+one private `RecursiveRuntime` per session, apart from every other preset's. Note the header's precision about
+why a shared **label** would not do: `provide()` throws on a second registration under the same realm symbol, and
+labels **join realms rather than pooling instances**.
+
+### What the preset deliberately does not own
+
+The host composition keeps the registries themselves, the sandbox and approval stack, persistence, and the model
+route. A preset that mounted those would claim authority it should not have — and would collide with the profile
+that legitimately owns them.
 
 **Why the split.** Client discovery requires an **enabled bare-name entry** in the loader's profile
 (`entry.fiber !== undefined && !entry.disabled`), and preset-mounted subtrees are absent from

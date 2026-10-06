@@ -312,17 +312,50 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
    * is reported as NOT VERIFIED in the harness.**
    */
   /**
-   * ⚠ P5 IS NOT HERE, AND THAT IS DELIBERATE. The behaviour test — a run where removing one shard changes
-   * what the agent is told — was attempted twice this round and FAILED both times: the seeded shard never
-   * reached the model, and I could not tell from the failure whether the cause was the shard's wording, the
-   * query the phase actually makes, or the retrieval path itself.
+   * P5 — THE BEHAVIOUR TEST, AND THE ONLY ACCEPTANCE THAT PROVES THE LOADER MATTERS.
    *
-   * Two harness affordances it needed were added and are worth keeping (see `beforeStart` above and the
-   * raised capture limit below), but a test that cannot be made green by reading rather than guessing does
-   * not belong in a green suite. The next attempt should start by PRINTING the phase result's `memory:` and
-   * `memoryReason:` fields for a run with no shard at all, so the query and the ranking are observed rather
-   * than inferred — I guessed at the query's tokens twice and both guesses were wrong.
+   * The same workflow, run twice, differing only by ONE memory shard, must hand the model different context.
+   * If it does not, the retrieval path is decoration.
+   *
+   * ⚠ WHY THE FIRST TWO ATTEMPTS FAILED, measured with a probe rather than inferred: the memory plane is read
+   * at `<controlPlaneRoot>/memory/<kind>/*.md`, NOT under `.recursive/`. A probe against the exact query the
+   * phase makes — the run's own `00-requirements.md`, built by `requirementsContent` — showed a shard seeded
+   * at `<dir>/memory/domains` selected, the same shard under `<dir>/.recursive/memory/domains` NOT selected,
+   * and `<dir>/.recursive` as the root selected again. So the shard's WORDING was fine both times and the
+   * seeding PATH was the whole problem — which is exactly the kind of thing that looks like broken retrieval.
+   *
+   * The seed therefore writes BOTH candidate roots: the assertion is about what the agent is told, and it
+   * should not also be a test of the root resolution.
    */
+  it('P5: REMOVING ONE SHARD CHANGES WHAT THE AGENT IS TOLD', async () => {
+    const shard = '# Lock chain ordering\n\nRequirements acceptance criteria for `/.recursive/run/` receipts.\n'
+    const seed = (root: string) => {
+      for (const plane of [join(root, 'memory', 'domains'), join(root, '.recursive', 'memory', 'domains')]) {
+        mkdirSync(plane, { recursive: true })
+        writeFileSync(join(plane, 'locks.md'), shard, 'utf8')
+      }
+    }
+    const told = (calls: Call[]): string => calls
+      .filter((call) => call.tool.includes('phase'))
+      .map((call) => call.detail)
+      .join('\n')
+
+    const withShard = await runWorkflow({ beforeStart: seed })
+    try {
+      expect(withShard.calls.some((call) => call.tool.includes('phase')), withShard.report).toBe(true)
+      expect(told(withShard.calls), 'the seeded shard must reach the agent').toContain('Lock chain ordering')
+    } finally {
+      if (process.env.E2E_KEEP !== '1') rmSync(withShard.root, { recursive: true, force: true })
+    }
+
+    const withoutShard = await runWorkflow()
+    try {
+      expect(told(withoutShard.calls), 'and removing it must change what is told').not.toContain('Lock chain ordering')
+    } finally {
+      if (process.env.E2E_KEEP !== '1') rmSync(withoutShard.root, { recursive: true, force: true })
+    }
+  }, 240_000)
+
   it('FU-2: recursive_review FAILS CLOSED without a continuable path, naming why', async () => {
     const root = join(scratchRoot(), 'fu2-' + new Date().toISOString().replace(/[:.]/g, '-'))
     mkdirSync(root, { recursive: true })

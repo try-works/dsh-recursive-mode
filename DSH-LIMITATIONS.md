@@ -213,3 +213,28 @@ looks like an answer.
 **Why this entry is written even though it is one line.** Nine other entries here describe surfaces that said
 too little. This one **lied**, and the cost was six rounds — which is the argument for treating "an error
 handler must never replace the error" as a rule rather than a style preference.
+---
+
+## 10 · A plugin cannot recover the error that a host mask destroys
+
+**Measured.** Entry 9 describes the mask: `control.ts:106` reads `signal.aborted` unguarded, so the prompt-delivery
+catch at `index.ts:464` reports the classifier's `TypeError` instead of the refusal that triggered it. This entry
+records the consequence for a **caller**:
+
+- the original error is **replaced inside the host**, before any of it reaches the plugin that called
+  `startContinuable`;
+- **nothing is logged.** A full live run leaves `stderr.txt` and `stderr-resume.txt` at **0 KB**, no log
+  directory, and a session log whose only mention of the failure is the plugin's own record of the masked
+  message;
+- and the plugin **cannot** work around it: the operations that would surface it (re-delivering the prompt,
+  classifying the refusal) are exactly the ones behind the mask.
+
+**What it forces.** A plugin-side diagnosis has to stop and report, because the information does not exist on the
+plugin's side of the boundary. In this workspace that is where a six-round investigation ended: seven hypotheses
+eliminated by evidence (router tier, provider name, subagents seam, live parent, child brief, capability gate,
+spec shape), every instrument honest, and the last unknown destroyed by a host line I am not free to change.
+
+**What DSH could provide.** Two things, either of which would have ended it in one round: the `?.` at
+`control.ts:106`; or a **log line** when a classifier throws over its input — `logger.warn` is already used
+elsewhere in that same file, so the cost is one line. **A caller that can see the original error can fix its own
+side; a caller that cannot, cannot.**

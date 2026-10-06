@@ -173,3 +173,43 @@ have made unnecessary.
 None of them is a reason not to use DSH. They are the reason this plugin has as much scaffolding as it does —
 and they are worth revisiting when a release addresses any of them, because several workarounds (the injected
 settlement observer, the response-file protocol, the file-URL patch rows) could then be deleted outright.
+
+---
+
+## 9 · An error-classifier crashes over the error it was asked to classify
+
+**Measured.** `packages/subagent/subagent/src/control.ts` L105-107:
+
+```ts
+function isCancellation(error: unknown, signal: AbortSignal): boolean {
+  return signal.aborted || (error instanceof SubagentError && error.code === 'CANCELLED')
+}
+```
+
+called from `rejectPrompt` (L56-58), itself called from the prompt-delivery catch at `index.ts` L464:
+
+```ts
+} catch (error: unknown) {
+  return rejectPrompt(error, childSessionId, signal)
+}
+```
+
+When `signal` is `undefined`, the **first** thing `isCancellation` does is throw
+`Cannot read properties of undefined (reading 'aborted')` — so the TypeError **replaces the error it was called
+to classify**, and the caller sees only the classifier's crash.
+
+**What it forces.** The original failure becomes invisible. In this workspace it hid the real cause for **six
+rounds** of live experimentation: every run reported the property read, and every instrument I added to my own
+surfaces faithfully reported it too. The failure has no relationship to the code that failed.
+
+**And it is inconsistent inside one package:** `list-children.ts` L130 guards the same read as
+`if (signal?.aborted)`. One of those two is wrong, and it is not the guarded one.
+
+**What DSH could provide.** `signal?.aborted` at L106. Better still, a classifier that cannot throw over its
+input — wrap the classification so a crash there is attached as a `cause` rather than thrown in place of the
+original. **A masked error is worse than a missing one:** a missing error is visible as absence, while a mask
+looks like an answer.
+
+**Why this entry is written even though it is one line.** Nine other entries here describe surfaces that said
+too little. This one **lied**, and the cost was six rounds — which is the argument for treating "an error
+handler must never replace the error" as a rule rather than a style preference.

@@ -253,12 +253,20 @@ export async function advanceReview(input: {
   const what = repairSent
     ? ' A repair instruction was sent to the SAME child.'
     : ' The child is kept so the repair can be sent to it.'
+  // ⚠ FU-9 — AND SAY WHY THE DELEGATION SAYS SO, when it says anything. `rounds: 0` plus a canned sentence hid
+  // one of THREE named failure branches (a caught error, "no continuable interrupt seam", "REVISE verdict
+  // without a repair instruction") for two rounds of live runs. The reason was already in the result and this
+  // message simply did not print it — the ninth surface in this sequence that could not say what the code knew.
+  // ADDITIVE: a result carrying no reason produces exactly the message it always did, so no caller changes.
+  const detail = result.reason !== undefined && result.reason !== ''
+    ? ' The delegation reported: ' + result.reason + '.'
+    : ''
   return {
     status: 'revised',
     childId,
     verdict: 'REVISE',
     rounds,
-    message: why + what,
+    message: why + what + detail,
   }
 }
 

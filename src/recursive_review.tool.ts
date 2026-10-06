@@ -21,6 +21,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import { toLosslessJson } from './json-safe.ts'
 import type { RecursiveRuntime } from './runtime.ts'
 import { codeRuntimeRefusal, toolError } from './errors.ts'
 import { replyPath } from './handoff.ts'
@@ -122,7 +123,16 @@ export function createRecursiveReviewTool(recursive: RecursiveRuntime, subagents
             })
           },
         })
-        return outcome as unknown as JsonValue
+        // ⚠ FU-9 — A CAST IS NOT A CONTRACT, and this line proved it live. It used to be
+        // `return outcome as unknown as JsonValue`, and a real session answered with
+        //   Error: tool "recursive_review" returned invalid output: value is not lossless JSON
+        //   ToolOutputError, code INVALID_TOOL_OUTPUT
+        // because the outcome carries per-round `result` objects from the host — live Agents and seams, none of
+        // which survive JSON.stringify. The projection keeps every datum a caller reads (status, rounds, the
+        // round text, the message) and turns what has no JSON form into something that does, so the host can
+        // always read the result rather than refusing it and reporting nothing about the work.
+        const projected = toLosslessJson(outcome)
+        return (projected ?? { error: codeRuntimeRefusal('the review produced no JSON-representable result') }) as JsonValue
       } catch (err) {
         return { error: codeRuntimeRefusal(err instanceof Error ? err.message : String(err)) } as const
       }

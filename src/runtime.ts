@@ -939,7 +939,12 @@ export class RecursiveRuntime extends Service {
       failure: evaluation.accepted
         ? undefined
         : result == null
-          ? 'no delegate result was produced (the provider never started, or returned nothing)'
+          // ⚠ THE TIER AND PROVIDER NAME ARE IN THE MESSAGE ON PURPOSE. `delegate` calls
+          // `subagents.start(provider, request)` — the provider is a NAME, and the router picks it from the map
+          // this plugin builds. A name that the host does not know is the difference between a child that runs
+          // and a start that produces nothing, and the record should not make me guess which was chosen.
+          ? 'no delegate result was produced (the provider never started, or returned nothing); tier '
+            + decision.tier + ', provider ' + (decision.provider ?? 'none chosen')
           : 'the delegation returned without acceptance; stop reason ' + (result.stopReason ?? 'none reported'),
     })
 

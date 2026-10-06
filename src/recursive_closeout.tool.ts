@@ -12,9 +12,9 @@ import type { RecursiveRuntime } from './runtime.ts'
 export function createRecursiveCloseoutTool(recursive: RecursiveRuntime) {
   return defineTool({
     name: 'recursive_closeout',
-    description: 'Scaffold a closeout receipt stub (Phase 0-8 delta receipt) for a run in the CURRENT session workspace only. Workspace-scoped: refuses runIds outside the session\'s workspace. Delegates to the RecursiveRuntime service.',
+    description: 'REPORT what a closeout phase artifact is missing (Phase 4-8): it reads the artifact, lists the required sections and gates that are absent, and records a closeout receipt of its own. It NEVER writes the phase document. For a run in the CURRENT session workspace only. Workspace-scoped: refuses runIds outside the session\'s workspace. Delegates to the RecursiveRuntime service.',
     parameters: {
-    phase: { type: 'string', description: 'Closeout phase to scaffold: 00R, 00W, 01, 01.5, 02, 03, 04, 05, 06, 07, or 08 - the same keys recursive_status prints (00R = requirements, 00W = worktree)' },
+    phase: { type: 'string', description: 'Closeout phase to report on: 04, 05, 06, 07 or 08 (the same phase keys recursive_status prints). Phase 08 additionally fires the training trigger when it has been closed out before.' },
       runId: { type: 'string', description: 'Run id (e.g. 03-something). Required. Must resolve inside the current workspace.' },
     },
     output: {

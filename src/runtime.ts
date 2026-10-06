@@ -869,7 +869,7 @@ export class RecursiveRuntime extends Service {
         // the repair path, because a one-shot child cannot be resumed.
         continuable = await delegateContinuable({
           subagents,
-          provider: decision.provider as string,
+          provider: (target.provider ?? decision.provider ?? '') as string,
           label: input.delegationId + '/' + input.childId,
           prompt,
           childId: input.childId,
@@ -970,7 +970,7 @@ export class RecursiveRuntime extends Service {
         try {
           result = await delegate({
             subagents,
-            provider: decision.provider as string,
+            provider: (target.provider ?? decision.provider ?? '') as string,
             request,
           })
         } catch (err) {

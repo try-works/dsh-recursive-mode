@@ -556,6 +556,24 @@ export class RecursiveRuntime extends Service {
     maxDepth?: number
     toolFilter?: unknown
     /**
+     * ⚠ FU-17 — THE BRIEF SLICE, WHEN THE CALLER OWNS IT.
+     *
+     * A review's slice is written here because a reviewer's briefing is review-shaped by definition. A WORK
+     * delegation needs the opposite kind of briefing — what to produce and the standard it will be linted
+     * against — and that is computed by `buildWorkSlice` from the phase rules. This seam lets a work caller pass
+     * it in without this method growing a second, drifting copy of the phase standard.
+     *
+     * ADDITIVE BY CONSTRUCTION: absent, the review slice below is built exactly as it always was, which is what
+     * keeps the review path's behaviour provable rather than merely claimed.
+     */
+    slice?: string
+    /**
+     * ⚠ FU-17 — whether this delegation is WORK or a REVIEW. It changes two things and nothing else: the slice
+     * (when `slice` is passed) and the `Purpose` line of the action record, so a reader of the run can tell a
+     * child that produced something from a child that judged something.
+     */
+    kind?: 'review' | 'work'
+    /**
      * T35: which child lifecycle to use. DEFAULT `continuable` — a one-shot
      * child cannot be resumed, so one-shot forfeits the repair path and must be
      * requested explicitly by a caller that will discard the result.
@@ -654,7 +672,9 @@ export class RecursiveRuntime extends Service {
       runId: input.runId,
       delegationId: input.delegationId,
       childId: input.childId,
-      slice: 'Perform the delegated ' + input.role + ' for run ' + input.runId + ' (' + input.phase + ') and write your submission to reply.md.',
+      // ⚠ FU-17 — `input.slice` wins when a work caller supplies one; otherwise this is byte-for-byte the review
+      // slice it has always been. A work brief cannot be built here without a second copy of the phase standard.
+      slice: input.slice ?? 'Perform the delegated ' + input.role + ' for run ' + input.runId + ' (' + input.phase + ') and write your submission to reply.md.',
     })
     const prompt = buildDelegationPrompt({
       root: input.root,
@@ -959,7 +979,9 @@ export class RecursiveRuntime extends Service {
       runId: input.runId,
       subagentId: input.childId,
       phase: input.phase,
-      purpose: input.role + ' for run ' + input.runId,
+      // ⚠ FU-17 — the kind is stated in the record. `Status` says accepted or failed; nothing said whether the
+      // child PRODUCED the phase's work or JUDGED it, and a reader of a run could not tell the two apart.
+      purpose: input.role + (input.kind === 'work' ? ' (work)' : '') + ' for run ' + input.runId,
       executionMode: decision.tier + (input.mode !== 'one-shot' ? ' (continuable)' : ''),
       artifactPath: input.artifactPath,
       upstreamArtifacts: input.upstreamArtifacts,

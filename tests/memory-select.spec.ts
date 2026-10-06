@@ -1,104 +1,156 @@
-import { describe, expect, it } from 'vitest'
-import { type MemoryEntry, scoreMemoryEntry } from '../src/memory.ts'
+import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  type MemoryEntry,
+  loadMemoryIndex,
+  scoreMemoryEntry,
+  selectMemory,
+} from '../src/memory.ts'
 import { explainMemorySelection } from '../src/memory-select.ts'
 
 /**
- * FU-13 P1 — THE SELECTOR EXPLAINS ITSELF.
+ * FU-13 P1/P2 — THE SELECTOR EXPLAINS THE RANKING THAT SHIPS.
  *
- * ⚠ WHAT THESE TESTS ARE FOR: the reference loader's ranking is opaque, so "why did the agent get this?" has
- * no answer and a bad ranking cannot be tuned. The assertions below pin the three properties that make the
- * explanation trustworthy rather than decorative:
- *   1. the components SUM to the score — a breakdown that does not add up is worse than none;
- *   2. the query component IS the production scorer's own number, so the explanation cannot drift from the
- *      ranking that actually ships;
- *   3. the output is DETERMINISTIC (same inputs, same order, twice) and the excluded list is complete.
+ * ⚠ WHY THE FIRST VERSION OF THIS SPEC WAS NOT ENOUGH, and it is the whole reason for the rewrite: it asserted
+ * that ONE component (the query score) came from production, and the module ranked on three other signals of
+ * its own. The spec passed; the property it was meant to protect was false. So the central assertion here is
+ * the one that cannot be faked — ON THE SAME ON-DISK PLANE WITH THE SAME OPTIONS, THE ORDER EQUALS
+ * `selectMemory`'s ORDER — and the component checks below are supporting detail rather than the guarantee.
  */
-describe('FU-13 P1: explainable memory selection', () => {
+describe('FU-13 P1/P2: the explainer describes production', () => {
+  let root = ''
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'rm-memory-select-'))
+  })
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  /** Write a real memory plane, the shape `loadMemoryIndex` reads: memory/<kind>/<file>.md. */
+  function plane(shards: Array<{ kind: string; file: string; text: string }>) {
+    for (const shard of shards) {
+      mkdirSync(join(root, 'memory', shard.kind), { recursive: true })
+      writeFileSync(join(root, 'memory', shard.kind, shard.file), shard.text, 'utf8')
+    }
+  }
+
+  const shardText = (title: string, body: string) => '## ' + title + '\n\n' + body + '\n'
+
+  const plane_ = () => plane([
+    { kind: 'domains', file: 'locks.md', text: shardText('Lock chain ordering', 'Receipts are scaffolded after prerequisites lock. See src/locks/chain.ts for the order.') },
+    { kind: 'patterns', file: 'retry.md', text: shardText('Retry budget', 'The spawn runner retries twice; the third attempt is dropped. See src/runner.ts.') },
+    { kind: 'domains', file: 'billing.md', text: shardText('Unrelated billing note', 'Invoices round per line item.') },
+    { kind: 'episodes', file: 'old.md', text: shardText('Retired advice', 'Status: `DEPRECATED`\n\nThe spawn runner retried four times.') },
+    { kind: 'domains', file: 'stale.md', text: shardText('Stale ordering note', 'Status: `STALE`\n\nLock chain ordering used to differ.') },
+  ])
+
   const entry = (kind: string, title: string, body: string, source: string): MemoryEntry =>
     ({ kind, title, body, source })
 
-  const shards: MemoryEntry[] = [
-    entry('domains', 'Lock chain ordering', 'Phase 4 receipts must be scaffolded after prerequisites lock.', 'memory/domains/locks.md'),
-    entry('patterns', 'Retry budget', 'The spawn runner retries twice; the third attempt is dropped.', 'memory/patterns/retry.md'),
-    entry('domains', 'Unrelated billing note', 'Invoices are rounded per line item.', 'memory/domains/billing.md'),
-    entry('episodes', 'Dead advice', 'Status: `DEPRECATED`\n\nOld approach that no longer applies.', 'memory/episodes/old.md'),
-    entry('domains', 'Suspect claim', 'Status: `SUSPECT`\nThe spawn runner retries four times.', 'memory/domains/suspect.md'),
-  ]
+  /**
+   * ⚠ THE ASSERTION THAT CANNOT BE FAKED. Same plane, same options: the explainer must produce exactly the
+   * shard order `selectMemory` produces. The first version of this module would fail here — that is the point.
+   */
+  it('matches selectMemory ORDER on the same plane, for several option sets', () => {
+    plane_()
+    const optionSets: Array<{ query: string; files?: string[] }> = [
+      { query: 'spawn runner retries' },
+      { query: 'lock chain ordering', files: ['src/locks/chain.ts'] },
+      { query: 'unrelated billing' },
+      { query: 'abcdefgh nothing matches', files: ['src/nowhere.ts'] },
+      { query: 'ordering note', files: ['src/locks/chain.ts', 'src/runner.ts'] },
+    ]
+    for (const options of optionSets) {
+      const production = selectMemory(root, options).shards.map((shard) => shard.entry.title)
+      const explained = explainMemorySelection(loadMemoryIndex(root), options).entries.map((e) => e.title)
+      expect(explained, 'order must equal selectMemory for: ' + JSON.stringify(options)).toEqual(production)
+    }
+  })
 
-  it('sums its components to the score, for every included entry', () => {
-    const result = explainMemorySelection(shards, { query: 'spawn runner retries', files: ['src/runner.ts'] })
+  it('sums its components to the score, and shares the query component with production', () => {
+    plane_()
+    const query = 'spawn runner retries'
+    const result = explainMemorySelection(loadMemoryIndex(root), { query })
     expect(result.entries.length).toBeGreaterThan(0)
     for (const item of result.entries) {
       const sum = item.components.reduce((total, c) => total + c.weight, 0)
       expect(sum, item.title + ' components must add up').toBe(item.score)
     }
-  })
-
-  it('uses the PRODUCTION scorer for the query component, so explanation cannot drift from behaviour', () => {
-    const query = 'lock chain ordering'
-    const result = explainMemorySelection(shards, { query })
-    const first = result.entries[0]
-    const production = scoreMemoryEntry(shards[0], query)
-    const explained = first.components.find((c) => c.name === 'query-match')?.weight
+    const retry = result.entries.find((e) => e.title === 'Retry budget')
+    const explained = retry?.components.find((c) => c.name === 'query-match')?.weight
+    const production = scoreMemoryEntry(
+      entry('patterns', 'Retry budget', 'The spawn runner retries twice; the third attempt is dropped. See src/runner.ts.', 'x'),
+      query,
+    )
     expect(explained).toBe(production)
   })
 
-  it('boosts an entry that names a path the run actually changed, and says which', () => {
-    const result = explainMemorySelection(shards, { query: 'irrelevant query', files: ['src/locks/chain.ts'] })
-    // The lock shard mentions 'lock' but not the file name; the retry shard names the runner, so seed a match.
-    const withPath = explainMemorySelection(
-      [entry('domains', 'Runner notes', 'See runner.ts for the retry loop.', 'memory/domains/runner.md')],
-      { query: 'nothing matches this', files: ['src/deep/runner.ts'] },
+  it('weights a matched path by the SAME exported constant production uses, and names the path', () => {
+    const files = ['src/locks/chain.ts']
+    // A whole-path match, which is production's rule: the segment alone would NOT match.
+    const whole = explainMemorySelection(
+      [entry('domains', 'Chain notes', 'The order lives in src/locks/chain.ts.', 'memory/domains/c.md')],
+      { query: 'nothing at all matches', files },
     )
-    expect(withPath.entries.length).toBe(1)
-    const pathComponent = withPath.entries[0].components.find((c) => c.name === 'path-overlap')
-    expect(pathComponent?.weight).toBe(1)
-    expect(pathComponent?.detail).toBe('src/deep/runner.ts')
-    // …and the run above, with no file overlap and no query match, injects nothing at all.
-    expect(result.entries.length).toBe(0)
-    expect(result.excluded.some((e) => e.reason.includes('no query match'))).toBe(true)
+    const pathComponent = whole.entries[0].components.find((c) => c.name === 'path-overlap')
+    expect(pathComponent?.weight).toBe(3)
+    expect(pathComponent?.detail).toBe('src/locks/chain.ts')
+
+    // …and a segment-only mention does NOT match, because production does not match it either.
+    const segment = explainMemorySelection(
+      [entry('domains', 'Chain notes', 'The order lives in chain.ts somewhere.', 'memory/domains/c.md')],
+      { query: 'nothing at all matches', files },
+    )
+    expect(segment.entries).toEqual([])
+    expect(segment.excluded.some((e) => e.reason.includes('no query match'))).toBe(true)
   })
 
-  it('never injects a DEPRECATED entry, and reports it instead of dropping it silently', () => {
-    const result = explainMemorySelection(shards, { query: 'old approach', files: ['memory/episodes/old.md'] })
-    expect(result.entries.some((e) => e.title === 'Dead advice')).toBe(false)
-    const dead = result.excluded.find((e) => e.title === 'Dead advice')
-    expect(dead?.reason).toBe('status DEPRECATED is never injected')
-  })
-
-  it('injects a SUSPECT entry with a visible warning rather than hiding it', () => {
-    const result = explainMemorySelection(shards, { query: 'spawn runner retries' })
-    const suspect = result.entries.find((e) => e.title === 'Suspect claim')
-    expect(suspect).toBeDefined()
-    expect(suspect?.warnings[0]).toContain('SUSPECT')
+  it('refuses to inject a RETIRED entry, and reports it instead of dropping it silently', () => {
+    plane_()
+    const result = explainMemorySelection(loadMemoryIndex(root), { query: 'spawn runner retried four times' })
+    expect(result.entries.some((e) => e.title === 'Retired advice')).toBe(false)
+    expect(result.excluded.find((e) => e.title === 'Retired advice')?.reason).toBe('status DEPRECATED is never injected')
+    // STALE is retired too — the same marker, not a second list.
+    expect(result.entries.some((e) => e.title === 'Stale ordering note')).toBe(false)
+    expect(result.excluded.find((e) => e.title === 'Stale ordering note')?.reason).toBe('status STALE is never injected')
   })
 
   it('is deterministic: identical inputs produce byte-identical output', () => {
-    const options = { query: 'lock chain', files: ['src/locks/chain.ts'] }
-    const a = explainMemorySelection(shards, options)
-    const b = explainMemorySelection(shards, options)
+    plane_()
+    const options = { query: 'lock chain ordering', files: ['src/locks/chain.ts'] }
+    const entries = loadMemoryIndex(root)
+    const a = explainMemorySelection(entries, options)
+    const b = explainMemorySelection(entries, options)
     expect(JSON.stringify(a)).toBe(JSON.stringify(b))
-    // …and stable under input reordering, because the sort breaks ties on source and title, not input order.
-    const reordered = explainMemorySelection([...shards].reverse(), options)
-    expect(reordered.entries.map((e) => e.title)).toEqual(a.entries.map((e) => e.title))
+
+    // ⚠ WHAT THIS DOES AND DOES NOT CLAIM, after the first version of it failed: the INCLUDED set is stable
+    // under input reordering, because production tie-breaks on title. The EXCLUDED list is a diagnostic and
+    // follows input order, so comparing it would be asserting something the module never promised.
+    const reversed = explainMemorySelection([...entries].reverse(), options)
+    expect(reversed.entries).toEqual(a.entries)
+    expect([...reversed.excluded].sort((x, y) => x.title.localeCompare(y.title)))
+      .toEqual([...a.excluded].sort((x, y) => x.title.localeCompare(y.title)))
   })
 
-  it('renders what was injected, including the score breakdown', () => {
-    const result = explainMemorySelection(shards, { query: 'spawn runner retries', files: ['src/runner.ts'] })
-    expect(result.rendered).toContain('cite by title')
+  it('honours production caps and reports what the budget kept out', () => {
+    plane_()
+    const options = { query: 'spawn runner retries lock chain ordering billing' }
+    const production = selectMemory(root, { ...options, maxDocs: 2 }).shards.length
+    const explained = explainMemorySelection(loadMemoryIndex(root), { ...options, maxDocs: 2 })
+    expect(explained.entries.length).toBe(production)
+    expect(explained.excluded.filter((e) => e.reason.includes('budget')).length).toBeGreaterThan(0)
+  })
+
+  it('renders the breakdown, and says why an empty result is empty', () => {
+    plane_()
+    const result = explainMemorySelection(loadMemoryIndex(root), { query: 'spawn runner retries' })
     expect(result.rendered).toContain('score ')
     expect(result.rendered).toContain('query-match')
-    // An empty result says so in words, and does not read like a failure.
     const empty = explainMemorySelection([], { query: 'anything' })
     expect(empty.entries).toEqual([])
     expect(empty.rendered).toContain('Do not assume the absence is conclusive')
-  })
-
-  it('honours the injection budget and reports what the budget kept out', () => {
-    const many = Array.from({ length: 5 }, (_, i) =>
-      entry('domains', 'Budget shard ' + i, 'lock chain ordering note ' + i, 'memory/domains/b' + i + '.md'))
-    const result = explainMemorySelection(many, { query: 'lock chain ordering', maxItems: 2 })
-    expect(result.entries.length).toBe(2)
-    expect(result.excluded.filter((e) => e.reason.includes('budget')).length).toBe(3)
   })
 })

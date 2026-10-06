@@ -162,7 +162,15 @@ export function renderMemorySection(entries: readonly MemoryEntry[]): string {  
  * is the one thing a later run must not be taught. Superseding writes a new entry; this is what makes
  * the old one stop being read.
  */
-const RETIRED_MARKER = /\bStatus:\s*`?(STALE|DEPRECATED)`?/i
+// ⚠ EXPORTED SO THERE IS ONE COPY: an explainer that tested its own retirement pattern would describe a
+// ranking that does not ship - which is exactly the defect memory-select.ts had before this change.
+export const RETIRED_MARKER = /\bStatus:\s*`?(STALE|DEPRECATED)`?/i
+
+/**
+ * What one matched changed path is worth. Exported for the same reason as the marker above: the explainer
+ * must add the number production adds, not a number that looks reasonable.
+ */
+export const MEMORY_PATH_MATCH_WEIGHT = 3
 
 /** The registry the loader starts from: the router, not the plane. */
 export const MEMORY_INDEX_FILE = 'memory/MEMORY.md'
@@ -226,7 +234,7 @@ export function selectMemory(
     if (RETIRED_MARKER.test(haystack)) continue
     const matchedFiles = files.filter((file) => haystack.includes(file))
     const base = scoreMemoryEntry(entry, options.query)
-    const score = base + matchedFiles.length * 3
+    const score = base + matchedFiles.length * MEMORY_PATH_MATCH_WEIGHT
     if (score === 0) continue
     const matched = matchedFiles.length > 0
       ? matchedFiles

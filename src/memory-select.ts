@@ -1,5 +1,5 @@
 /**
- * Explainable memory selection (FU-13 P1) — the reference loader's good idea, with the reasons attached.
+ * Explainable memory selection (FU-13 P1/P2) — the reference loader's good idea, with the reasons attached.
  *
  * ⚠ THE REFERENCE, measured: `recursive-training-loader.py` (21.1 KB) *"scores memory docs by relevance to the
  * current task, reads the most relevant docs, scores individual items, and returns formatted context for the
@@ -7,17 +7,21 @@
  * returns context, not reasons, so "why did the agent get this?" has no answer and a bad ranking cannot be
  * debugged or tuned.
  *
- * ⚠ WHY THIS DOES NOT REIMPLEMENT `memory.ts`: `retrieveMemory` and `scoreMemoryEntry` already exist and are
- * what the review path uses. This module is ADDITIVE — it explains their outcome rather than replacing it, and
- * it deliberately CALLS `scoreMemoryEntry` for the query component so the explanation cannot drift from the
- * behaviour it describes. Two implementations of one ranking is the duplication that has produced three
- * defects in this repo already.
- *
- * ⚠ AND WHY IT IS NOT THE WHOLE PROPOSAL: `TRAINING.md` plans phase/run signals, injection counters and a CLI
- * verb. This is P1: typed, scored, explainable, deterministic, with an explicit excluded list — the foundation
- * the later phases attach to.
+ * ⚠⚠ AND THE DEFECT THIS MODULE WAS REWRITTEN TO FIX. The first version asserted that one component — the
+ * query score — came from production, and then ranked on THREE OTHER SIGNALS OF ITS OWN: it matched the last
+ * path SEGMENT where production matches the whole path, capped the path weight where production does not,
+ * tested its own retirement pattern instead of `RETIRED_MARKER`, and tie-broke differently. So it described a
+ * ranking that does not ship, and the spec passed because it only checked the one shared component. The fix is
+ * not "be careful": it is that this module now IMPORTS every constant it ranks with from `memory.ts`, and its
+ * spec asserts the only property that cannot be faked — on the same on-disk plane with the same options, this
+ * module's order EQUALS `selectMemory`'s shard order.
  */
-import { type MemoryEntry, scoreMemoryEntry } from './memory.ts'
+import {
+  type MemoryEntry,
+  MEMORY_PATH_MATCH_WEIGHT,
+  RETIRED_MARKER,
+  scoreMemoryEntry,
+} from './memory.ts'
 
 /** One contribution to an entry's score, named so a reader can argue with it. */
 export interface ScoreComponent {
@@ -47,7 +51,7 @@ export interface MemoryExplanation {
   entries: ExplainedEntry[]
   /** Everything the selector saw and did not inject — never silently dropped. */
   excluded: ExcludedEntry[]
-  /** The same rendering the review path uses, for the included set. */
+  /** The same rendering shape the review path uses, for the included set. */
   rendered: string
 }
 
@@ -58,50 +62,40 @@ export interface ExplainOptions {
    * script cannot compute because it runs outside the run.
    */
   files?: readonly string[]
-  /** How many entries may be injected. Defaults to the module's own limit, not a new one. */
+  /** How many entries may be injected. Mirrors `selectMemory`'s own cap, which is docs-and-items bounded. */
   maxItems?: number
+  /** Mirrors `selectMemory`'s doc cap; the two caps compose there, so they must compose here. */
+  maxDocs?: number
 }
 
-/** Status markers the plane uses for entries that must not be injected. Read from the body, by convention. */
-const DEAD_STATUS = /\bStatus:\s*`?(DEPRECATED|STALE|SUPERSEDED)`?/i
-const SUSPECT_STATUS = /\bStatus:\s*`?SUSPECT`?/i
-
-/** A path counts as a hit when its final segment appears in the entry's text. Cheap, and honest about it. */
-function pathHits(entry: MemoryEntry, files: readonly string[]): string[] {
-  const haystack = (entry.title + '\n' + entry.body).toLowerCase()
-  const hits: string[] = []
-  for (const file of files) {
-    const segment = file.replace(/\\/g, '/').split('/').filter(Boolean).pop()
-    if (segment === undefined || segment === '') continue
-    if (haystack.includes(segment.toLowerCase())) hits.push(file)
-  }
-  return hits
-}
+/** The same compose rule production applies at L246: `slice(0, Math.min(maxDocs, maxItems))`. */
+const DEFAULT_MAX_DOCS = 3
+const DEFAULT_MAX_ITEMS = 10
 
 /**
- * Rank entries and explain every decision.
+ * Rank entries and explain every decision, using **production's own signals**.
  *
- * Deterministic by construction: the sort is by score, then by source, then by title — never by input order
- * or a clock — so the same inputs always produce the same output, which is what makes two runs comparable.
+ * The score is `scoreMemoryEntry(entry, query) + <whole-path matches> * MEMORY_PATH_MATCH_WEIGHT`, the retired
+ * marker is `RETIRED_MARKER`, and the tie-break is `title.localeCompare` — the four things the first version
+ * got wrong by inventing them.
  */
 export function explainMemorySelection(
   entries: readonly MemoryEntry[],
   options: ExplainOptions,
 ): MemoryExplanation {
   const files = options.files ?? []
-  const maxItems = options.maxItems ?? 10
+  const cap = Math.min(options.maxDocs ?? DEFAULT_MAX_DOCS, options.maxItems ?? DEFAULT_MAX_ITEMS)
   const excluded: ExcludedEntry[] = []
   const scored: ExplainedEntry[] = []
 
   for (const entry of entries) {
-    const title = entry.title.trim()
-    const text = title + '\n' + entry.body.trim()
-    if (text.trim() === '') {
+    const haystack = entry.title + '\n' + entry.body
+    if (haystack.trim() === '') {
       excluded.push({ title: entry.title, source: entry.source, reason: 'the entry is empty' })
       continue
     }
-    if (DEAD_STATUS.test(entry.body)) {
-      const status = DEAD_STATUS.exec(entry.body)?.[1] ?? 'dead'
+    if (RETIRED_MARKER.test(haystack)) {
+      const status = RETIRED_MARKER.exec(haystack)?.[1] ?? 'retired'
       excluded.push({
         title: entry.title,
         source: entry.source,
@@ -111,18 +105,18 @@ export function explainMemorySelection(
     }
 
     const components: ScoreComponent[] = []
-    // ⚠ THE QUERY COMPONENT IS THE PRODUCTION SCORER'S OWN NUMBER, so this explanation cannot disagree with
-    // what `retrieveMemory` would have chosen.
+    // ⚠ THE QUERY COMPONENT IS PRODUCTION'S OWN SCORER, not a second implementation of it.
     const queryScore = scoreMemoryEntry(entry, options.query)
     if (queryScore > 0) components.push({ name: 'query-match', weight: queryScore })
 
-    const hits = pathHits(entry, files)
-    if (hits.length > 0) {
+    // ⚠ WHOLE-PATH MATCH, UNCAPPED — production's rule (L227/L229), reproduced rather than improved on. The
+    // temptation to match a path's last segment was exactly the drift this module was rewritten to remove.
+    const matchedFiles = files.filter((file) => haystack.includes(file))
+    if (matchedFiles.length > 0) {
       components.push({
         name: 'path-overlap',
-        // Capped so one entry naming every changed file cannot dominate the ranking.
-        weight: Math.min(hits.length, 3),
-        detail: hits.slice(0, 3).join(', '),
+        weight: matchedFiles.length * MEMORY_PATH_MATCH_WEIGHT,
+        detail: matchedFiles.slice(0, 3).join(', '),
       })
     }
 
@@ -136,31 +130,25 @@ export function explainMemorySelection(
       continue
     }
 
-    const warnings: string[] = []
-    if (SUSPECT_STATUS.test(entry.body)) {
-      warnings.push('status SUSPECT — injected, but treat the claim as unverified')
-    }
-
-    scored.push({ kind: entry.kind, title: entry.title, source: entry.source, score: total, components, warnings })
+    scored.push({ kind: entry.kind, title: entry.title, source: entry.source, score: total, components, warnings: [] })
   }
 
-  scored.sort((a, b) => (b.score - a.score)
-    || (a.source < b.source ? -1 : a.source > b.source ? 1 : 0)
-    || (a.title < b.title ? -1 : a.title > b.title ? 1 : 0))
+  // Production's tie-break, exactly: score descending, then title by localeCompare.
+  scored.sort((a, b) => (b.score - a.score) || a.title.localeCompare(b.title))
 
-  const included = scored.slice(0, Math.max(0, maxItems))
-  for (const dropped of scored.slice(Math.max(0, maxItems))) {
+  const included = scored.slice(0, Math.max(0, cap))
+  for (const dropped of scored.slice(Math.max(0, cap))) {
     excluded.push({
       title: dropped.title,
       source: dropped.source,
-      reason: 'below the injection budget of ' + maxItems + ' entries',
+      reason: 'below the injection budget of ' + cap + ' shard(s)',
     })
   }
 
   return { entries: included, excluded, rendered: renderExplained(included) }
 }
 
-/** Render the included set the way the review section does, so a caller can print exactly what was shown. */
+/** Render the included set, so a caller can print exactly what would be shown. */
 export function renderExplained(entries: readonly ExplainedEntry[]): string {
   if (entries.length === 0) {
     return 'No prior-run memory matched this phase. Do not assume the absence is conclusive:'

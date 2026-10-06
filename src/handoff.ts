@@ -134,6 +134,68 @@ export function replyPath(input: { root: string; runId: string; delegationId: st
   return join(subagentsDir(root, runId), delegationId, 'child-' + childId, 'reply.md')
 }
 
+/**
+ * ⚠ FU-17 — THE WORK BRIEF'S SLICE: what a child is told when it is delegated the phase's ACTUAL WORK rather
+ * than a review of it.
+ *
+ * WHY THIS IS SEPARATE FROM THE REVIEWER'S SLICE, and the reason is not tidiness. A reviewer is told what to
+ * look FOR — anti-patterns, a verdict vocabulary, "do not be satisfied by prose". A worker must be told what to
+ * PRODUCE, and above all **the standard its output will be judged against**, because the phase artifact is
+ * linted for required sections and a child that was never told them cannot meet them. That standard already
+ * exists in one place (`getArtifactRequiredSections`), so this composes it rather than restating it — a second
+ * copy would drift from the linter, which is the defect this project has fixed more than once.
+ *
+ * ⚠ IT ALSO TELLS THE CHILD WHO DECIDES. The main agent verifies and records what it accepted
+ * (`## Subagent Contribution Verification`: reviewed action records, main-agent verification performed, an
+ * acceptance decision, refresh handling, repair performed). Saying so up front is not politeness: a child that
+ * believes its own output is final writes a different, worse submission than one that knows a parent will
+ * check it against named sections.
+ */
+export function buildWorkSlice(input: {
+  /** The main agent's task for this child, verbatim. */
+  instruction: string
+  /** The run-relative artifact the work contributes to, e.g. `03-implementation-summary.md`. */
+  artifactFile: string
+  /** The phase key, for the brief's own traceability back to the run. */
+  phase: string
+  /** Required sections for that artifact — pass `getArtifactRequiredSections(artifactFile, profile)`. */
+  requiredSections: readonly string[]
+  /** Optional: the phase's lint rules, so the child sees the gate fields too. */
+  lintNotes?: readonly string[]
+}): string {
+  const sections = input.requiredSections.length > 0
+    ? input.requiredSections.map((section) => '- ' + section).join('\n')
+    : '- (no section map for this artifact — follow the existing artifact\'s own shape)'
+  const lines: string[] = [
+    'You are doing the WORK for phase `' + input.phase + '`, not reviewing it.',
+    '',
+    '## Your Task',
+    '',
+    input.instruction.trim(),
+    '',
+    '## What You Are Contributing To',
+    '',
+    '`' + input.artifactFile + '` — the phase artifact. Write the content INTO your `reply.md` submission; the',
+    'main agent is the author of record for the artifact itself and will place your work there.',
+    '',
+    '## The Standard It Will Be Judged Against',
+    '',
+    'The artifact must contain these sections. Yours must supply the ones your task touches, in this vocabulary:',
+    '',
+    sections,
+    '',
+    '## How This Will Be Checked',
+    '',
+    'An INDEPENDENT reviewer and the MAIN agent both judge your submission against the sections above. If it falls',
+    'short, feedback comes back to YOU — the same child — so state your assumptions and your evidence plainly',
+    'rather than leaving a gap someone else has to guess at.',
+  ]
+  if (input.lintNotes !== undefined && input.lintNotes.length > 0) {
+    lines.push('', '## Phase Gates', '', input.lintNotes.map((note) => '- ' + note).join('\n'))
+  }
+  return lines.join('\n')
+}
+
 /** Child-scoped disposable scratch (Phase B R5, PROPOSAL 10.7). */
 export function childScratchPath(input: { root: string; runId: string; childId: string }): string {
   const { root, runId, childId } = input

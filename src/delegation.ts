@@ -468,6 +468,15 @@ export async function delegateContinuable(input: {
   // actual result) rather than fabricating authority and silently APPROVE-ing.
   const hasContinuableSeam = startContinuable !== undefined && followup !== undefined && input.awaitRoundResult !== undefined
   if (!hasContinuableSeam || subagents === undefined || parent === undefined) {
+    // ⚠ FU-9 — NAME WHICH CONDITION FAILED, because this branch covers THREE of them and the report did not.
+    // A live run returned `status: unavailable` with "no continuable seam or no live parent" for three rounds,
+    // making its cause UNDECIDABLE while this code knew it exactly. That is the defect class this session keeps
+    // finding - a surface describing less than the code knows - and it cost more than the bug it was hiding.
+    const fallbackReason = 'missing ' + [
+      hasContinuableSeam ? null : 'the continuable seam (startContinuable, followup, awaitRoundResult)',
+      subagents === undefined ? 'the subagents runtime' : null,
+      parent === undefined ? 'the exact live parent Agent' : null,
+    ].filter((part): part is string => part !== null).join(', ')
     // Fall back to one-shot delegation (self-audit-safe): never silently drop.
     try {
       const oneShot = await delegate({
@@ -487,6 +496,7 @@ export async function delegateContinuable(input: {
         rounds: [{ text: prompt, result: oneShot }],
         accepted: verdict === 'APPROVE' && evaluateDelegationResult(oneShot).accepted,
         fellBackToOneShot: true,
+        reason: fallbackReason,
       }
     } catch (err) {
       return { ok: false, reason: err instanceof Error ? err.message : String(err), rounds: [], accepted: false, fellBackToOneShot: true }

@@ -153,11 +153,15 @@ export async function advanceReview(input: {
   // The delegation ran, but not continuably: the review happened without the repair
   // path. Named, never hidden behind a success — this is T35's whole reason.
   if (result.fellBackToOneShot === true) {
+    // ⚠ FU-9 — AND SAY WHICH CONDITION, when the delegation kept it. The sentence below used to name two
+    // possibilities for a branch that covers three, so a live run's cause was undecidable from its own report.
     return {
       status: 'unavailable',
       rounds: result.rounds.length,
-      message: 'the review ran WITHOUT the continuable repair path (no continuable seam or no live parent), '
-        + 'so a failed review cannot be sent back to the child that did the work',
+      message: 'the review ran WITHOUT the continuable repair path'
+        + (result.reason !== undefined
+          ? ' — ' + result.reason + ' — so a failed review cannot be sent back to the child that did the work'
+          : ' (no continuable seam or no live parent), so a failed review cannot be sent back to the child that did the work'),
     }
   }
 

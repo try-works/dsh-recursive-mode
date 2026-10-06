@@ -10,7 +10,32 @@ it, and where the observation was indirect that is stated.
 
 ---
 
-## 1 · A parked continuable child never gets a turn in a one-shot session
+## 1 · ~~A parked continuable child never gets a turn in a one-shot session~~ — **RETRACTED**
+
+> **⚠ THIS ENTRY WAS WRONG, AND THE EVIDENCE THAT KILLED IT WAS IN THE RUN ITSELF.** The claim was that a child
+> was started and then never given a turn. Reading the plugin's own **action record** for that delegation shows
+> what actually happened:
+>
+> ```
+> - Execution Mode: self-audit (continuable)
+> - Status: failed
+> ```
+>
+> **The delegation never happened.** The plugin fell back to self-audit because it could not resolve the
+> subagents service, so no child was ever started — which is why there was no child session, no settlement and
+> no reply. The child directory I kept pointing at is written by the **plugin's own brief writer**, before any
+> service call, so it proves nothing about the host. I read directories instead of the record that said
+> `Status: failed`, and built a host-limitation story on top of it.
+>
+> **The real cause is a composition-ordering trap in the plugin, not a DSH limitation:** `index.ts` resolves the
+> seam with a one-shot `ctx.get('subagents')` during `apply`, while the harness's own pattern is
+> `ctx.inject(['subagents'], …)`. If the service is mounted by a later layer, the get returns undefined and
+> nothing re-resolves it. The name is correct — `@deepseek-ai/dsh-subagent` does `super(ctx, 'subagents')`.
+>
+> Kept rather than deleted, because the mistake is the instructive part: **a truthful status field was sitting
+> in an artifact I had already opened, and I preferred my own story to it.**
+
+## 1b · (original entry, superseded — kept for the record) A parked continuable child never gets a turn in a one-shot session
 
 **Measured.** A live headless session with this plugin mounted delegated a review, wrote
 `subagents/03-review/child-<id>/brief.md`, and then **nothing happened**: no child session was created, no

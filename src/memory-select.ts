@@ -16,6 +16,7 @@
  * spec asserts the only property that cannot be faked — on the same on-disk plane with the same options, this
  * module's order EQUALS `selectMemory`'s shard order.
  */
+import { feedbackBonus, type FeedbackBook } from './memory-feedback.ts'
 import {
   type MemoryEntry,
   MEMORY_PATH_MATCH_WEIGHT,
@@ -70,6 +71,12 @@ export interface ExplainOptions {
   maxItems?: number
   /** Mirrors `selectMemory`'s doc cap; the two caps compose there, so they must compose here. */
   maxDocs?: number
+  /**
+   * The counters, PASSED IN. This module takes entries rather than a root, so it has no business reading a
+   * sidecar — and an explainer that read its own evidence could disagree with the ranking it describes,
+   * which is the defect it was rewritten to remove.
+   */
+  feedback?: FeedbackBook
 }
 
 /** The same compose rule production applies at L246: `slice(0, Math.min(maxDocs, maxItems))`. */
@@ -129,6 +136,10 @@ export function explainMemorySelection(
     if (options.phase !== undefined && declared.some((p) => options.phase === p || options.phase?.startsWith(p + '-'))) {
       components.push({ name: 'phase-applicable', weight: MEMORY_PHASE_MATCH_WEIGHT, detail: 'declares ' + declared.join(', ') })
     }
+
+    // Production's counter rule, imported rather than re-derived, and fed the same book.
+    const bonus = feedbackBonus(options.feedback ?? {}, entry.source)
+    if (bonus !== 0) components.push({ name: 'feedback', weight: bonus, detail: 'applied/contradicted history' })
 
     const total = components.reduce((sum, c) => sum + c.weight, 0)
     if (total === 0) {

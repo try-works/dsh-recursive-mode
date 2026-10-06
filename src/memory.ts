@@ -21,6 +21,8 @@
 /** The kinds this plugin's memory layer holds, in the order the scaffold creates them. */
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+// P3b: the counters, passed IN rather than read here, so a caller decides where the evidence comes from.
+import { type FeedbackBook, feedbackBonus } from './memory-feedback.ts'
 
 export const MEMORY_KINDS = ['domains', 'patterns', 'episodes', 'skills'] as const
 
@@ -236,7 +238,7 @@ export interface MemorySelection {
  */
 export function selectMemory(
   root: string,
-  options: { query: string; files?: readonly string[]; phase?: string; maxDocs?: number; maxItems?: number },
+  options: { query: string; files?: readonly string[]; phase?: string; feedback?: FeedbackBook; maxDocs?: number; maxItems?: number },
 ): MemorySelection {
   const maxDocs = options.maxDocs ?? MAX_MEMORY_DOCS
   const maxItems = options.maxItems ?? MAX_MEMORY_ITEMS
@@ -260,6 +262,9 @@ export function selectMemory(
       && entryAppliesTo(entry).some((p) => options.phase === p || options.phase?.startsWith(p + '-'))
     const score = base + matchedFiles.length * MEMORY_PATH_MATCH_WEIGHT
       + (phaseApplies ? MEMORY_PHASE_MATCH_WEIGHT : 0)
+      // P3b: what the counters have learned about this entry, clamped to one step by `feedbackBonus`. Passed
+      // in as an option, so this module never decides where evidence lives.
+      + feedbackBonus(options.feedback ?? {}, entry.source)
     if (score === 0) continue
     const matched = matchedFiles.length > 0
       ? matchedFiles

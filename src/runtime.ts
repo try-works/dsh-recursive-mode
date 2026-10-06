@@ -6,6 +6,7 @@ import { requirementsContent, worktreeContent, laterPhaseContent, detectGitConte
 import { foldRun, getMdFieldValue, pendingWork, resolveRunDir } from './status.ts'
 import {
   getLockStatus,
+  PHASE_SEQUENCE,
   getNextLegalPhase,
   getPrerequisiteBlockers,
   getStaleDownstreamPhases,
@@ -29,6 +30,7 @@ import { closeoutReport, writeCloseoutReceipt } from './closeout-report.ts'
 import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './scratch.ts'
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
 import { readMemoryEntries, retrieveMemory, renderMemorySection, selectMemory } from './memory.ts'
+import { readFeedback, recordInjection, settleInjections } from './memory-feedback.ts'
 import { runPhase8Trigger, resolveExtractor, spawnExtractorRunner } from './training.ts'
 import { buildAskQuestion, GATE_DEFAULT_ARTIFACT, pendingGateFor } from './recursive_ask.tool.ts'
 import { contractDigest } from './policy.ts'
@@ -355,6 +357,9 @@ export class RecursiveRuntime extends Service {
       // It READS the artifact, reports what the standard requires and what is missing, and records that
       // examination as a receipt of its own under locks/<stem>.closeout.receipt.json — never over the doc.
       const result = closeoutReport(runDir, phase)
+      // P3b: settle this run's injections against its own outcome. Only phases that LOCKED are evidence, and
+      // a run settles once, at closeout.
+      settleInjections(root, runDir, PHASE_SEQUENCE.filter((file) => getLockStatus(join(runDir, file)) === 'LOCKED'))
       writeCloseoutReceipt(runDir, phase)
       const training = isPhase8
         ? runPhase8Trigger(root, runId, {
@@ -1045,8 +1050,17 @@ export class RecursiveRuntime extends Service {
       // query still ranks, and a memory hint must never be why a phase call fails.
       files: files ?? changedPaths(root),
       // P2: the phase in play, so an entry declaring it applies here outranks general guidance.
+      // P3b: the counters, read ONCE here and handed to the ranking — the book is evidence about retrieval,
+      // and where it lives is the caller's business, not the ranker's.
+      feedback: readFeedback(root),
       phase,
     })
+    // P3b: record what this phase was shown, so the loop has evidence to settle at closeout.
+    recordInjection(resolved.runDir, selection.shards.map((shard) => ({
+      source: shard.entry.source,
+      title: shard.entry.title,
+      score: shard.score,
+    })), phase)
     return {
       runId: resolved.runId,
       phase,

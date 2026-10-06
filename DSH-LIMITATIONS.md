@@ -238,3 +238,25 @@ spec shape), every instrument honest, and the last unknown destroyed by a host l
 `control.ts:106`; or a **log line** when a classifier throws over its input — `logger.warn` is already used
 elsewhere in that same file, so the cost is one line. **A caller that can see the original error can fix its own
 side; a caller that cannot, cannot.**
+
+## 11 · A preset cannot be installed by writing a file, and the UI gives no reason why
+
+**What it is.** The directory `~/.dsh/.agent-presets/<name>/` is **not a discovery path**. The registry
+documents its parameter as *"Parsed configuration supplied by the declaring plugin"*, and the settings UI renders
+whatever emote.agentPresets.list() returns. A package that ships a preset must declare a row naming
+`@deepseek-ai/dsh-agent-preset` in a patch file listed by dsh.bundle.patch - which is an **array** for such a
+package, not the plain string every plugin without a preset uses.
+
+**What it cost.** A correct-looking installer wrote a correct-looking file to a path nothing reads, and printed
+success. The preset had never appeared in the UI, and **the UI gives no reason**: the CUSTOM section simply lists
+what the registry returned, so "not registered" and "registered badly" look identical from the outside. The
+diagnosis came from a user screenshot, not from any output the system produced.
+
+**What it forces.** Anyone packaging a preset has to find the declaration contract in the harness source. The
+symptom is a missing row in a list, which points at the registry, which points at the plugin row - three hops
+from a file that looks right.
+
+**What DSH could provide.** Either make a stray directory a **visible** condition (a warning for
+`agent-presets/` entries that were never registered), or say so in the UI: an empty CUSTOM section with one
+line - *"no custom presets are registered; presets are declared by plugins, not placed in a directory"* - would
+have turned a screenshot-plus-investigation into a single read.

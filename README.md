@@ -730,13 +730,13 @@ flowchart TB
         SHELL --> CLIENT
     end
 
-    INSTALL["scripts/install-preset.js<br/>--profile web --dsh-home … --force"]
-    HOME["~/.dsh/.agent-presets/recursive/<br/>agent.cordis.yml + preset.yml"]
-    INSTALL -->|"materialize"| HOME
-    PKG -.->|"the preset's server row is an ABSOLUTE file URL<br/>into the profile-installed package,<br/>NOT a vendored copy"| HOME
+    INSTALL["preset/recursive.patch.yml<br/>insert: id preset-recursive<br/>name: @deepseek-ai/dsh-agent-preset"]
+    HOME["the agent-preset registry, in process<br/>NOTHING is written to the DSH home"]
+    INSTALL -->|"the bundle patch declares it"| HOME
+    PKG -.->|"the preset's server row names the PACKAGE,<br/>resolved from the profile node_modules,<br/>so no absolute path is written anywhere"| HOME
 
     subgraph agentPlane["AGENT plane (each session that selects it)"]
-        SEL["session selects the recursive preset<br/>agentPreset.list returns it"]
+        SEL["session selects the recursive preset<br/>registered by the bundle row"]
         STD["the standard coding agent surface<br/>+ tool-presentation mode: both"]
         REALM["group recursive-realm<br/>isolate: true"]
         SURF["RecursiveRuntime + 12 tools<br/>+ /recursive + recursive:policy"]
@@ -754,22 +754,53 @@ flowchart TB
 
 ### Installing the preset
 
-The preset is not something a profile mounts by listing it: it is **materialized into the DSH home** so the
-harness's own preset list can see it.
+**There is nothing to install.** A preset is **declared by a plugin row**, not discovered from a directory, so
+enabling the bundle and letting it mount *is* the installation. No script, no post-install step, and nothing
+written into the DSH home.
 
+> **⚠ THIS SECTION USED TO DESCRIBE AN INSTALLER SCRIPT, AND IT WAS WRONG.** It documented
+> `node scripts/install-preset.js --profile web`, a destination of `~/.dsh/.agent-presets/recursive/`, and the
+> claim that **`agentPreset.list` then returns `recursive`**. A screenshot of Settings → Agent presets showed an
+> **empty CUSTOM section** while the file sat exactly where that script put it, which falsified all three claims
+> at once. The script had no bug: it wrote a correct file to a path nothing reads. It is now deleted, and the
+> correction is recorded here rather than quietly edited away, because a document asserting a behaviour that does
+> not occur is the defect this section used to be.
+
+How the declaration works is in [§12.1](#121-how-the-preset-is-declared-and-how-it-used-to-be-wrong) below: the
+bundle patch ships a `- insert:` row naming `@deepseek-ai/dsh-agent-preset`, whose config **is** the preset
+definition, and `dsh.bundle.patch` lists it as an **array** — which is what a package that ships a preset does.
+
+### 12.1 How the preset is declared (and how it used to be, wrongly)
+
+A preset is **declared by a plugin row**, not discovered from a directory. `preset/recursive.patch.yml` ships the
+declaration, and the bundle's manifest lists it:
+
+```yaml
+- insert:
+    - id: preset-recursive
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: recursive
+        order: 25
+        plugins: [ …the composition, verbatim… ]
 ```
-node scripts/install-preset.js --profile web [--dsh-home <dir>] [--force]
-```
 
-Three details in the installer are load-bearing:
+`@deepseek-ai/dsh-agent-preset` is the row type whose only work is `ctx.agentPresets.register(this.config)`, and it
+sets `EntryGroup.key`, documented in the harness as *"preserve child expressions until their own plugins
+activate"* — which is why the two `!!js` platform switches stay expressions rather than being evaluated at
+packaging time. **`dsh.bundle.patch` is an ARRAY** for a package that ships a preset: the harness `web-app` bundle
+lists its main patch plus one patch per built-in preset the same way, and every plugin that ships *no* preset uses
+a plain string.
 
-- **Destination is `~/.dsh/.agent-presets/recursive/`** — both `agent.cordis.yml` and the `preset.yml` metadata,
-  each written through a temp file and a rename, so a half-written preset never appears.
-- **The preset's server-surface row is an ABSOLUTE file URL** into the **profile-installed package**
-  (`…/profiles/<profile>/node_modules/@try-works/dsh-recursive-mode/lib/index.js`) — **not a vendored copy**.
-  Deliberate: it keeps the nested `@deepseek-ai/cordis` and `@deepseek-ai/dsh-tools` imports resolving through
-  the profile's own `node_modules`. A copy placed anywhere else would fail to resolve them.
-- **`agentPreset.list` then returns `recursive`**, and selecting it mounts the server surface for that session.
+**`preset/recursive/agent.cordis.yml` remains the source composition**, and a parity spec proves the patch agrees
+with it line for line — one definition with two consumers proven equal, rather than two copies free to drift.
+
+**What this replaced, and why the old way could not work.** `scripts/install-preset.js` wrote
+`~/.dsh/.agent-presets/recursive/agent.cordis.yml` through a temp file and a rename, and printed success. **That
+directory is not a discovery path.** The registry's documentation says its parameter is *"Parsed configuration
+supplied by the declaring plugin"*, and the settings UI renders whatever `remote.agentPresets.list()` returns — so a
+correct file on disk produced an empty CUSTOM section, and the installer's success message was true about the file
+and false about the effect.
 
 ### Why the realm is not optional
 

@@ -37,8 +37,8 @@ describe('preset/recursive — R2 absolute-file-URL server surface (addendum-r4-
   it('carries a SINGLE placeholder server row (commands.ts is bundled into lib/index.js)', () => {
     const yml = readFileSync(join(pkgRoot, 'preset', 'recursive', 'agent.cordis.yml'), 'utf8')
     expect(yml).toContain("'@@RECURSIVE_SERVER_ENTRY@@'")
-    // No separate commands row: install-preset.js materializes ONE absolute
-    // file URL into the profile-installed lib/index.js.
+    // No separate commands row: the plugin row in preset/recursive.patch.yml names the PACKAGE, so the loader
+    // resolves it from the profile node_modules and no absolute file URL is ever written.
     expect(yml).not.toContain('src/commands.ts')
   })
 

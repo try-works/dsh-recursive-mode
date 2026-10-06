@@ -136,6 +136,10 @@ export function createRecursiveDelegateTool(recursive: RecursiveRuntime, subagen
             // brief/prompt paths and the session agree from the first call (`ctx.agents.create` accepts a
             // reserved id).
             const childId = resumeChild ?? randomUUID()
+            // ⚠ FU-18 — AND THE RUNTIME IS TOLD IT IS A CONTINUATION. Without this the delegation carries the
+            // same operation identity as the round that already ran, the T19 guard sees an accepted operation
+            // against an unchanged artifact and REFUSES — which is precisely the call that starts a repair.
+            const continuing = resumeChild !== undefined
             const work = await recursive.delegateReview({
               root,
               runId,
@@ -166,6 +170,7 @@ export function createRecursiveDelegateTool(recursive: RecursiveRuntime, subagen
               parent,
               mode: 'continuable',
               kind: 'work',
+              continuing,
               awaitRoundResult: settlementRoundObserver(runDir),
             })
             return toContinuable(work)

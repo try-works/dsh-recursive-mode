@@ -578,6 +578,14 @@ export class RecursiveRuntime extends Service {
      * child cannot be resumed, so one-shot forfeits the repair path and must be
      * requested explicitly by a caller that will discard the result.
      */
+    /**
+     * ⚠ FU-18 — IS THIS ROUND A CONTINUATION OF AN OPEN DELEGATION RATHER THAN A FRESH ONE?
+     *
+     * Set by a caller that is resuming the same child to deliver FEEDBACK. It is the difference between "run this
+     * operation again", which the T19 guard exists to refuse, and "carry on with the operation that is already
+     * open", which the guard must not refuse — see the guard below for why the obvious alternative is worse.
+     */
+    continuing?: boolean
     mode?: 'one-shot' | 'continuable'
     awaitRoundResult?: (childId: ContinuableChildId, messageId: ContinuableMessageId) => Promise<SubagentResultLike | null>
     /**
@@ -797,7 +805,19 @@ export class RecursiveRuntime extends Service {
     // because its body is part of the id. Without this the same review could spawn a
     // second reviewer for an artifact that has not changed.
     const prior = operationsDir === '' ? null : findOperation(operationsDir, operation)
-    if (prior?.outcome === 'accepted') {      throw new Error(
+    // ⚠ FU-18 — A CONTINUATION IS NOT A REPEAT, and the distinction has to live HERE rather than in the operation
+    // id. The tempting fix is to fold the round into the id so a feedback round becomes a different operation,
+    // and it is the wrong one: T28's children budget below counts DISTINCT OPERATIONS and its own comment says a
+    // resumed turn "re-enters here with the same id and must not be counted as another child". Making a
+    // continuation a new identity would fix this refusal and silently miscount the budget instead.
+    //
+    // The collision it resolves: the T19 guard refuses an operation already accepted against an UNCHANGED
+    // artifact, which is right in general — re-reviewing an artifact nothing has touched since it passed wastes a
+    // child. But when the main agent sends FEEDBACK, the artifact has not changed YET: the child has not repaired
+    // it. So the guard refused exactly the call that starts the repair. A continuation is the operation still
+    // running, so it is exempt; a genuinely fresh delegation against an unchanged artifact is still refused.
+    if (prior?.outcome === 'accepted' && input.continuing !== true) {
+      throw new Error(
         'review of ' + input.phase + ' is a recognised repeat of an operation already accepted (operation ' +
         operation + '); the artifact has not changed since it passed',
       )

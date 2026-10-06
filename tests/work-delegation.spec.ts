@@ -179,7 +179,7 @@ describe('FU-17 acceptance: the main agent delegates the work, judges it, and th
    * Skipped, not deleted: this test is the acceptance FU-17 is judged by, and it should go green the moment FU-18
    * is resolved. Until then the two legs above — briefing and judging — are asserted for real.
    */
-  it.skip('FEEDBACK reaches the SAME child (blocked by the runtime idempotence guard — see FU-18)', async () => {
+  it('FEEDBACK reaches the SAME child', async () => {
     const call = await mount()
     const first = await call('recursive_delegate', { runId: 'work-run', phase: '03', instruction: 'Write it.' })
     expect(JSON.stringify(first)).toContain('reviewing')

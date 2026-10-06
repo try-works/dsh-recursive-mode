@@ -81,6 +81,11 @@ async function runWorkflow(options: {
   subagents?: unknown
   /** Called with the run dir just before the final closeout — how a test seeds state a run would have. */
   beforeCloseout?: (runDir: string) => void
+  /**
+   * P5: called with the repo root BEFORE the plugin mounts, so a test can seed what the run will read —
+   * a memory shard, for instance. `beforeCloseout` is too late for that: the phases have already run.
+   */
+  beforeStart?: (root: string) => void
 } = {}): Promise<{ root: string; runId: string; calls: Call[]; report: string; closeout: unknown }> {
   const root = join(scratchRoot(), 'run-' + new Date().toISOString().replace(/[:.]/g, '-'))
   mkdirSync(root, { recursive: true })
@@ -89,6 +94,8 @@ async function runWorkflow(options: {
   execFileSync('git', ['config', 'user.email', 'e2e@example.invalid'], { cwd: root, stdio: 'ignore' })
   execFileSync('git', ['config', 'user.name', 'e2e'], { cwd: root, stdio: 'ignore' })
   writeFileSync(join(root, 'README.md'), '# e2e scratch repo\n', 'utf8')
+  // P5: seed BEFORE the plugin mounts, so the run's own phases read what the test put there.
+  options.beforeStart?.(root)
 
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
@@ -120,7 +127,7 @@ async function runWorkflow(options: {
       // checked `isError` (or only caught exceptions) would report a REFUSED call as ok, which is exactly
       // the class of mistake this harness exists to catch elsewhere.
       const refused = isRefusal(value)
-      calls.push({ tool, args, ok: !refused, detail: detail.slice(0, 400) })
+      calls.push({ tool, args, ok: !refused, detail: detail.slice(0, 4000) })
       return value
     } catch (err) {
       calls.push({ tool, args, ok: false, detail: err instanceof Error ? err.message : String(err) })
@@ -303,6 +310,18 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
    * `{ id }` copy" — and this harness has no live Agent, so faking one would prove nothing. **The
    * continuable branch is verified by `tests/delegation-mode.spec.ts` (a fake seam called directly) and
    * is reported as NOT VERIFIED in the harness.**
+   */
+  /**
+   * ⚠ P5 IS NOT HERE, AND THAT IS DELIBERATE. The behaviour test — a run where removing one shard changes
+   * what the agent is told — was attempted twice this round and FAILED both times: the seeded shard never
+   * reached the model, and I could not tell from the failure whether the cause was the shard's wording, the
+   * query the phase actually makes, or the retrieval path itself.
+   *
+   * Two harness affordances it needed were added and are worth keeping (see `beforeStart` above and the
+   * raised capture limit below), but a test that cannot be made green by reading rather than guessing does
+   * not belong in a green suite. The next attempt should start by PRINTING the phase result's `memory:` and
+   * `memoryReason:` fields for a run with no shard at all, so the query and the ranking are observed rather
+   * than inferred — I guessed at the query's tokens twice and both guesses were wrong.
    */
   it('FU-2: recursive_review FAILS CLOSED without a continuable path, naming why', async () => {
     const root = join(scratchRoot(), 'fu2-' + new Date().toISOString().replace(/[:.]/g, '-'))

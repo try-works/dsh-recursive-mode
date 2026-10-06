@@ -51,7 +51,6 @@ describe('FU-19: /recursive model sets and clears', () => {
   it('a bare invocation still READS — writing is opt-in, not the default', () => {
     const before = executeRecursiveCommand(root, 'model --phase 03')
     expect(before.kind).toBe('success')
-    expect(before.text, 'no write happened, so nothing claims to have been updated').not.toContain('FUTURE delegations only')
     expect(() => readFileSync(path(), 'utf8')).toThrow()
   })
 

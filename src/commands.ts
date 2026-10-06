@@ -20,6 +20,7 @@ import { readFeedback } from './memory-feedback.ts'
 import { closeoutReport } from './closeout-report.ts'
 import { loadRouterPolicy, routerPolicyPath } from './router.ts'
 import { resolveSubagentTarget } from './role-route.ts'
+import { writePolicySelection, type SelectionScope } from './policy-write.ts'
 
 export type RecursiveVerb = 'status' | 'spec' | 'worktree' | 'init' | 'lock' | 'qa' | 'closeout' | 'addendum' | 'review' | 'scratch' | 'memory' | 'model' | 'bootstrap' | 'list' | 'help'
 
@@ -146,8 +147,34 @@ export function executeRecursiveCommand(root: string, rawInput: string): Recursi
       // model" is answerable without reading the code or starting anything.
       const phaseMatch = arg.match(/--phase\s+(\S+)/)
       const roleMatch = arg.match(/--role\s+(\S+)/)
-      const phase = phaseMatch?.[1] ?? ''
-      const role = roleMatch?.[1] ?? ''
+      // ⚠ QUOTES ARE STRIPPED, because a shell-typed selector often arrives quoted and `--role ""` must be
+      // understood as "no role given" rather than as a role literally named two quote characters. That mistake was
+      // caught by this verb's own spec, which is the point of writing the spec before believing the code.
+      const unquote = (value: string | undefined): string => (value ?? '').replace(/^["']|["']$/g, '').trim()
+      const phase = unquote(phaseMatch?.[1])
+      const role = unquote(roleMatch?.[1])
+      // ⚠ FU-19 — SET OR CLEAR, when the user supplied something to set. A bare `/recursive model` still READS.
+      // The scope is inferred from which selectors were given, so `/recursive model --model cheap` sets the GENERAL
+      // default, `--phase 03 --model cheap` sets that phase's override, and `--role X --provider fork` sets the
+      // role route. `--clear` removes the named fields, or the whole level when none are named.
+      const providerMatch = arg.match(/--provider\s+(\S+)/)
+      const modelMatch = arg.match(/--model\s+(\S+)/)
+      const modelProviderMatch = arg.match(/--model-provider\s+(\S+)/)
+      const clear = /--clear\b/.test(arg)
+      if (providerMatch !== null || modelMatch !== null || modelProviderMatch !== null || clear) {
+        const scope: SelectionScope = phase !== '' ? 'phase' : role !== '' ? 'role' : 'general'
+        const written = writePolicySelection(root, {
+          scope,
+          ...(phase === '' ? {} : { phase }),
+          ...(role === '' ? {} : { role }),
+          ...(providerMatch === null ? {} : { provider: providerMatch[1]! }),
+          ...(modelMatch === null ? {} : { model: modelMatch[1]! }),
+          ...(modelProviderMatch === null ? {} : { modelProvider: modelProviderMatch[1]! }),
+          ...(clear ? { clear: true } : {}),
+        })
+        if ('refused' in written) return { kind: 'error', text: written.refused }
+        return { kind: 'success', text: written.message }
+      }
       const policy = loadRouterPolicy(routerPolicyPath(root))
       // `ladderProvider: null` on purpose: this verb reports what is CONFIGURED, and the provider ladder needs a
       // live host's registered providers to answer. A caller wanting the full answer gets it from a delegation's

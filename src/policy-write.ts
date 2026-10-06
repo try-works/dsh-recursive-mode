@@ -57,6 +57,15 @@ export interface SelectionWriteResult {
 
 const SCOPED_FIELDS = ['provider', 'model', 'modelProvider'] as const
 
+/**
+ * A selector name, cleaned of the quotes a shell-typed argument often carries. `--role ""` must mean "no role"
+ * rather than a route literally named two quote characters — a defect this writer's own spec caught when the verb
+ * was wired to it.
+ */
+function cleanName(value: string | undefined): string {
+  return (value ?? '').replace(/^["']|["']$/g, '').trim()
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null
 }
@@ -67,7 +76,7 @@ function containerFor(policy: Record<string, unknown>, patch: SelectionPatch): R
     return asRecord(policy.defaults) ?? null
   }
   if (patch.scope === 'phase') {
-    const key = (patch.phase ?? '').trim()
+    const key = cleanName(patch.phase)
     if (key === '') return null
     const routes = asRecord(policy.phase_routes) ?? {}
     const existing = asRecord(routes[key]) ?? {}
@@ -75,7 +84,7 @@ function containerFor(policy: Record<string, unknown>, patch: SelectionPatch): R
     policy.phase_routes = routes
     return existing
   }
-  const role = (patch.role ?? '').trim()
+  const role = cleanName(patch.role)
   if (role === '') return null
   const routes = asRecord(policy.role_routes) ?? {}
   const existing = asRecord(routes[role]) ?? {}
@@ -89,10 +98,10 @@ export function applySelectionPatch(
   policy: Record<string, unknown>,
   patch: SelectionPatch,
 ): { changed: boolean } | { refused: string } {
-  if (patch.scope === 'phase' && (patch.phase ?? '').trim() === '') {
+  if (patch.scope === 'phase' && cleanName(patch.phase) === '') {
     return { refused: 'a phase-scoped choice needs a phase, e.g. --phase 03' }
   }
-  if (patch.scope === 'role' && (patch.role ?? '').trim() === '') {
+  if (patch.scope === 'role' && cleanName(patch.role) === '') {
     return { refused: 'a role-scoped choice needs a role, e.g. --role code-reviewer' }
   }
 

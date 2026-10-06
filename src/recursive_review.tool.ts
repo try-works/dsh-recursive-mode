@@ -158,7 +158,7 @@ function readReplyText(root: string, runId: string, delegationId: string, childI
  * saying so beats reporting a success that cannot be acted on.
  */
 function toContinuable(review: {
-  continuable: { rounds: unknown[]; childId?: string; fellBackToOneShot?: boolean; parked?: boolean } | null
+  continuable: { rounds: unknown[]; childId?: string; fellBackToOneShot?: boolean; parked?: boolean; ok?: boolean; reason?: string } | null
   evaluation?: { accepted?: boolean }
   error?: string | null
   parked?: boolean
@@ -173,10 +173,18 @@ function toContinuable(review: {
     }
   }
   return {
-    ok: true,
+    // ⚠ FU-9 — THE DELEGATION'S OWN `ok` AND `reason`, NOT A HARDCODED `true`. This adapter forwarded `rounds`,
+    // `childId`, `accepted` and `parked` while dropping `ok` and `reason`, so a delegation that returned
+    // `{ ok: false, reason: '...' }` arrived at the review driver as `{ ok: true, rounds: [] }` — and the driver
+    // then printed "the round ended without an approval", naming none of the three branches that can produce
+    // it. Two rounds of live runs went into recovering a sentence this object already carried.
+    ok: review.continuable.ok ?? true,
+    ...(review.continuable.reason === undefined ? {} : { reason: review.continuable.reason }),
     rounds: review.continuable.rounds as ContinuableDelegationLike['rounds'],
     ...(review.continuable.childId === undefined ? {} : { childId: review.continuable.childId }),
     accepted: review.evaluation?.accepted === true,
     ...(review.continuable.parked === true ? { parked: true } : {}),
+    // ⚠ AND THE FALLBACK FLAG, which decides whether the driver reports "no continuable repair path" at all.
+    ...(review.continuable.fellBackToOneShot === true ? { fellBackToOneShot: true } : {}),
   }
 }

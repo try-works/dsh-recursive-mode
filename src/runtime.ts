@@ -1025,7 +1025,13 @@ export class RecursiveRuntime extends Service {
        */
       parked,
       parkedReason,
-      continuable: continuable ? { rounds: continuable.rounds, childId: continuable.childId, fellBackToOneShot: continuable.fellBackToOneShot, parked: continuable.parked === true } : null,
+      continuable: continuable ? { rounds: continuable.rounds, childId: continuable.childId, fellBackToOneShot: continuable.fellBackToOneShot, parked: continuable.parked === true,
+        // ⚠ FU-9 — `ok` AND `reason` TRAVEL WITH IT. The adapter that builds the review driver's view read only
+        // `rounds`, `childId`, `fellBackToOneShot` and `parked`, so every failure branch's REASON — the whole
+        // point of the field — was discarded one layer above the message that needed it, and `ok: false` was
+        // replaced by a hardcoded `ok: true`. A driver cannot report which branch fired if the branch's own
+        // name never reaches it.
+        ok: continuable.ok, reason: continuable.reason } : null,
     }
   }
 

@@ -9,6 +9,7 @@ import {
   selectMemory,
 } from '../src/memory.ts'
 import { explainMemorySelection } from '../src/memory-select.ts'
+import type { FeedbackBook } from '../src/memory-feedback.ts'
 
 /**
  * FU-13 P1/P2 — THE SELECTOR EXPLAINS THE RANKING THAT SHIPS.
@@ -57,7 +58,7 @@ describe('FU-13 P1/P2: the explainer describes production', () => {
    */
   it('matches selectMemory ORDER on the same plane, for several option sets', () => {
     plane_()
-    const optionSets: Array<{ query: string; files?: string[]; phase?: string }> = [
+    const optionSets: Array<{ query: string; files?: string[]; phase?: string; feedback?: FeedbackBook }> = [
       { query: 'spawn runner retries' },
       { query: 'lock chain ordering', files: ['src/locks/chain.ts'] },
       { query: 'unrelated billing' },
@@ -67,7 +68,21 @@ describe('FU-13 P1/P2: the explainer describes production', () => {
       { query: 'review round shape', phase: '03.5' },
       { query: 'review round shape', phase: '07' },
     ]
-    for (const options of optionSets) {
+
+    // ⚠ P3b: THE COUNTERS, CHECKED THE SAME WAY — and this case is why the assertion is worth having. The book
+    // is keyed from the LOADER's source rather than a path written by hand: a hand-built key silently fails to
+    // match, and a bonus that never applies is indistinguishable from a bonus that is not wired. Both
+    // directions are exercised, because a reward and a penalty are different code paths in `feedbackBonus`.
+    const loaded = loadMemoryIndex(root)
+    const sourceOf = (title: string): string => loaded.find((e) => e.title === title)?.source ?? 'missing-' + title
+    const feedbackCases: Array<{ query: string; feedback: FeedbackBook }> = [
+      { query: 'spawn runner retries', feedback: { [sourceOf('Retry budget')]: { applied: 3, contradicted: 0 } } },
+      { query: 'spawn runner retries', feedback: { [sourceOf('Retry budget')]: { applied: 0, contradicted: 2 } } },
+      { query: 'ordering note', feedback: { [sourceOf('Lock chain ordering')]: { applied: 1, contradicted: 0 } } },
+      { query: 'spawn runner retries', feedback: { 'memory/domains/nowhere.md': { applied: 9, contradicted: 0 } } },
+    ]
+
+    for (const options of [...optionSets, ...feedbackCases]) {
       const production = selectMemory(root, options).shards.map((shard) => shard.entry.title)
       const explained = explainMemorySelection(loadMemoryIndex(root), options).entries.map((e) => e.title)
       expect(explained, 'order must equal selectMemory for: ' + JSON.stringify(options)).toEqual(production)

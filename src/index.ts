@@ -36,6 +36,7 @@ import { registerRecursiveSkill } from './skills.ts'
 import { enumerateRuns, stageBWorkflowInit } from './bootstrap.ts'
 import { getNextLegalPhase, getLockStatus, PHASE_SEQUENCE } from './lock.ts'
 import { adoptSettlement } from './settlement.ts'
+import type { LlmInventoryLike } from './model-inventory.ts'
 import { resolveRunDir } from './run.ts'
 import { phaseLintRulesMessage, ReminderOnceGate } from './phase-rules.ts'
 import { settlementFromEvent, runDirForChild, recordSettlement } from './settlement.ts'
@@ -227,6 +228,14 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     // the service is already present, so this is a guarantee rather than a second chance.
     ctx.inject(['subagents'], (subagentsCtx: Context) => {
       recursive.attachSubagents((subagentsCtx.get('subagents') as SubagentsRuntimeLike | undefined) ?? null)
+    })
+    // ⚠ FU-19 — AND THE LLM INVENTORY, the same late-attaching way: `ctx.llm` is what the browser model catalog is
+    // built from, so it is the service that knows which providers and models this host actually has. Resolved
+    // optionally — a host without it gets the `unverified` verdict rather than a silent approval.
+    const llmInventory = ctx.get('llm') as LlmInventoryLike | undefined
+    recursive.attachLlmInventory(llmInventory ?? null)
+    ctx.inject(['llm'], (llmCtx: Context) => {
+      recursive.attachLlmInventory((llmCtx.get('llm') as LlmInventoryLike | undefined) ?? null)
     })
 
     // T7 — THE SETTINGS NAMESPACE, APPLIED ON EVERY APPLY. The settings service edits the

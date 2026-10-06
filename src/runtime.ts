@@ -21,6 +21,7 @@ import { findOperation, countOperations, operationId, recordOperation } from './
 import { createHookRegistry, type HookRegistry } from './hooks.ts'
 import { runTracked, abortReason, type JobsRegistryLike } from './jobs-runner.ts'
 import { resolveSubagentTarget } from './role-route.ts'
+import { checkModelChoice, describeInventory, type LlmInventoryLike } from './model-inventory.ts'
 import { recordJobRun } from './job-log.ts'
 import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
@@ -204,6 +205,8 @@ export class RecursiveRuntime extends Service {
    * remember, while an explicit `input.subagents` still wins for a test or a narrower caller.
    */
   private subagentsSeam: SubagentsRuntimeLike | null
+  /** FU-19: the host's provider/model inventory, or null when no llm service is mounted. */
+  private llmInventory: LlmInventoryLike | null = null
 
   /**
    * ⚠ FU-9 — ATTACH THE SEAM WHEN THE SERVICE APPEARS, not only when this plugin happens to apply.
@@ -221,6 +224,18 @@ export class RecursiveRuntime extends Service {
    */
   attachSubagents(seam: SubagentsRuntimeLike | null): void {
     this.subagentsSeam = seam
+  }
+
+  /**
+   * ⚠ FU-19 — THE LLM INVENTORY SEAM, resolved the same late-attaching way the subagents seam is and for the same
+   * measured reason: a one-shot `ctx.get` at apply time misses a service mounted by a later layer.
+   *
+   * Null is a legitimate value and it is NOT treated as "no models exist" — `describeInventory(null)` reports a
+   * named unavailability, and `checkModelChoice` turns that into the `unverified` verdict. A missing inventory
+   * therefore never silently approves a model and never silently replaces one.
+   */
+  attachLlmInventory(seam: LlmInventoryLike | null): void {
+    this.llmInventory = seam
   }
 
   /** What the composition attached, for a caller that needs to report or assert it. */
@@ -746,14 +761,27 @@ export class RecursiveRuntime extends Service {
       )
     }
     if (target.model !== null) {
-      const capable = providers[target.provider ?? '']?.capabilities?.agentOptions === true
-      if (capable) {
-        request.agentOptions = { model: target.model }
-      } else {
+      const chosenProvider = target.provider ?? decision.provider ?? ''
+      const capable = providers[chosenProvider]?.capabilities?.agentOptions === true
+      // ⚠ FU-19 — THE CHOICE IS CHECKED AGAINST WHAT DSH ACTUALLY HAS, and the three-state verdict decides what
+      // happens next. `missing` means the inventory ANSWERED and does not have this model: it is NOT applied, and
+      // crucially NO OTHER MODEL IS SUBSTITUTED — the child inherits the session default and the note says so.
+      // `unverified` (no inventory to ask) still applies the model, because refusing on the strength of a service
+      // that merely was not mounted would refuse something the user asked for on no evidence.
+      const check = checkModelChoice(await describeInventory(this.llmInventory), target.model)
+      if (check.verdict === 'missing') {
+        routingNotes.push(
+          'model ' + target.model + ' was chosen (from ' + target.chosen.model + '), but ' + check.reason
+          + ' — it was NOT applied and no other model was substituted, so the child inherits the session default',
+        )
+      } else if (!capable) {
         routingNotes.push(
           'model ' + target.model + ' was chosen (from ' + target.chosen.model + '), but provider '
-          + (target.provider ?? '(none)') + ' does not declare the agentOptions capability, so the model was NOT applied',
+          + (chosenProvider || '(none)') + ' does not declare the agentOptions capability, so the model was NOT applied',
         )
+      } else {
+        request.agentOptions = { model: target.model }
+        routingNotes.push('model ' + target.model + ' applied (from ' + target.chosen.model + '); inventory says: ' + check.reason)
       }
     }
 

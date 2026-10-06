@@ -472,12 +472,40 @@ flowchart TB
     class ASK human
 ```
 
-**Reading it.** The heavy arrow is the one mandatory delegation: **03.5** is the review phase, and
-`recursive_review` routes it by role (default `code-reviewer`). The dotted arrows into `recursive_audit_team` are
-the *optional* fan-out — one phase per role, one item per reviewer, so the engine's progress reads as a per-phase
-per-role review rather than an undifferentiated pile. The dotted arrows into `recursive_ask` are **human**
-decisions, not subagents. Every audited phase feeds the same five-part contract, and **08** additionally triggers
-the training pass from §10.
+**Reading it.** The heavy arrow marks the phase the workflow **depends** on delegation for: **03.5** is the
+review phase, and `recursive_review` routes it by role (default `code-reviewer`). The dotted arrows into
+`recursive_audit_team` are the *optional* fan-out — one phase per role, one item per reviewer, so the engine's
+progress reads as a per-phase per-role review rather than an undifferentiated pile. The dotted arrows into
+`recursive_ask` are **human** decisions, not subagents. Every audited phase feeds the same five-part contract, and
+**08** additionally triggers the training pass from §10.
+
+> ### ⚠ This map shows where delegation is *expected*, not where it is *permitted*
+>
+> **The main agent can delegate in any phase that has an artifact.** Nothing in this plugin gates delegation by
+> phase — a grep for a `03.5`-only restriction finds none. `recursive_review` resolves the phase as
+> *"the one a review is actually about, because that is the artifact whose lock the review gates"*, defaults it to
+> the run's **current** phase, and rejects a phase for exactly one reason: **`phase <n> has no artifact to review
+> yet`**. Pass any role, any phase that has an artifact, and it will run.
+>
+> What *is* phase-dependent is **accountability**, not capability:
+>
+> | | Any phase with an artifact | The nine `AUDITED_PHASE_FILES` |
+> |---|---|---|
+> | `recursive_review` works | ✅ | ✅ |
+> | `recursive_audit_team` fan-out | ✅ | ✅ |
+> | the artifact must record `Subagent Contribution Verification` | **only in strict profiles, and only for audited phases** | ✅ required |
+>
+> So `00-requirements`, `00-worktree` and `05-manual-qa` **can** be reviewed — they are simply not in the set
+> whose artifacts must carry the five-part verification. And the plugin says so to the agent directly: each
+> phase's skill carries `audited: yes — this phase needs a delegated audit` or `audited: no`
+> (`skills-phase.ts`), so the expectation is stated per phase rather than implied.
+>
+> **Two delegation paths exist, and they are different animals.** The workflow's own — `recursive_review`,
+> `recursive_audit_team` — is phase-aware and writes evidence **into the run** (brief, reply, action record,
+> settlement), which is what makes the per-phase contract checkable. The harness's generic subagent and team
+> tools are always available and know nothing about phases; work delegated through those leaves no run-scoped
+> record unless the agent writes one. **Use the workflow's path when the phase's artifact must prove something.**
+
 
 ### What each phase owes after delegating
 

@@ -32,11 +32,12 @@ be skipped by an agent that is in a hurry.
 7. [How it works: the guard](#7-how-it-works-the-guard)
 8. [How it works: delegation and review](#8-how-it-works-delegation-and-review)
 9. [How it works: the memory plane](#9-how-it-works-the-memory-plane)
-10. [How it works: closeout as a linter](#10-how-it-works-closeout-as-a-linter)
-11. [How it works: mounting and the preset](#11-how-it-works-mounting-and-the-preset)
-12. [Getting started](#12-getting-started)
-13. [Verification: what is proven, and how](#13-verification-what-is-proven-and-how)
-14. [File map and further reading](#14-file-map-and-further-reading)
+10. [How it works: training](#10-how-it-works-training)
+11. [How it works: closeout as a linter](#11-how-it-works-closeout-as-a-linter)
+12. [How it works: mounting and the preset](#12-how-it-works-mounting-and-the-preset)
+13. [Getting started](#13-getting-started)
+14. [Verification: what is proven, and how](#14-verification-what-is-proven-and-how)
+15. [File map and further reading](#15-file-map-and-further-reading)
 
 ---
 
@@ -207,7 +208,9 @@ $ /recursive memory lock chain ordering --phase 04
   controller — and **always reports which**.
 - **A closeout linter** over the whole run (00–08), with per-phase and run-level receipts.
 - **A client half** (`platform: web`) so the run's state is visible in the harness UI.
-- **A training path** that improves this plugin's own prompts from its own recorded outcomes.
+- **A training path** that improves this plugin's prompts and its injected context from its own recorded
+  outcomes — extraction gated on phase 08 having actually locked, and on evidence being sufficient. See
+  [How it works: training](#10-how-it-works-training).
 
 ---
 
@@ -238,6 +241,10 @@ Every arrow is enforced: a later artifact may not exist while an earlier one is 
 writes to a locked one. The phase rules are **profile-aware** — a `feature` run and an `audit` run ask for
 different sections — and the required sections for each are read from `getArtifactRequiredSections`, so the
 linter and the guard can never disagree about the standard.
+
+**Phase 08 is where the workflow learns.** Locking `08-memory-impact.md` is the evidence a training pass waits
+for, so the run's own record of *what it taught us* becomes input to the memory plane rather than a closing
+formality — see [How it works: training](#10-how-it-works-training).
 
 **A lock is a receipt, not just a marker.** When a phase locks, a receipt records the artifact's content hash,
 the gate status, and the evidence that let it through. This is why a run can be audited months later: the
@@ -445,7 +452,88 @@ kind of false conclusion a unit test would have let stand.
 
 ---
 
-## 10. How it works: closeout as a linter
+## 10. How it works: training
+
+The workflow closes on `08-memory-impact.md` — the phase whose whole subject is *what did this run teach us?*
+**Training is what makes that phase more than a document:** when phase 08 locks, the plugin can extract the
+run's learnings, group them, and write them into the memory plane as shards that future runs will be scored
+against.
+
+```mermaid
+flowchart TB
+    P8["08-memory-impact.md locks"] --> COUNT["countPhase8LockedRuns(root)<br/>how many runs have locked it?"]
+    COUNT --> GATE{"trainingGate(lockedRuns)"}
+    GATE -->|"too few"| INSUF["INSUFFICIENT_EVIDENCE<br/>refuse, and say why"]
+    GATE -->|"no extractor configured"| NOEX["EXTRACTOR_UNAVAILABLE<br/>refuse, and say why"]
+    GATE -->|"OK"| TRIG["runPhase8Trigger()"]
+
+    TRIG --> CHOOSE{"which extractor?"}
+    CHOOSE -->|cmd| CMD["RECURSIVE_TRAINING_EXTRACTOR_CMD<br/>spawnSync, stdio: 'ignore'"]
+    CHOOSE -->|file| FILE["RECURSIVE_TRAINING_RESPONSE_FILE<br/>the answer is a FILE"]
+    CMD --> ITEMS["parseExtractorItems(payload)"]
+    FILE --> ITEMS
+
+    ITEMS --> INF["inferSubsystem(item)"]
+    INF --> GROUP["groupLearnings(items, isWinner)<br/>winners vs losers per subsystem"]
+    GROUP --> SHARD["renderGroupShard() / renderTaskTypeShard()"]
+    SHARD --> WRITE["write the shard into memory/"]
+    WRITE --> REG["updateMemoryRegistry()<br/>registryLine() → MEMORY.md"]
+    REG --> NEXT(["the memory plane's next run scores it"])
+
+    classDef refuse fill:#fee,stroke:#a44
+    class INSUF,NOEX refuse
+```
+
+### Why an external extractor, and why a file
+
+The plugin ships **no LLM client**. Extraction is delegated to a command the operator configures
+(`RECURSIVE_TRAINING_EXTRACTOR_CMD`) or to a **response file** (`RECURSIVE_TRAINING_RESPONSE_FILE`) — and the
+file is not a convenience:
+
+> This harness's sandbox denies a child process the **piped stdio** a capture needs, so a spawn that read the
+> extractor's stdout fails with **EPERM in the environment it runs in**. The extractor therefore **writes its
+> answer to a path**, and the plugin spawns with `stdio: 'ignore'`.
+
+Two consequences are visible in the code and worth knowing if you work on it:
+
+- **The spawn is injected, not performed, inside the module.** `spawnExtractorRunner` takes the runner as an
+  argument and `runExtractor` is asserted with a fake, because a module that spawned directly would be
+  untestable under the same sandbox. The real spawn lives at the caller (`runtime.ts`).
+- **"Configured" is not "working".** An e2e run walked into exactly that footgun: the env var was set, the spawn
+  was wired, and the trigger still reported no extractor. That is why the unavailable case is a **named code**
+  (`EXTRACTOR_UNAVAILABLE`) rather than an empty result.
+
+### What the gate is for
+
+`trainingGate(lockedRuns)` refuses below a threshold, with the code `INSUFFICIENT_EVIDENCE`. This is the same
+principle as the rest of the plugin applied to *learning*: **a shard inferred from two runs is a rumour**, and a
+memory plane that fills with rumours is worse than one that stays empty, because the scorer cannot tell the
+difference. Phase 08 is the unit of evidence — a run has to have *reached* the memory-impact phase, and locked
+it, before it counts.
+
+### What comes out
+
+Items are attributed to a **subsystem** (`inferSubsystem`) and grouped by **outcome** — `groupLearnings(items,
+isWinner)` separates what won from what lost — then rendered as shards and registered:
+
+| Output | Where it goes |
+|---|---|
+| A grouped shard per subsystem / task type | `renderGroupShard`, `renderTaskTypeShard` → `memory/` |
+| A registry line pointing at the new shard | `registryLine` + `updateMemoryRegistry` → `memory/MEMORY.md` |
+
+Which closes the loop the [memory plane](#9-how-it-works-the-memory-plane) opened: training **writes** shards,
+`selectMemory` **scores** them, `recordInjection` remembers what was used, `settleInjections` settles it at
+closeout, and `feedbackBonus` nudges the next selection. The plugin's prompts and its context are meant to
+improve from its own recorded outcomes rather than from someone's recollection of them.
+
+**Design and status:** [TRAINING.md](TRAINING.md) is the design — including the phases P1–P5, each with a live
+acceptance, and the measured comparison with the reference implementation it deliberately does **not** copy.
+Its non-goals are as load-bearing as its goals: this is not a fine-tuning pipeline, and it does not ship a model
+client.
+
+---
+
+## 11. How it works: closeout as a linter
 
 Closeout is not a writer. It is a **linter over the run**, plus a receipt:
 
@@ -481,7 +569,7 @@ describes the **linter** behaviour as a contract rather than a detail.
 
 ---
 
-## 11. How it works: mounting and the preset
+## 12. How it works: mounting and the preset
 
 The plugin mounts in two halves, and understanding why explains a lot of the file layout.
 
@@ -526,7 +614,7 @@ are all resolved at composition and may be `undefined`. Two lessons are encoded 
 
 ---
 
-## 12. Getting started
+## 13. Getting started
 
 **Requirements.** A DeepSeek Harness checkout (the plugin's peer dependencies are the harness packages) and
 Node with pnpm.
@@ -569,7 +657,7 @@ surface arrives when a session opts into the `recursive` preset. See
 
 ---
 
-## 13. Verification: what is proven, and how
+## 14. Verification: what is proven, and how
 
 | Claim | How it is established |
 |---|---|
@@ -601,7 +689,7 @@ unverified.**
 
 ---
 
-## 14. File map and further reading
+## 15. File map and further reading
 
 **Source, by responsibility** (`src/`, ~16k lines):
 

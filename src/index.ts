@@ -19,6 +19,7 @@ import { createRecursiveWorktreeTool } from './recursive_worktree.tool.ts'
 import { createRecursivePhaseTool } from './recursive_phase.tool.ts'
 import { createRecursiveAuditTeamTool } from './recursive_audit_team.tool.ts'
 import { createRecursiveReviewTool } from './recursive_review.tool.ts'
+import { createRecursiveDelegateTool } from './recursive_delegate.tool.ts'
 import { createRecursiveAskTool } from './recursive_ask.tool.ts'
 import { createRecursivePreviewTool } from './recursive_preview.tool.ts'
 import type { SubagentsRuntimeLike } from './delegation.ts'
@@ -287,6 +288,10 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
       ctx.tools.register(createRecursiveWorktreeTool(recursive)),
       ctx.tools.register(createRecursivePhaseTool(recursive)),
       ctx.tools.register(createRecursiveReviewTool(recursive, subagentsSeam)),
+    // ⚠ FU-17 — WORK delegation: the main agent hands a phase's actual work to a child, reads it, and sends
+    // feedback to the same child. Registered beside the review tool because they share the round driver, the
+    // settlement observer and the reply contract — the difference is what a settlement MEANS.
+    ctx.tools.register(createRecursiveDelegateTool(recursive, subagentsSeam)),
     // T23: the three human gates as structured decisions. Registered here so the ask is a TOOL call
     // — which is what the host renders as a card — rather than prose a person has to interpret.
     ctx.tools.register(createRecursiveAskTool(recursive)),

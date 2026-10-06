@@ -141,7 +141,7 @@ export function createRecursiveReviewTool(recursive: RecursiveRuntime, subagents
 }
 
 /** The child's reply file, or '' when it has not written one (an empty reply is not an approval). */
-function readReplyText(root: string, runId: string, delegationId: string, childId: string): string {
+export function readReplyText(root: string, runId: string, delegationId: string, childId: string): string {
   try {
     return readFileSync(replyPath({ root, runId, delegationId, childId }), 'utf8')
   } catch {
@@ -157,7 +157,7 @@ function readReplyText(root: string, runId: string, delegationId: string, childI
  * driver reports as `unavailable` — the review happened without the repair path, and
  * saying so beats reporting a success that cannot be acted on.
  */
-function toContinuable(review: {
+export function toContinuable(review: {
   continuable: { rounds: unknown[]; childId?: string; fellBackToOneShot?: boolean; parked?: boolean; ok?: boolean; reason?: string } | null
   evaluation?: { accepted?: boolean }
   error?: string | null

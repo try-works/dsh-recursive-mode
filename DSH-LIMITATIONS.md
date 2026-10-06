@@ -1,0 +1,150 @@
+# DSH limitations found while building this plugin
+
+**What this is.** Every entry below was hit while building or verifying `dsh-recursive-mode` against DSH in this
+workspace, and each one records **how it was measured**, **what it forced us to do instead**, and **what a
+future DSH release could provide**. These are limitations of the *host*, not of this plugin — the plugin works
+around every one of them, and the workarounds are what make the plugin more complicated than it should be.
+
+**What this is not.** A wish list. Nothing here is inferred from a README; each item has an observation behind
+it, and where the observation was indirect that is stated.
+
+---
+
+## 1 · A parked continuable child never gets a turn in a one-shot session
+
+**Measured.** A live headless session with this plugin mounted delegated a review, wrote
+`subagents/03-review/child-<id>/brief.md`, and then **nothing happened**: no child session was created, no
+`settlements.jsonl` appeared, and the child's `reply.md` was never written. Driving more parent turns ran more
+rounds but still never drove the child. The control that explains it: the harness's own team fixture, same
+recipe, reported *"both teammates and dependent tasks completed"* and wrote **3 session logs** — so the host
+**does** drive children, but only while the parent is **active**. The engine contract says why:
+`submitAdmitted` *"crosses the final admission cutoff and **submits without yielding**"*
+(`packages/subagent/subagent/lib/types/continuation-activation.d.ts`).
+
+**What it forces.** A plugin cannot fire a continuable child and return. It must keep the parent waiting, and
+at present the only way to observe a child's settlement is a **seam the plugin injects itself**
+(`awaitRoundResult`), because the host exposes no awaitable handle. Our own first attempt parked instead of
+waiting, and the consequence was that in production the child never ran at all.
+
+**What DSH could provide.** An **awaitable child settlement** — a promise or handle from
+`startContinuable`/`submitAdmitted` — or an idle pump that drains child inboxes while a session has no active
+turn. Either would make "delegate, then read the answer" a one-line operation instead of a seam.
+
+---
+
+## 2 · `ctx.provide(...)` alone does not reach `ctx.get(...)`
+
+**Measured.** In the FU-1 harness, providing a structural `subagents` service was not enough: the drain
+reported *"no subagents runtime is mounted"* until the value was **also** put on the context with `set`.
+Both calls are needed; the type surface does not say so.
+
+**What it forces.** Every test harness that mounts a service must know a two-step incantation, and the failure
+mode is silent: `ctx.get` returns nothing and the consumer reports its own "not mounted" path, which looks like
+a configuration choice rather than a mistake.
+
+**What DSH could provide.** One call that declares *and* sets, or a **loud error** when a service is provided
+but not retrievable — the silent version cost real time here.
+
+---
+
+## 3 · A spawned child process cannot use piped stdio
+
+**Measured.** The extractor spawn failed with **EPERM** whenever stdio was piped. The production runner
+therefore uses `stdio: 'ignore'` and exchanges results through a **response file**
+(`RECURSIVE_TRAINING_RESPONSE_FILE`). Capture is impossible; files are the only channel.
+
+**What it forces.** Any plugin that shells out must invent a file protocol — write a request file, read a
+response file, and decide what a missing file means. That is a lot of machinery for "run this and tell me what
+it said", and it is the reason this plugin's training path looks heavier than it is.
+
+**What DSH could provide.** An approved capture mechanism for spawned processes, or a documented
+file-handshake helper. If the restriction is deliberate, saying so *in the spawn API* would save the
+experiment.
+
+---
+
+## 4 · `--session-id` needs the full prefixed id, and the error does not say so
+
+**Measured.** Resuming with the bare UUID fails: `dsh: session "<uuid>" does not exist; omit --session-id to
+start a new Session`. The value the CLI wants is the whole `session-<uuid>`, which is also what the session
+log's own `id` field carries. With the prefix it resumes cleanly (`resume exit: 0`).
+
+**What it forces.** A caller that reads an id from a log or a directory name has to know to keep the prefix —
+and the error message names neither the expected form nor the place the id comes from.
+
+**What DSH could provide.** Accept either form, or echo the expected shape in the error
+(*"expected session-<uuid>"*).
+
+---
+
+## 5 · A plugin package cannot be listed in `dsh.profile.bundles`
+
+**Measured.** Neither `@deepseek-ai/dsh-workflow` nor `@deepseek-ai/dsh-tool-workflow` declares a `dsh` block.
+A bundle must declare `dsh.bundle.patch` (as `@deepseek-ai/dsh-headless` does), so neither can appear in
+`dsh.profile.bundles`. They are ordinary plugin packages that export a Cordis plugin and resolve their own
+dependencies, and they mount only through a patch row **by file URL**.
+
+**What it forces.** Mounting a first-party package requires knowing its path inside the checkout and writing it
+into a profile patch, with the version relationship left implicit. There is no "add this plugin" path for a
+package that is plainly a plugin.
+
+**What DSH could provide.** Let `bundles` accept a plugin package, or ship a workflow bundle so the capability
+is reachable the same way the other bundled features are.
+
+---
+
+## 6 · Client plugins need a build, and nothing says which one
+
+**Measured.** `@deepseek-ai/dsh-client-ui-workflow-run` declares
+`dsh.client = { platform: "web", inject: [...] }` — a **client** plugin, not a bundle. Mounting it in a web
+profile is a patch row, but its code reaches the page through a **build**, not from source.
+
+**What it forces.** Installing a UI plugin is not a configuration change; it is a build step whose exact
+command is not discoverable from the plugin's own metadata. This is why we stopped at the engine and did not
+install the run viewer.
+
+**What DSH could provide.** State the build requirement in the plugin's metadata (or in the loader's
+diagnostics when a client plugin is mounted without one), and name the command that produces it.
+
+---
+
+## 7 · A malformed profile reports the wrong cause
+
+**Measured.** A hand-written headless profile was rejected with
+`error: option '--profile <name>' argument 'headless' is invalid. select a profile only once` — which reads
+like a CLI flag problem. The actual cause was that the profile lacked the fixture's **dependency list and its
+three bundles**; copying the working recipe verbatim fixed it with no flag change at all.
+
+**What it forces.** Debugging a profile by bisection against a known-good one, because the message points at
+the wrong layer.
+
+**What DSH could provide.** A validation error that names the missing piece — *"profile 'headless' declares no
+bundles"* — rather than a flag complaint.
+
+---
+
+## 8 · Client-plugin changes reload only with a watcher
+
+**Measured** (stated in this session's own runtime context, not independently re-tested here): client-plugin
+changes reload without a page refresh **only while `pnpm run dev:web` is running** from the same checkout.
+Everything else — the web shell, plain packages — requires rebuilding the affected artifacts and refreshing.
+
+**What it forces.** A contributor has to hold two rules in their head, and the failure looks like the change
+was ignored rather than like a stale bundle.
+
+**What DSH could provide.** A visible build stamp in the UI, or a console warning when a client plugin's source
+is newer than its bundle.
+
+---
+
+## The shape of these
+
+Seven of the eight are the same complaint in different clothes: **the system knows something the caller
+cannot see, and the failure is silent or misattributed.** The child that never runs, the service that is
+provided but not retrievable, the profile that is invalid for a reason it does not name, the client plugin that
+needs a build nobody mentions. Each cost an experiment here that a better error, or an awaitable handle, would
+have made unnecessary.
+
+None of them is a reason not to use DSH. They are the reason this plugin has as much scaffolding as it does —
+and they are worth revisiting when a release addresses any of them, because several workarounds (the injected
+settlement observer, the response-file protocol, the file-URL patch rows) could then be deleted outright.

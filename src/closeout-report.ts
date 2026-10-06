@@ -17,8 +17,8 @@
  * adds no vocabulary of its own: three separate defects in this repo came from inventing a private copy of
  * something that already had one home.
  */
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { getLockStatus } from './lock.ts'
 import { CURRENT_WORKFLOW_PROFILE, phaseLintRulesMessage } from './phase-rules.ts'
 import { RUN_ARTIFACT_SEQUENCE, getGateStatus, hasHeading } from './ts-lint.ts'
@@ -154,4 +154,37 @@ import { getArtifactRequiredSections as getArtifactRequiredSectionsImpl } from '
 export function uncoveredArtifacts(): string[] {
   const covered = new Set(Object.values(CLOSEOUT_PHASE_FILES).map((e) => e.file))
   return RUN_ARTIFACT_SEQUENCE.filter((name) => !covered.has(name))
+}
+
+/**
+ * Where a closeout receipt lives: **its own file, beside the lock receipts, never over the artifact.**
+ *
+ * ⚠ FOLLOWS `lock.ts`'s `receiptPath`, which is the convention this plugin already has: a receipt is a JSON
+ * file under `<runDir>/locks/` named after the artifact stem. The closeout receipt deliberately does NOT
+ * reuse `<stem>.receipt.json` — that name belongs to the LOCK receipt, which carries a hash and is read by
+ * `getLockStatus`. A distinct suffix keeps them together without a collision.
+ */
+export function closeoutReceiptPath(runDir: string, phase: string): string {
+  const entry = CLOSEOUT_PHASE_FILES[phase]
+  if (!entry) throw new Error('Unsupported closeout phase: ' + phase)
+  return join(runDir, 'locks', entry.file.replace(/\.md$/, '') + '.closeout.receipt.json')
+}
+
+/**
+ * Record the report as a closeout receipt. **The only write in this module, and it is never the artifact.**
+ *
+ * ⚠ WHY A RECEIPT AT ALL, in the user's words: a closeout *"should potentially create a close out receipt,
+ * that is ok and valuable, as long as it doesnt overwrite the phase docs."* So the durable trace of "the
+ * closeout examined this phase" is a file of its own, and the phase document is read and reported on but
+ * never touched.
+ *
+ * The JSON is a plain projection of the report — no timestamp, so the receipt is a pure function of the run
+ * state and two calls on the same run produce identical bytes.
+ */
+export function writeCloseoutReceipt(runDir: string, phase: string, options: CloseoutReportOptions = {}) {
+  const report = closeoutReport(runDir, phase, options)
+  const path = closeoutReceiptPath(runDir, phase)
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, JSON.stringify(report, null, 2) + '\n', 'utf8')
+  return { path, report }
 }

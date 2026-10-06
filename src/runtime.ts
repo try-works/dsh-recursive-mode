@@ -25,7 +25,7 @@ import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
 import { resolveControlPlaneRoot, type WorkspaceRegistryLike } from './workspace.ts'
 import { phaseRulesFor, type PhaseRules } from './phase-rules.ts'
-import { closeoutPhase } from './closeout.ts'
+import { closeoutReport, writeCloseoutReceipt } from './closeout-report.ts'
 import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './scratch.ts'
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
 import { readMemoryEntries, retrieveMemory, renderMemorySection, selectMemory } from './memory.ts'
@@ -351,7 +351,11 @@ export class RecursiveRuntime extends Service {
             .then(() => ({ children: children.length, drained: true }))
             .catch((err: unknown) => ({ children: children.length, drained: false, reason: err instanceof Error ? err.message : String(err) }))
         : null
-      const result = closeoutPhase(runDir, phase)
+      // ⚠ FU-12 — THE CLOSEOUT NO LONGER WRITES TO THE PHASE DOCUMENT.
+      // It READS the artifact, reports what the standard requires and what is missing, and records that
+      // examination as a receipt of its own under locks/<stem>.closeout.receipt.json — never over the doc.
+      const result = closeoutReport(runDir, phase)
+      writeCloseoutReceipt(runDir, phase)
       const training = isPhase8
         ? runPhase8Trigger(root, runId, {
             rerun,
@@ -377,24 +381,9 @@ export class RecursiveRuntime extends Service {
             },
           })
         : null
-      // FU-3 — DRAIN THE RUN'S CHILDREN AT CLOSEOUT.
-      //
-      // ⚠ WHY THE CHILD LIST IS READ FROM DISK: `runChildIds` scans the `subagents/<delegationId>/child-<id>/`
-      // layout the delegations already write, so a drain works in a FRESH process — after a resume, a crash
-      // or a compaction — where an in-memory list would be empty and the run would silently leak every child
-      // it started. This is the follow-up the `recursive_review` item left unchecked (L1082).
-      //
-      // ⚠ IT REPORTS WHAT IT DRAINED, and a run with no children reports ZERO rather than omitting the
-      // field: "this run had no children" and "the drain never ran" must not look the same in the result.
-      drain = isPhase8
-        ? this.subagentsSeam === null
-          // ⚠ NO SEAM IS REPORTED, NOT SKIPPED SILENTLY: a host without the service cannot drain, and a
-          // run that leaked its children should say so rather than look like a clean closeout.
-          ? { children: children.length, drained: false, reason: 'no subagents runtime is mounted, so the children could not be drained' }
-          : await drainContinuableChildren(this.subagentsSeam, agent as never, children)
-            .then(() => ({ children: children.length, drained: true }))
-            .catch((err: unknown) => ({ children: children.length, drained: false, reason: err instanceof Error ? err.message : String(err) }))
-        : null
+      // ⚠ THE SECOND drain ASSIGNMENT WAS REMOVED (FU-12): it re-drained on the success path and
+      // overwrote the value the throw path depends on. The assignment above is the one that matters.
+
       // ⚠ THE DRAIN HAPPENS BEFORE THE STUB WRITE, and the first version got this wrong: the FU-8 guard
       // THROWS when 08 is already LOCKED, so a drain placed after it never ran on exactly the runs that
       // reach closeout twice — leaking every child of a completed run. Draining is a RUN-CLOSE action and

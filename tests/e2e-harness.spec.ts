@@ -249,18 +249,38 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
    * names the remedy, so this asserts the promise the policy section makes every turn: *"Writes to a
    * Status: LOCKED phase doc are denied/asked; reopen explicitly to edit."*
    */
-  it('FU-8: REFUSES a closeout that would unlock a LOCKED artifact, and leaves the lock intact', async () => {
+  /**
+   * FU-12 — THE CLOSEOUT REPORTS, IT DOES NOT WRITE. This test replaces the old FU-8 one, and the change is
+   * the point of the FU-12 work: the closeout used to REFUSE when the phase artifact was locked, and the
+   * refusal was what made the runtime's training trigger unreachable, because the trigger runs after it.
+   * A probe in a temp run folder also showed what the old writer did to an UNLOCKED artifact: it returned
+   * success while the agent's content was gone.
+   *
+   * So the contract asserted here is threefold: the artifact KEEPS its lock, the closeout SUCCEEDS (it
+   * examined rather than refused), and the durable trace is a receipt of its OWN — never the phase document.
+   */
+  it('FU-12: the closeout REPORTS on a LOCKED artifact, keeps the lock, and writes its own receipt', async () => {
     const { root, runId, calls } = await runWorkflow()
     try {
-      const artifact = join(root, '.recursive', 'run', runId, '08-memory-impact.md')
+      const runDir = join(root, '.recursive', 'run', runId)
+      const artifact = join(runDir, '08-memory-impact.md')
       const text = readFileSync(artifact, 'utf8')
       // The lock survived the second closeout attempt…
       expect(text).toMatch(/Status:\s*`?LOCKED`?/)
-      // …AND the refusal is visible in the report, naming the remedy rather than failing silently.
-      const refusals = calls.filter((entry) => entry.tool === 'recursive_closeout' && !entry.ok)
-      expect(refusals.length, 'the post-lock closeout was not refused: ' + reportTail(calls)).toBeGreaterThan(0)
-      expect(refusals[refusals.length - 1].detail).toContain('LOCKED')
-      expect(refusals[refusals.length - 1].detail).toContain('reopen')
+
+      // …the closeout did NOT refuse — a refusal was the old contract, and would leave the trigger unreachable…
+      const closeouts = calls.filter((entry) => entry.tool === 'recursive_closeout')
+      expect(closeouts.length, 'no closeout ran: ' + reportTail(calls)).toBeGreaterThan(0)
+      expect(closeouts[closeouts.length - 1].ok, 'the closeout refused instead of reporting: ' + reportTail(calls)).toBe(true)
+
+      // …the phase document is BYTE-IDENTICAL, because the closeout read it rather than writing it…
+      expect(readFileSync(artifact, 'utf8')).toBe(text)
+
+      // …and the durable trace is a receipt at its own path, distinct from the lock receipt beside it.
+      const receipt = JSON.parse(readFileSync(join(runDir, 'locks', '08-memory-impact.closeout.receipt.json'), 'utf8'))
+      expect(receipt.artifact).toBe('08-memory-impact.md')
+      expect(receipt.status).toBe('LOCKED')
+      expect(Array.isArray(receipt.findings)).toBe(true)
     } finally {
       if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
     }

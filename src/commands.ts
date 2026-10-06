@@ -14,10 +14,13 @@ import { join } from 'node:path'
 import type { RecursiveRuntime } from './runtime.ts'
 import { resolveControlPlaneRoot } from './workspace.ts'
 import { bootstrapScaffold } from './bootstrap.ts'
+import { loadMemoryIndex } from './memory.ts'
+import { explainMemorySelection } from './memory-select.ts'
+import { readFeedback } from './memory-feedback.ts'
 
-export type RecursiveVerb = 'status' | 'spec' | 'worktree' | 'init' | 'lock' | 'qa' | 'closeout' | 'addendum' | 'review' | 'scratch' | 'bootstrap' | 'list' | 'help'
+export type RecursiveVerb = 'status' | 'spec' | 'worktree' | 'init' | 'lock' | 'qa' | 'closeout' | 'addendum' | 'review' | 'scratch' | 'memory' | 'bootstrap' | 'list' | 'help'
 
-export const PRESET_VERBS: RecursiveVerb[] = ['status', 'spec', 'worktree', 'init', 'lock', 'qa', 'closeout', 'addendum', 'review', 'scratch']
+export const PRESET_VERBS: RecursiveVerb[] = ['status', 'spec', 'worktree', 'init', 'lock', 'qa', 'closeout', 'addendum', 'review', 'scratch', 'memory']
 export const GLOBAL_VERBS: RecursiveVerb[] = ['bootstrap', 'list', 'help']
 export const ALL_VERBS: RecursiveVerb[] = [...PRESET_VERBS, ...GLOBAL_VERBS]
 
@@ -75,6 +78,33 @@ export function executeRecursiveCommand(root: string, rawInput: string): Recursi
         ? 'scaffold already complete (no changes)'
         : 'created ' + result.created.length + ' item(s), ' + result.existing.length + ' existing'
       return { kind: 'success', text: 'recursive-mode scaffold repair: ' + summary + ' — root ' + root }
+    }
+    case 'memory': {
+      // P4 — THE SELECTOR WITH NO AGENT LOOP, printing its score COMPONENTS. The reference's loader is a
+      // script an agent runs; this is the same job on the surface the plugin already has, and it explains
+      // itself, so "why did the agent get this?" is answerable from a shell rather than only from a test.
+      const phaseMatch = arg.match(/--phase\s+([\d.]+)/)
+      const phase = phaseMatch?.[1]
+      const query = arg.replace(/--phase\s+[\d.]+/, '').trim()
+      if (query === '') {
+        return { kind: 'error', text: 'memory requires a query: /recursive memory <query> [--phase 04]' }
+      }
+      const entries = loadMemoryIndex(root)
+      if (entries.length === 0) {
+        return { kind: 'success', text: 'the memory plane is empty, so nothing is injected rather than fabricating memory' }
+      }
+      const explanation = explainMemorySelection(entries, {
+        query,
+        ...(phase === undefined ? {} : { phase }),
+        // The counters live in the sidecar; the caller reads them, exactly as the runtime does.
+        feedback: readFeedback(root),
+      })
+      const lines = [explanation.rendered]
+      if (explanation.excluded.length > 0) {
+        lines.push('', 'Excluded ' + explanation.excluded.length + ' entry(s):')
+        for (const item of explanation.excluded.slice(0, 5)) lines.push('- ' + item.title + ': ' + item.reason)
+      }
+      return { kind: 'success', text: lines.join('\n') }
     }
     case 'closeout': {
       const phaseMatch = arg.match(/--phase\s+(\d{2})/)
@@ -152,7 +182,7 @@ export function registerRecursiveCommand(
   return ctx.commands.register({
     name: 'recursive',
     description: 'recursive-mode workflow commands (workspace-scoped)',
-    input: { hint: 'status|spec|worktree|init|lock|qa|closeout|addendum|review|scratch|bootstrap|list|help' },
+    input: { hint: 'status|spec|worktree|init|lock|qa|closeout|addendum|review|scratch|memory|bootstrap|list|help' },
     handler: async ({ rawInput, agent }) => {
       const root = await resolveControlPlaneRoot(agent, (recursive as unknown as { workspaceRegistry?: unknown }).workspaceRegistry as never)
       if (!root) {

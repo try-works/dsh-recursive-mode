@@ -16,6 +16,25 @@ import { join } from 'node:path'
 // this is a one-way runtime dependency, not the cycle that bit `policy-globs` earlier.
 import { modelForRole } from './role-route.ts'
 
+/**
+ * ⚠ FU-19 — WHAT A CHILD RUNS ON, WHEN THE USER SAYS SO AND NOTHING MORE SPECIFIC DOES.
+ *
+ * Optional on purpose, and the reason is the same one the override layer gives below: an absent field must mean
+ * "defer to the next level in the precedence", never "reset to nothing". A default here would make every field
+ * present and silently shadow the role routes and phase routes forever.
+ */
+export interface SubagentDefault {
+  provider?: string | null
+  model?: string | null
+}
+
+/** Per-phase overrides — the narrowest level, and the one that answers "this phase needs a stronger model". */
+export interface PhaseRoute {
+  role?: string
+  provider?: string | null
+  model?: string | null
+}
+
 export interface RouterDefaults {
   when_role_unconfigured: string
   when_cli_unavailable: string
@@ -23,6 +42,8 @@ export interface RouterDefaults {
   allow_auto_assign_if_single_cli: boolean
   probe_timeout_ms: number
   invoke_timeout_ms: number
+  /** FU-19: the general provider/model for delegated subagents, absent when the user has not chosen one. */
+  subagent?: SubagentDefault
 }
 
 export interface RoleRoute {
@@ -30,6 +51,11 @@ export interface RoleRoute {
   mode: string
   cli: string | null
   model: string | null
+  /**
+   * FU-19: the provider this role should be served by, when the user has chosen one. Absent means "let the tier
+   * ladder decide", which is what every policy scaffolded before this field did.
+   */
+  provider?: string | null
   fallback: string
 }
 
@@ -37,6 +63,8 @@ export interface RouterPolicy {
   version: number
   defaults: RouterDefaults
   role_routes: Record<string, RoleRoute>
+  /** FU-19: phase-keyed overrides, e.g. `{ '08': { role: 'memory-auditor' } }`. Absent means none. */
+  phase_routes?: Record<string, PhaseRoute>
   cli_overrides: Record<string, unknown>
   custom_clis: unknown[]
 }
@@ -51,11 +79,18 @@ export interface RouteDecision {
    * T9: the model the policy names for this role, or null when it names none.
    *
    * Present on EVERY decision because it is attached by the wrapper, never per-return-site.
-   * ⚠ The plugin does not apply it to a child — that is the host's
-   * `subagent-model-selection` concern — so this is the value a caller can HONOUR, not a
-   * promise that the child ran on it.
+   *
+   * ⚠ THIS COMMENT USED TO SAY THE PLUGIN DOES NOT APPLY IT. That was true when it was written and is false now:
+   * `delegateReview` sets `request.agentOptions = { model }` when the provider declares the `agentOptions`
+   * capability, and reports a routing note when it does not. So this is still a value a caller can HONOUR, but
+   * the plugin now does the honouring — and says so when it cannot.
    */
   model?: string | null
+  /**
+   * FU-19: where the provider and model came from, one short label per value, so "why did this child run on
+   * that model" is answerable without reading the resolution code.
+   */
+  chosen?: { provider?: string; model?: string }
 }
 
 export interface SubagentProviderLike {
@@ -139,8 +174,13 @@ function readRouterPolicy(path?: string): RouterPolicy {
     const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<RouterPolicy>
     return {
       version: typeof raw.version === 'number' ? raw.version : 1,
+      // The spread carries `subagent` through when the file declares it and leaves it absent when it does not —
+      // which is exactly the tolerance FU-19 needs, with no extra code.
       defaults: { ...DEFAULT_POLICY.defaults, ...(raw.defaults ?? {}) },
       role_routes: raw.role_routes ?? {},
+      // Phase overrides are carried only when the file has them: an empty object would claim the user configured
+      // something, and absence is a fact worth keeping distinct from emptiness.
+      ...(raw.phase_routes === undefined ? {} : { phase_routes: raw.phase_routes }),
       cli_overrides: raw.cli_overrides ?? {},
       custom_clis: raw.custom_clis ?? [],
     }

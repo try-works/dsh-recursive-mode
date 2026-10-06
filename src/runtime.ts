@@ -242,17 +242,48 @@ export class RecursiveRuntime extends Service {
    */
   private providerMapFromSeam(): Record<string, SubagentProviderLike> {
     const seam = this.subagentsSeam
-    if (seam === null || seam.getProvider === undefined) return {}
+    this.lastProviderNames = []
+    if (seam === null) return {}
     const map: Record<string, SubagentProviderLike> = {}
+    // ⚠ ASK THE SERVICE WHAT IT HAS, FIRST. The previous version only probed three invented names and
+    // registered whatever came back — and the live record then said `provider spawn`, so the router faithfully
+    // returned a name the host does not serve and `start('spawn', …)` produced NOTHING. A name this plugin made
+    // up is not a provider the host knows, and the difference is a child that runs versus a silent no-op.
+    try {
+      const listed = seam.list?.()
+      if (Array.isArray(listed)) {
+        for (const entry of listed) {
+          if (typeof entry === 'string' && entry !== '') map[entry] = { name: entry }
+          else if (entry !== null && typeof entry === 'object' && typeof (entry as { name?: unknown }).name === 'string') {
+            const named = entry as { name: string } & SubagentProviderLike
+            map[named.name] = named
+          }
+        }
+      }
+    } catch {
+      // A service that cannot enumerate is not an error: the probes below are the fallback, not the plan.
+    }
+    // The probes stay as a FALLBACK for a service that exposes getProvider but no list. Whatever they return is
+    // registered under the name ASKED FOR, which is only sound because the name came from a real lookup.
     for (const name of ['spawn', 'fork', 'dsh-sdk']) {
+      if (map[name] !== undefined) continue
       try {
-        const found = seam.getProvider(name)
+        const found = seam.getProvider?.(name)
         if (found !== undefined && found !== null) map[name] = found as SubagentProviderLike
       } catch {
         // An unavailable name is not an error: the next candidate still gets its turn.
       }
     }
+    this.lastProviderNames = Object.keys(map)
     return map
+  }
+
+  /** The provider names the last `providerMapFromSeam` call registered, for the record and for assertions. */
+  private lastProviderNames: string[] = []
+
+  /** What the router could choose from, so a failure can say whether the name it used was ever on offer. */
+  knownProviderNames(): string[] {
+    return this.lastProviderNames
   }
 
   private readonly repoRoot: string
@@ -945,6 +976,7 @@ export class RecursiveRuntime extends Service {
           // and a start that produces nothing, and the record should not make me guess which was chosen.
           ? 'no delegate result was produced (the provider never started, or returned nothing); tier '
             + decision.tier + ', provider ' + (decision.provider ?? 'none chosen')
+            + ', names on offer [' + (this.lastProviderNames.join(', ') || 'none') + ']'
           : 'the delegation returned without acceptance; stop reason ' + (result.stopReason ?? 'none reported'),
     })
 

@@ -19,7 +19,32 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 /** Where the machine-owned counters live — inside the memory plane, but never a shard a person writes. */
-export const FEEDBACK_FILE = 'memory/.feedback.json'
+// The path is `.recursive/memory/.feedback.json`, joined onto the REPO ROOT, which is what the
+// doc comment above has always said and what `filterRuntimeChangedFiles` expects: a counter the
+// memory plane writes must live inside the `.recursive` control plane, not in the product tree.
+// Measured before this fix: a completed fixture run ended with four residual FAILs naming
+// `memory/.feedback.json` against phases 03 and 03.5, because the file landed outside
+// `.recursive/run/<runId>/`, survived the runtime-diff filter, and entered the run's diff only
+// after those phases were authored - retro-invalidating them. The counter is machine-owned and
+// disposable per the same doc comment, so a counter left at the OLD path by an earlier version is
+// READ once (see LEGACY_FEEDBACK_FILE) rather than silently dropped.
+export const FEEDBACK_FILE = '.recursive/memory/.feedback.json'
+
+/**
+ * WHERE THE COUNTERS LIVED BEFORE the constant above carried its `.recursive/` prefix.
+ *
+ * ⚠ READ, BUT DELIBERATELY NEITHER MOVED NOR DELETED. Read, because evidence a previous run recorded is
+ * not the plugin's to discard, and without the fallback the first settle after the move would start the
+ * new file from an empty book — a counter lost silently, which is the one outcome ruled out. NOT moved,
+ * because a delete is the single action that could re-create the very defect the prefix fixes: a legacy
+ * file that is TRACKED and COMMITTED is absent from the run's diff while it is clean, so removing it
+ * mid-run puts `D memory/.feedback.json` into the diff of every diff-audited phase authored before the
+ * delete, which is the same retro-invalidation. Left alone, an untracked legacy file is in the diff from
+ * the run's first phase (and is therefore accounted for), while a committed one stays invisible.
+ * `readFeedback` prefers {@link FEEDBACK_FILE}, so the legacy counters are folded forward by the next
+ * settle and this file then only sits there; it is machine-owned and disposable, so delete it by hand.
+ */
+export const LEGACY_FEEDBACK_FILE = 'memory/.feedback.json'
 
 /** Where a run records what it was shown. */
 export const INJECTIONS_FILE = 'memory-injections.json'
@@ -43,10 +68,24 @@ export interface FeedbackCounter {
 
 export type FeedbackBook = Record<string, FeedbackCounter>
 
-/** Read the counters. A missing or unreadable file is an empty book, never an error. */
+/**
+ * Read the counters. A missing or unreadable file is an empty book, never an error.
+ *
+ * ⚠ THE LEGACY PATH IS A FALLBACK AND ONLY A FALLBACK: it is consulted when — and only when — there is
+ * no usable file at {@link FEEDBACK_FILE} yet, which is exactly the first run after the path moved. The
+ * two are never merged, because they are two SNAPSHOTS of one counter and adding them would count a run
+ * twice. A file that exists at the current path but does not parse stays an empty book, which is what
+ * this function has always promised: a corrupt sidecar is not an invitation to read a different file.
+ */
 export function readFeedback(root: string, readFile: (path: string) => string | null = defaultRead): FeedbackBook {
-  const text = readFile(join(root, FEEDBACK_FILE))
-  if (text === null || text.trim() === '') return {}
+  const current = readFile(join(root, FEEDBACK_FILE))
+  if (current !== null && current.trim() !== '') return parseBook(current)
+  const legacy = readFile(join(root, LEGACY_FEEDBACK_FILE))
+  return legacy === null ? {} : parseBook(legacy)
+}
+
+/** One counters file as a book: anything unreadable or unshaped is `{}`, never an error. */
+function parseBook(text: string): FeedbackBook {
   try {
     const parsed = JSON.parse(text) as unknown
     if (typeof parsed !== 'object' || parsed === null) return {}
@@ -140,7 +179,13 @@ export function settleInjections(
     book[record.source] = counter
   }
 
-  write(join(root, FEEDBACK_FILE), JSON.stringify(sortBook(book), null, 2) + '\n')
+  const feedbackPath = join(root, FEEDBACK_FILE)
+  // The counter now lives under the `.recursive` control plane, whose memory directory a fresh
+  // checkout or a scratch fixture may not have yet. Creating it here rather than assuming it
+  // exists is what a plugin owning its own control plane should do; before this, the write
+  // threw ENOENT when nothing else had already made the directory.
+  mkdirSync(dirname(feedbackPath), { recursive: true })
+  write(feedbackPath, JSON.stringify(sortBook(book), null, 2) + '\n')
   return book
 }
 

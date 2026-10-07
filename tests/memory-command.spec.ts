@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { executeRecursiveCommand } from '../src/commands.ts'
 import { FEEDBACK_FILE } from '../src/memory-feedback.ts'
 import { loadMemoryIndex } from '../src/memory.ts'
@@ -56,6 +56,10 @@ describe('FU-13 P4: the memory verb', () => {
     expect(zeta, 'the loader must report a source to key the book by').not.toBe('x')
 
     const plain = executeRecursiveCommand(root, 'memory orders receipts phase')
+      // The counter lives under the `.recursive` control plane now, so the fixture must create that
+    // directory before writing into it — a scratch repo has no memory plane until something makes
+    // one. The path itself comes from the module constant, so this fixture follows the source.
+    mkdirSync(join(root, '.recursive', 'memory'), { recursive: true })
     writeFileSync(join(root, FEEDBACK_FILE), JSON.stringify({ [zeta]: { applied: 3, contradicted: 0 } }), 'utf8')
     const favoured = executeRecursiveCommand(root, 'memory orders receipts phase')
 

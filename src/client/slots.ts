@@ -21,7 +21,7 @@ import type { ClientContext, SessionListStateLike, SnapshotSelectorHook, Workspa
 import { isRecursivePreset, currentWorkspacePath } from './contract.ts'
 import { Board } from './board.tsx'
 import { Inspector } from './inspector.tsx'
-import { RecursiveSettings } from './settings.tsx'
+import { RecursiveSettings, RecursiveSettingsLive, type RecursiveSettingsSeatProps } from './settings.tsx'
 import { useLiveProjection } from './use-live.ts'
 import { boardState, useBoardState } from './open-state.ts'
 import { injectBoardStyles } from './styles.ts'
@@ -139,12 +139,25 @@ export function registerSlots(ctx: ClientContext): () => void {
   })))
 
   // Settings section (root scope, always present; no gate — configuration is always available).
+  // The seat receives the shell's `close` PLUS the root standard kit (useSessions/useWorkspaces,
+  // scoped-slots standardProps), so the panel can subscribe to the SAME live route the board
+  // reads and report the projection. Without the kit the panel still renders — with every value
+  // reported as absent (never guessed), which is the honest degradation.
   disposers.push(ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'recursive',
     order: 90,
     label: 'Recursive',
-  }, (props: { close: () => void }) => createElement(RecursiveSettings, { close: props.close }))))
+  }, (props: RecursiveSettingsSeatProps) => {
+    if (props.useSessions === undefined || props.useWorkspaces === undefined) {
+      return createElement(RecursiveSettings, { close: props.close })
+    }
+    return createElement(RecursiveSettingsLive, {
+      close: props.close,
+      useSessions: props.useSessions,
+      useWorkspaces: props.useWorkspaces,
+    })
+  })))
 
   return () => { for (const d of disposers) d() }
 }

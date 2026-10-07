@@ -860,6 +860,243 @@ const BOARD_CSS = `
   border-color: var(--dsw-alias-state-warn-primary);
 }
 
+/* ===== Settings section (Settings -> Recursive): the live projection report =====
+   This panel lives INSIDE the settings shell, so it consumes the shell's own
+   --dsw-alias-* theme tokens (like .rec-badge above) instead of the board's
+   scoped --board-* paper tokens: no theme toggle, and it follows the app theme. */
+.rec-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 940px;
+  padding: 2px 2px 10px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.rec-settings-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rec-settings-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.rec-settings-tag {
+  flex: none;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--dsw-alias-label-tertiary);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+}
+
+.rec-settings-close {
+  margin-left: auto;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  background: transparent;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.rec-settings-close:hover {
+  background: var(--dsw-alias-bg-layer-3);
+}
+
+.rec-settings-lede,
+.rec-settings-hint,
+.rec-settings-none {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.rec-settings-hint,
+.rec-settings-none {
+  font-size: 12px;
+}
+
+.rec-settings-section,
+.rec-settings-notcarried,
+.rec-settings-run {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+}
+
+.rec-settings-h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rec-settings-h4 {
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.rec-settings-run-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rec-settings-run-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.rec-settings-run-root {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Solid state pill, same vocabulary as .rec-pill but on the SHELL tokens
+   (the board's --board-* aliases are scoped to .rec-board/.rec-inspector). */
+.rec-settings-pill {
+  flex: none;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  border-radius: 999px;
+  color: var(--dsw-alias-label-primary-foreground);
+  background: var(--dsw-alias-label-tertiary);
+}
+
+.rec-settings-pill[data-pill='locked']      { background: var(--dsw-alias-state-success-primary); }
+.rec-settings-pill[data-pill='in-progress'] { background: var(--dsw-alias-state-business-primary); }
+.rec-settings-pill[data-pill='paused']      { background: var(--dsw-alias-state-warn-primary); }
+.rec-settings-pill[data-pill='blocked']     { background: var(--dsw-alias-state-error-primary); }
+.rec-settings-pill[data-pill='tampered']    { background: var(--dsw-alias-state-error-primary); }
+.rec-settings-pill[data-pill='advisory']    { background: var(--dsw-alias-state-warn-secondary); }
+.rec-settings-pill[data-pill='neutral']     { background: var(--dsw-alias-label-tertiary); }
+
+dl.rec-settings-source,
+dl.rec-settings-rows {
+  display: grid;
+  grid-template-columns: minmax(160px, 300px) 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.rec-settings-label {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rec-settings-value {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  overflow-wrap: anywhere;
+}
+
+/* An absent value is a STATEMENT, not an empty row — always visibly marked. */
+.rec-settings-absent {
+  color: var(--dsw-alias-state-warn-label);
+  font-style: italic;
+}
+
+.rec-settings-phases {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rec-settings-phase {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 4px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+}
+
+.rec-settings-phase-id {
+  flex: none;
+  min-width: 40px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.rec-settings-phase-name {
+  flex: 1;
+  min-width: 140px;
+  overflow-wrap: anywhere;
+}
+
+.rec-settings-phase-status,
+.rec-settings-phase-pos {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.rec-settings-phase-lock {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rec-settings-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rec-settings-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.rec-settings-item-id {
+  flex: none;
+  min-width: 96px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.rec-settings-item-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rec-card, .rec-back, .rec-close, .rec-theme-toggle { transition: none; }
 }

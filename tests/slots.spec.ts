@@ -11,6 +11,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { SessionListStateLike, SnapshotSelectorHook, WorkspaceListStateLike } from '../src/client/contract.ts'
 import { overlayContent, useRecursiveSessions, registerSlots, RecursiveLauncherGate, RecursiveView } from '../src/client/slots.ts'
+import { RecursiveSettings, RecursiveSettingsLive } from '../src/client/settings.tsx'
 import { createBoardState } from '../src/client/open-state.ts'
 
 /** Real SessionListState-shaped fixture (ids/byId/current — the subset we consume). */
@@ -128,6 +129,22 @@ describe('slots (run 10 selector-hook fix + run 11 launcher gate)', () => {
   it('conversation.input.dock registers NOTHING (run names/status stay in the board only)', () => {
     expect(collect('conversation.input.dock').length).toBe(0)
     expect(collect('settings.section').length).toBe(1)
+  })
+
+  it('settings seat hands the panel a LIVE snapshot (root kit) and still renders without it', () => {
+    const [seat] = collect('settings.section')
+    expect(seat).toBeDefined()
+    // With the shell's standard kit the seat renders the subscribing wrapper — this
+    // is the assertion that fails if the panel stops reading the live route.
+    const withKit = seat({
+      close: () => {},
+      useSessions: selectorHook(sessionState('recursive')),
+      useWorkspaces: workspaceHook({ items: [], recentWorkspaceId: undefined }),
+    }) as { type?: unknown }
+    expect(withKit.type).toBe(RecursiveSettingsLive)
+    // Without the kit the panel still renders (values report as absent, never guessed).
+    const withoutKit = seat({ close: () => {} }) as { type?: unknown }
+    expect(withoutKit.type).toBe(RecursiveSettings)
   })
 
   it('registers a Recursive conversation.view tab at the right of Trajectory (order 20)', () => {

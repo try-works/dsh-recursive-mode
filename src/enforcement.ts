@@ -211,7 +211,33 @@ export function currentPhaseArtifact(worktreeRoot: string, runId: string): strin
       best = name
     }
   }
-  return best
+  // ⚠ FIX 2 (half a) — PRESENCE IS NO LONGER EVIDENCE OF PROGRESS, AND THIS USED TO ASSUME IT WAS.
+  //
+  // The loop above returns the HIGHEST-numbered phase artifact present, on the documented assumption that "a run at
+  // phase 3 has `00`-`03` on disk". That assumption stopped being true when `recursive_init` began scaffolding ALL
+  // TWELVE artifacts, `08-memory-impact.md` included — so from turn 0 the phase-8 baseline governed every guard call.
+  // Phase 8 is the documentation phase, whose rule denies writes outside the run tree, so a run sitting at phase 3
+  // had its SOURCE EDITS denied as though it were finished and merely writing up. A live verification pass recorded
+  // five denials out of five while trying to author phase artifacts.
+  //
+  // The workflow's own notion of progress is the LOCK, so the phase in force is the LOWEST-numbered artifact that is
+  // not locked — the phase actually being worked on. Once everything is locked the run is complete, and the previous
+  // answer still stands, which keeps the old behaviour exactly where the old reasoning held. Still read from the
+  // filesystem on every call, for the same no-cache reason the directory listing is.
+  let inForce = ''
+  let inForcePhase = Number.POSITIVE_INFINITY
+  for (const name of names) {
+    if (!name.endsWith('.md')) continue
+    const phase = phaseNumberForArtifact(name)
+    if (!phase) continue
+    const value = Number(phase)
+    if (getLockStatus(join(runDir, name)) === 'LOCKED') continue
+    if (value < inForcePhase) {
+      inForcePhase = value
+      inForce = name
+    }
+  }
+  return inForce !== '' ? inForce : best
 }
 
 export function evaluateToolGuard(

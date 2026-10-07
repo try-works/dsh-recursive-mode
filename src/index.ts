@@ -307,8 +307,27 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     ctx.tools.register(createRecursiveAskTool(recursive)),
     // T26: the read-only view of what the enforcement contract will do, before it fires.
     ctx.tools.register(createRecursivePreviewTool(recursive)),
-      ...(agentTeams ? [ctx.tools.register(createRecursiveAuditTeamTool(agentTeams))] : []),
     ]
+
+    // ⚠ FIX 1 — THE THIRD SEAM NEEDED THE SAME LATE ATTACH AS THE OTHER TWO, AND DID NOT HAVE IT.
+    //
+    // The line that used to sit in the array above was `...(agentTeams ? [register(...)] : [])` — a ONE-SHOT
+    // `ctx.get('agentTeams')` taken at apply time. A live verification pass found the consequence: `team_task_create`
+    // worked in the same session whose tool catalog lacked `recursive_audit_team`, because the service was mounted
+    // AFTER this plugin applied. The plugin shipped 13 tool files and offered 12.
+    //
+    // `subagents` and `llm` already solve this with `ctx.inject` (above); this is that pattern, with one addition the
+    // others do not need: the tool may only be registered ONCE, because the one-shot path can already have taken it.
+    let auditTeamRegistered = agentTeams !== undefined && agentTeams !== null
+    if (auditTeamRegistered) disposers.push(ctx.tools.register(createRecursiveAuditTeamTool(agentTeams ?? null)))
+    ctx.inject(['agentTeams'], (teamCtx: Context) => {
+      if (auditTeamRegistered) return
+      const late = teamCtx.get('agentTeams') as TeamRuntimeLike | undefined
+      if (late === undefined || late === null) return
+      auditTeamRegistered = true
+      // Registered in the injecting scope, so the fiber that owns this plugin withdraws it again.
+      ctx.tools.register(createRecursiveAuditTeamTool(late))
+    })
 
     // /recursive command (R4): preset-scoped registration, workspace-scoped dispatch.
     const commands = ctx.get('commands') as { register: (def: unknown) => () => void } | undefined

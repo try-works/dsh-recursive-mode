@@ -185,7 +185,11 @@ async function main() {
       complete: (_agent, ref) => { goalCurrent = { ...(goalCurrent ?? { id: ref.id, revision: ref.revision }), phase: 'complete', revision: ref.revision + 1 }; return goalCurrent },
       clear: (_agent, ref) => { goalCurrent = undefined; return { id: ref.id, revision: ref.revision + 1 } },
     }
-    const goalSync = syncRunGoal(goalService, {}, '10-smoke', 'active')
+    // PHASE 0: scaffolding a run must not start it. Without an approval the projection creates NOTHING —
+    // this is the defect the gate closes, so the smoke script proves the refusal as well as the arm.
+    const unapproved = syncRunGoal(goalService, {}, '10-smoke', 'active')
+    check('PHASE 0 no goal without approval', unapproved.ok === false && goalCurrent === undefined)
+    const goalSync = syncRunGoal(goalService, {}, '10-smoke', 'active', true)
     check('T1 run goal armed', goalSync.ok === true && goalCurrent?.objective === 'recursive-run:10-smoke · active')
     const goalBlock = blockRunGoal(goalService, {}, '10-smoke', { code: 'prerequisite-blockers', message: 'monotonic lock-order' })
     check('T1 gate-block blocks the run goal', goalBlock.ok === true && goalCurrent?.phase === 'blocked')

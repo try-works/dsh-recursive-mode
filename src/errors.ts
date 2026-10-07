@@ -147,6 +147,18 @@ export const TOOL_ERRORS = {
 
   /* 5xxx — the runtime refused an operation it understands. */
 
+  RUN_START_NO_CHANNEL: {
+    code: 'RM5502',
+    klass: 'runtime',
+    problem: 'the run-start gate needs an answer, and this composition mounts no user-questions channel to ask one directly',
+    next: 'call recursive_ask with gate: run-start and no answer to surface the question, then retry with answer: ' + '"Start run"',
+  },
+  RUN_START_UNANSWERED: {
+    code: 'RM5503',
+    klass: 'runtime',
+    problem: 'the user-questions channel mounted in this composition refused the run-start question, so no person was asked',
+    next: 'use recursive_ask without an answer to surface the question, and retry it with answer: ' + '"Start run" once the user has approved the run start',
+  },
   RUNTIME_REFUSED: {
     code: 'RM5501',
     klass: 'runtime',

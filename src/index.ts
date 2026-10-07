@@ -4,6 +4,7 @@ import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { RecursiveRuntime } from './runtime.ts'
+import type { UserQuestionsLike } from './runtime.ts'
 import type { JobsRegistryLike } from './jobs-runner.ts'
 import { planGateForExit } from './plan-gate.ts'
 import { registerPhaseSkills, type SkillRegistryLike } from './skills-phase.ts'
@@ -236,6 +237,14 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     recursive.attachLlmInventory(llmInventory ?? null)
     ctx.inject(['llm'], (llmCtx: Context) => {
       recursive.attachLlmInventory((llmCtx.get('llm') as LlmInventoryLike | undefined) ?? null)
+    })
+    // ⚠ PHASE 0 — THE HUMAN-QUESTION CHANNEL, resolved the same late-attaching way for the same reason:
+    // a composition may mount `userQuestions` after this plugin applies, and the run-start gate asks the
+    // person DIRECTLY through it before it arms a goal — which is what keeps a relayed `Start run` from
+    // being an approval while a person can actually be asked (see run-start.ts).
+    recursive.attachUserQuestions((ctx.get('userQuestions') as UserQuestionsLike | undefined) ?? null)
+    ctx.inject(['userQuestions'], (questionsCtx: Context) => {
+      recursive.attachUserQuestions((questionsCtx.get('userQuestions') as UserQuestionsLike | undefined) ?? null)
     })
 
     // T7 — THE SETTINGS NAMESPACE, APPLIED ON EVERY APPLY. The settings service edits the

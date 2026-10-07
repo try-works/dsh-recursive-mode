@@ -46,7 +46,16 @@ import { renderRecursivePolicy, type PolicyContext } from './policy.ts'
 import { snapshotWorkspace } from './snapshot.ts'
 import { createLinkedWorktree, promoteBranch, listWorktrees, defaultWorktreeBranch, type CreateWorktreeResult, type PromoteBranchResult } from './worktree.ts'
 import { changedPaths, gitFacts } from './git-context.ts'
-import { syncRunGoal, blockRunGoal, resumeRunGoal, type GoalServiceLike } from './goals-projection.ts'
+import { syncRunGoal, blockRunGoal, resumeRunGoal, type GoalServiceLike, type SyncResult } from './goals-projection.ts'
+import {
+  RUN_START_APPROVE,
+  RUN_START_ARTIFACT,
+  RUN_START_GATE_ID,
+  RUN_START_MARKER,
+  RUN_START_NOT_APPROVED,
+  readRunStartApproval,
+  runStartArtifactPath,
+} from './run-start.ts'
 import { auditToPass, renderTaskHistory, type TeamRuntimeLike, type AuditToPassResult, type TeamCallerHandle, type TeamTaskViewLike, type AuditRoundOutcome } from './teams-loop.ts'
 import type { ContinuableChildId, ContinuableMessageId } from './delegation.ts'
 import { runChildIds } from './settlement.ts'
@@ -73,6 +82,26 @@ export interface LintArtifactResult {
   errors: string[]
   warnings: string[]
   passed: boolean
+}
+
+/**
+ * PHASE 0 — the structural seam for the host's human-question channel (`ctx.userQuestions`).
+ *
+ * Declared here as a minimal seam for the same reason as every other harness touchpoint in this plugin:
+ * the live `UserQuestionService` satisfies it structurally, so the plugin never imports the host package,
+ * and a test can drive the run-start gate with a fake that behaves like the real one. The error case is
+ * part of the contract, not an afterthought: the real `ask()` REJECTS (NO_PROVIDER / CALLER_NOT_LIVE /
+ * ASK_ABORTED) instead of resolving with something that could be mistaken for an answer, which is what
+ * lets `recursive_ask` fail closed rather than invent an approval.
+ */
+export interface UserQuestionsLike {
+  ask(request: {
+    questions: Array<{ id: string; header?: string; question: string; options?: Array<{ label: string; description?: string }> }>
+    agent?: unknown
+    signal?: AbortSignal
+    /** Links the card to the tool call that asked, the way plan-mode's exit does. */
+    wait?: { callId?: unknown }
+  }): Promise<{ answers: Array<{ id: string; selected: string[]; custom?: string }> }>
 }
 
 /**
@@ -153,8 +182,23 @@ export class RecursiveRuntime extends Service {
     this.workflow = config.workflow ?? null
   }
 
-  /** T10: the native jobs registry, when the composition mounts one. */
+  /**
+   * T10: the native jobs registry, when the composition mounts one. */
   private readonly jobs: JobsRegistryLike | null
+
+  /**
+   * PHASE 0 — attach the goals service after construction.
+   *
+   * The composition resolves `goals` with ONE `ctx.get` at apply time and passes it to the constructor,
+   * which is fine for a service that is already mounted. This seam exists for the two cases that pattern
+   * cannot cover: a composition that mounts `goals` later (the same late-attach reason `attachSubagents`
+   * and `attachLlmInventory` exist), and a test that needs the REAL runtime wired to a structural fake —
+   * a fake passed through the plugin's Config is dropped, because the Config schema is the settings
+   * namespace and strips keys it does not declare.
+   */
+  attachGoals(service: GoalServiceLike | null): void {
+    this.goalsService = service
+  }
 
   /**
    * T23 — write a gate's answer into an artifact as a marker line.
@@ -303,7 +347,7 @@ export class RecursiveRuntime extends Service {
 
   private readonly repoRoot: string
   private readonly workspaceRegistry: WorkspaceRegistryLike | null
-  private readonly goalsService: GoalServiceLike | null
+  private goalsService: GoalServiceLike | null
   /**
    * T27 — the hook registry, EXPOSED so a sibling plugin can participate in a run
    * without patching this one:
@@ -381,25 +425,88 @@ export class RecursiveRuntime extends Service {
   }
 
   /**
+   * PHASE 0 — read a run's start approval from its own Phase 0 artifact.
+   *
+   * The approval is a DURABLE line in `.recursive/run/<runId>/00-requirements.md`, not a value held in
+   * memory, for the reason every other gate here is durable: a decision that only exists in a session
+   * cannot be cited, and cannot survive the session it was made in. Read-only; asking changes nothing.
+   */
+  readRunStartApproval(root: string, runId: string): { approved: boolean; artifact: string; reason: string } {
+    return readRunStartApproval(root, runId)
+  }
+
+  /**
+   * PHASE 0 — the harness's blocking human-question channel (`ctx.userQuestions`), when this composition
+   * mounts one.
+   *
+   * ⚠ WHY THE PLUGIN REACHES FOR THIS AT ALL. The other three gates answer through a question card and a
+   * relayed label, which is fine for a decision the workflow acts on later. STARTING A RUN is different:
+   * the first human turn is the only place the harness can say "arming this goal means autonomous rounds"
+   * BEFORE arming it. This channel is the same one plan-mode's exit uses; `ask()` resolves only with a
+   * real answer from a real person, and it THROWS when there is no answerer or no live root agent. So the
+   * absence of this service cannot be papered over: `recursive_ask` refuses the run-start gate and names
+   * the missing channel (RM5502).
+   */
+  private userQuestions: UserQuestionsLike | null = null
+
+  /** Late-bind the human-question channel when the composition mounts it. */
+  attachUserQuestions(service: UserQuestionsLike | null): void {
+    this.userQuestions = service
+  }
+
+  /** The human-question channel this composition mounted, or null. */
+  get userQuestionsChannel(): UserQuestionsLike | null {
+    return this.userQuestions
+  }
+
+  /**
    * T1 (goals projection): project the run into the native goals service so it is
    * a first-class durable, resumable, blockable object. Best-effort — the run's
    * filesystem state is the source of truth; a goal is the durable projection.
+   *
+   * ⚠ PHASE 0 — AND IT ARMS NOTHING UNLESS THE RUN WAS STARTED. `create` returns an ARMED goal, and an
+   * armed goal is the harness driving autonomous rounds, so this is the one place where "project the
+   * state" can quietly equal "start the run". The approval is therefore REQUIRED from the caller and
+   * has no default here: a caller that has not resolved the run's approval cannot arm a goal by
+   * forgetting to pass one, and `syncRunGoal` refuses every branch that would create one without it.
+   *
+   * Unapproved is the EXPECTED state for a scaffolded run, so the refusal comes back as a plain
+   * `{ ok: false }` carrying {@link RUN_START_NOT_APPROVED}: callers must treat that as normal work,
+   * never as a warning (see `armRunGoalIfApproved`, the one caller that arms).
    */
-  projectRunToGoal(agent: { session?: { header?: { cwd?: string } } } | null | undefined, runId: string, state: Parameters<typeof syncRunGoal>[3] = 'active') {
+  projectRunToGoal(agent: { session?: { header?: { cwd?: string } } } | null | undefined, runId: string, state: Parameters<typeof syncRunGoal>[3] = 'active', approved = false): SyncResult {
     if (!agent) return { ok: false, reason: 'no agent' }
-    return syncRunGoal(this.goalsService, agent, runId, state)
+    return syncRunGoal(this.goalsService, agent, runId, state, approved)
+  }
+
+  /**
+   * PHASE 0 — the approved-run arm step: read the run's approval from `root` and project the goal only
+   * if it is there. This is the phase-progress path (`syncRunGoal` reached on ordinary work), so the
+   * unapproved case is deliberately silent: `{ ok: false, reason: RUN_START_NOT_APPROVED }` with no
+   * goal, no write and no throw. Read on EVERY call rather than cached, because the approval can arrive
+   * mid-session and a cached "not yet" would leave an approved run unable to arm until a plugin reload.
+   */
+  armRunGoalIfApproved(agent: { session?: { header?: { cwd?: string } } } | null | undefined, root: string, runId: string, state: Parameters<typeof syncRunGoal>[3] = 'active'): SyncResult {
+    if (!agent) return { ok: false, reason: 'no agent' }
+    const approval = this.readRunStartApproval(root, runId)
+    return syncRunGoal(this.goalsService, agent, runId, state, approval.approved)
   }
 
   /** T1: block the run's goal on a gate-block (durable + UI-visible). */
-  blockRunToGoal(agent: { session?: { header?: { cwd?: string } } } | null | undefined, runId: string, reason: { code: string; message: string }) {
+  blockRunToGoal(agent: { session?: { header?: { cwd?: string } } } | null | undefined, runId: string, reason: { code: string; message: string }): SyncResult {
     if (!agent) return { ok: false, reason: 'no agent' }
     return blockRunGoal(this.goalsService, agent, runId, reason)
   }
 
-  /** T1: re-arm the run's goal on a reopen (blocked/paused -> active). */
-  resumeRunToGoal(agent: { session?: { header?: { cwd?: string } } } | null | undefined, runId: string) {
+  /**
+   * T1: re-arm the run's goal on a reopen (blocked/paused -> active). Never starts an unstarted run —
+   * REOPEN IS NOT A BACK DOOR TO STARTING A RUN. `approved` is required for the same reason as in
+   * `projectRunToGoal`: the phase-0 gate cannot be defaulted open. An approved run's approval outlives
+   * a reopen because it is a durable line in the run's own Phase 0 artifact, not a held value.
+   */
+  resumeRunToGoal(agent: { session?: { header?: { cwd?: string } } } | null | undefined, runId: string, approved = false): SyncResult {
     if (!agent) return { ok: false, reason: 'no agent' }
-    return resumeRunGoal(this.goalsService, agent, runId)
+    return resumeRunGoal(this.goalsService, agent, runId, approved)
   }
 
   /**
@@ -1394,12 +1501,46 @@ export class RecursiveRuntime extends Service {
       created.push(file)
     }
 
-    const result: { runDir: string; runId: string; created: string[]; existing: string[]; worktree?: CreateWorktreeResult } = { runDir, runId, created, existing }
+    const result: { runDir: string; runId: string; created: string[]; existing: string[]; worktree?: CreateWorktreeResult; runStartApproval: { approved: boolean; artifact: string; reason: string; gate: string } } = { runDir, runId, created, existing, runStartApproval: { ...this.readRunStartApproval(scaffoldRoot, runId), gate: RUN_START_GATE_ID } }
     if (worktree) result.worktree = worktree
-    // T1 (goals projection): arm a durable run goal for the driving session.
-    // Best-effort — never fails a run init if the goals service is absent/odd.
-    try { this.projectRunToGoal(agent, runId, 'active') } catch { /* goal projection is best-effort */ }
+    // ⚠ PHASE 0 — SCAFFOLDING A RUN MUST NOT START IT. This used to arm a durable run goal right here,
+    // and arming is what makes the harness drive autonomous rounds: asking for a run spec was enough to
+    // start an unattended run. The rule is that phase 0 requires EXPLICIT approval to start a run and
+    // goal, so init now ONLY SCAFFOLDS and REPORTS what is owed. `result.runStartApproval` is that
+    // report, and it is the pointer the model needs: the run stays inert until `recursive_ask` answers
+    // the `run-start` gate (which re-reads the approval and arms the goal through `armRunGoalIfApproved`).
+    // The spec is not forbidden — the whole run directory was just written. What is withheld is the goal.
     return result
+  }
+
+  /**
+   * PHASE 0 — THE APPROVAL ACT: record the human's `Start run` decision and arm the run's goal.
+   *
+   * ⚠ THE ONLY PATH THAT STARTS A RUN. It exists as one method rather than as "write a line, then
+   * project the goal" at the tool, because those two steps must not be separable: an approval recorded
+   * without the arm (or an arm without the record) is exactly the half-state that made this defect hard
+   * to see. `tests/run-start-approval.spec.ts` drives both halves through this one call.
+   *
+   * The approval line goes into the run's own Phase 0 artifact, so it is durable, citable, and survives
+   * the session — and so a reader of the run can answer "was this run started, and by what?" without the
+   * transcript. `answer` is validated against the gate's own labels before it reaches here.
+   */
+  approveRunStart(root: string, runId: string, agent?: { session?: { header?: { cwd?: string } } } | null, answer: string = RUN_START_APPROVE): { ok: boolean; reason: string; path: string; replaced: boolean; goal: SyncResult } {
+    if (root.trim() === '' || runId.trim() === '') {
+      return { ok: false, reason: 'a run start needs a workspace root and a run id', path: '', replaced: false, goal: { ok: false, reason: 'no run to start' } }
+    }
+    const path = runStartArtifactPath(root, runId)
+    // The record is written through the same in-place marker write every other gate uses, so a changed
+    // mind REPLACES its line instead of leaving two answers to one question.
+    const written = this.recordAskAnswer(root, runId, RUN_START_ARTIFACT, '- ' + RUN_START_MARKER + ': ' + answer)
+    const approval = this.readRunStartApproval(root, runId)
+    if (!approval.approved) {
+      // A `Hold` (or anything else) is recorded as the decision it is and STARTS NOTHING. The goal is
+      // not merely paused: an unstarted run has no goal at all (see goals-projection.ts branch 3).
+      return { ok: false, reason: approval.reason, path: written.path, replaced: written.replaced, goal: { ok: false, reason: RUN_START_NOT_APPROVED } }
+    }
+    const goal = this.armRunGoalIfApproved(agent, root, runId, 'active')
+    return { ok: true, reason: '', path: written.path, replaced: written.replaced, goal }
   }
 
   /**
@@ -1574,7 +1715,9 @@ export class RecursiveRuntime extends Service {
     for (const entry of stale) invalidateReceipt(runDir, entry.artifact)
     // B2: reopen reverts to DRAFT — the live fs route folds the reverted state.
     // T1 (goals projection): re-arm the durable run goal (reopen un-blocks).
-    try { this.resumeRunToGoal(agent, runId) } catch { /* best-effort */ }
+    // ⚠ PHASE 0: only for a run that WAS started — the approval is read from the run's own Phase 0
+    // artifact here, so reopening an unapproved run cannot arm the goal init deliberately withheld.
+    try { this.resumeRunToGoal(agent, runId, this.readRunStartApproval(root, runId).approved) } catch { /* best-effort */ }
     return {
       artifact,
       runId,

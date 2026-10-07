@@ -4,6 +4,7 @@ import {
   syncRunGoal, blockRunGoal, resumeRunGoal,
   type GoalServiceLike, type GoalViewLike, type GoalRefLike,
 } from '../src/goals-projection.ts'
+import { RUN_START_NOT_APPROVED } from '../src/run-start.ts'
 
 /** Structural fake of the goals service that mutates a single current goal. */
 function fakeService(initial?: GoalViewLike) {
@@ -48,10 +49,77 @@ describe('goals-projection.ts — map + tag + isRunGoal', () => {
   })
 })
 
-describe('syncRunGoal — create / mutate / no-op / replace / foreign', () => {
-  it('creates a run goal when none exists', () => {
+/**
+ * PHASE 0 — THE APPROVAL GATE ON CREATION.
+ *
+ * `goals.create` returns an ARMED goal, and an armed goal is the harness driving autonomous rounds for
+ * the session. So creating one is not bookkeeping: it is STARTING THE RUN. The owner's rule is that
+ * phase 0 requires explicit approval to start a run and goal, which makes the UNPROVED case the one to
+ * pin first — the projection must be unable to arm anything on its own, in every branch, with a default
+ * that fails closed.
+ */
+describe('syncRunGoal — PHASE 0: no approval, no goal', () => {
+  it('creates NO goal when no approval has been given (the defect this closes)', () => {
     const { service, state } = fakeService()
     const res = syncRunGoal(service, {}, 'r1', 'active')
+    expect(res).toEqual({ ok: false, reason: RUN_START_NOT_APPROVED })
+    expect(state.current).toBeUndefined()
+    // The objective of the bug is printed rather than assumed: this is exactly the goal that used to
+    // exist with no approval of any kind.
+    expect(state.current?.objective).not.toBe('recursive-run:r1 · active')
+  })
+
+  it('REFUSES to replace a completed goal for this run without approval', () => {
+    const { service, state } = fakeService(runGoal('r1', 'complete'))
+    const res = syncRunGoal(service, {}, 'r1', 'active')
+    expect(res.ok).toBe(false)
+    expect(state.current?.phase).toBe('complete')
+  })
+
+  it('REFUSES to replace a completed FOREIGN goal without approval', () => {
+    // Branch 2 is the one that "cannot happen" for an unapproved run — which is exactly the reasoning a
+    // single unguarded branch relied on. Both replace paths are gated, so neither is a way in.
+    const { service, state } = fakeService(runGoal('other', 'complete'))
+    const res = syncRunGoal(service, {}, 'r1', 'active')
+    expect(res.ok).toBe(false)
+    expect(state.current?.objective).toBe('recursive-run:other · complete')
+  })
+
+  it('is QUIET and IDEMPOTENT across repeated phase steps before approval', () => {
+    // `syncRunGoal` is reached on ordinary work, so the unapproved state must be a stable value, not an
+    // error raised once per step: the caller has to be able to tell "not started yet" from a failure.
+    const { service, state } = fakeService()
+    const seen = ['active', 'paused', 'blocked', 'complete', 'active'].map((phase) => {
+      const res = syncRunGoal(service, {}, 'r1', phase as never)
+      return res
+    })
+    for (const res of seen) expect(res).toEqual({ ok: false, reason: RUN_START_NOT_APPROVED })
+    expect(state.current).toBeUndefined()
+  })
+
+  it('does not block or resume a goal that was never created', () => {
+    const { service, state } = fakeService()
+    // A run that was never started has no goal, so neither entry point may invent one on the way past.
+    expect(blockRunGoal(service, {}, 'r1', { code: 'x', message: 'y' }).ok).toBe(false)
+    expect(resumeRunGoal(service, {}, 'r1').ok).toBe(false)
+    expect(state.current).toBeUndefined()
+  })
+
+  it('reopen is NOT a back door: an approved run still re-arms, an unapproved one still does not', () => {
+    const approved = fakeService(runGoal('r1', 'blocked'))
+    expect(syncRunGoal(approved.service, {}, 'r1', 'active', true).ok).toBe(true)
+    expect(approved.state.current?.phase).toBe('active')
+
+    const unapproved = fakeService()
+    expect(resumeRunGoal(unapproved.service, {}, 'r1', false).ok).toBe(false)
+    expect(unapproved.state.current).toBeUndefined()
+  })
+})
+
+describe('syncRunGoal — create / mutate / no-op / replace / foreign', () => {
+  it('creates an ARMED run goal once phase 0 is approved', () => {
+    const { service, state } = fakeService()
+    const res = syncRunGoal(service, {}, 'r1', 'active', true)
     expect(res.ok).toBe(true)
     expect(state.current?.objective).toBe('recursive-run:r1 · active')
     expect(state.current?.phase).toBe('active')
@@ -74,7 +142,7 @@ describe('syncRunGoal — create / mutate / no-op / replace / foreign', () => {
 
   it('replaces a completed run goal on a new phase (never resumes it)', () => {
     const { service, state } = fakeService(runGoal('r1', 'complete'))
-    const res = syncRunGoal(service, {}, 'r1', 'active')
+    const res = syncRunGoal(service, {}, 'r1', 'active', true)
     expect(res.ok).toBe(true)
     expect(state.current?.phase).toBe('active')
     expect(state.current?.objective).toBe('recursive-run:r1 · active')
@@ -82,7 +150,7 @@ describe('syncRunGoal — create / mutate / no-op / replace / foreign', () => {
 
   it('never clobbers a foreign goal', () => {
     const { service, state } = fakeService(runGoal('other', 'active'))
-    const res = syncRunGoal(service, {}, 'r1', 'active')
+    const res = syncRunGoal(service, {}, 'r1', 'active', true)
     expect(res.ok).toBe(false)
     expect(state.current?.objective).toBe('recursive-run:other · active')
     expect(state.current?.phase).toBe('active')
@@ -110,7 +178,7 @@ describe('blockRunGoal / resumeRunGoal', () => {
 
   it('re-arms a blocked run goal to active', () => {
     const { service, state } = fakeService(runGoal('r1', 'blocked'))
-    const res = resumeRunGoal(service, {}, 'r1')
+    const res = resumeRunGoal(service, {}, 'r1', true)
     expect(res.ok).toBe(true)
     expect(state.current?.phase).toBe('active')
   })

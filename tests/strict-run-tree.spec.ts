@@ -1,7 +1,8 @@
 /**
  * strict-run-tree.spec.ts — the regression spec for the two STRICT-ENFORCEMENT fixes
  * (the pair that made a live pass record 5 denials out of 5 while a model tried to
- * author its own phase artifacts).
+ * author its own phase artifacts), plus the `locked-write` RELATIVE-PATH gap that the
+ * first of them exposed (see TEETH below).
  *
  * WHAT THIS PROVES, and through which entry point. Every verdict below comes from the
  * guard's real entry points — `resolveToolPolicyForGuard(worktreeRoot, runId)` for the
@@ -25,7 +26,12 @@
  *     phases lock, with the guard's verdict following it.
  *   TEETH — the fixes did not disarm the guard: a write OUTSIDE the run tree is still
  *     DENIED while the phase-8 baseline is in force, and a write to a LOCKED artifact is
- *     still denied.
+ *     still denied — named ABSOLUTELY and named REPO-RELATIVELY. The relative form used to
+ *     slip past the `locked-write` rule, which admitted a target only when the string it was
+ *     handed contained `/.recursive/run/`; a repo-relative path has no separator before
+ *     `.recursive`, so the rule ABSTAINED, and the phase-8 baseline then saw a write INSIDE
+ *     the run tree, which it allows by design. `src/policy-globs.ts` `lockedWriteRule` now
+ *     matches the RESOLVED path as well, so both spellings of one file get one verdict.
  *
  * WHAT THIS DOES **NOT** PROVE — read this before trusting a green run:
  *   - IT IS NOT A LIVE SESSION. There is no model, no host and no turn loop here: the
@@ -43,13 +49,6 @@
  *   - `recursive_init` itself is not run: the twelve artifacts are written from the shipped
  *     templates (`requirementsContent`, `laterPhaseContent`) so the run tree has the shape
  *     a real scaffold produces. The claim under test is about the GUARD reading that tree.
- *   - KNOWN GAP, deliberately NOT asserted (observed, not fixed here): the built-in
- *     `locked-write` rule admits a target only when the path contains the substring
- *     `/.recursive/run/`, so a target named RELATIVELY (`.recursive/run/<id>/00-requirements.md`,
- *     no leading slash) never reaches that rule's condition and the call is ALLOWED even
- *     though the artifact is LOCKED. Fixing it means touching `src/policy-globs.ts`, which
- *     is outside this spec. It is recorded here so the gap is visible rather than hidden,
- *     and it is NOT written as an expectation, so a fix is not obstructed by a green test.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -295,22 +294,24 @@ describe('(b) writing OUTSIDE the run tree is still DENIED — the guard keeps i
     }
   })
 
-  it('denies a write to a LOCKED artifact named absolutely', () => {
+  it('denies a write to a LOCKED artifact, named absolutely AND repo-relatively', () => {
     const run = phaseEightRun()
-    const decision = writeGuard(run, join(run.runDir, '00-requirements.md'))
-    expect(decision.kind).toBe('deny')
-    expect(reasonOf(decision)).toContain('locked-artifact write denial')
-    expect(decision.rule).toBe('locked-write')
-    // ⚠ KNOWN GAP, OBSERVED AND DELIBERATELY NOT ASSERTED (verified 2026-10-07):
-    // the SAME locked artifact named RELATIVELY —
-    // `writeGuard(run, '.recursive/run/strict-run/00-requirements.md')` — returns
-    // `{ kind: 'allow', rule: 'none' }`. The locked-write rule admits a target only when
-    // the string contains `/.recursive/run/` (src/policy-globs.ts `lockedWriteRule`), and
-    // a relative path has no leading slash before `.recursive`, so the rule abstains and
-    // the phase-8 baseline sees an in-run-tree write, which is allowed by design. The
-    // same relative dotfile form is EXACTLY the form this spec exists to protect, so the
-    // gap is recorded here rather than hidden — but it is not written as an expectation,
-    // because that would enshrine a defect and obstruct the fix in `src/policy-globs.ts`.
+    const absolute = writeGuard(run, join(run.runDir, '00-requirements.md'))
+    expect(absolute.kind).toBe('deny')
+    expect(reasonOf(absolute)).toContain('locked-artifact write denial')
+    expect(absolute.rule).toBe('locked-write')
+
+    // THE SAME FILE, SPELLED THE WAY A MODEL SPELLS IT — and the spelling this spec exists to
+    // protect. This used to be `{ kind: 'allow', rule: 'none' }`: `lockedWriteRule` admitted a
+    // target only when the string carried `/.recursive/run/`, a repo-relative path has no
+    // separator before `.recursive`, so the rule abstained, the phase-8 baseline then saw a
+    // write INSIDE the run tree (allowed by design) and the catch-all allowed it. The RULE
+    // LABEL is asserted, not only the verdict: a denial produced by the phase baseline for
+    // some other reason would not prove the locked-artifact rule fired.
+    const relative = writeGuard(run, relativeArtifact(run, '00-requirements.md'))
+    expect(relative.kind).toBe('deny')
+    expect(reasonOf(relative)).toContain('locked-artifact write denial')
+    expect(relative.rule).toBe('locked-write')
   })
 
   it('leaves non-write tools alone: the narrowing is scoped to the write-tool family', () => {
@@ -418,6 +419,18 @@ describe('live path — the same two verdicts through the mounted plugin', () =>
       } as never)
       expect(denied.isError).toBe(true)
       expect((denied as { error?: { message?: string } }).error?.message ?? '').toContain('documentation phase')
+
+      // …and a LOCKED artifact in the RELATIVE form is refused by this SAME listener: the gap
+      // was measured on the pure guard, and this is the call a live session actually makes.
+      const locked = await ctx.tools.execute({
+        signal,
+        callId: ToolCallId('strict-3'),
+        name: 'write',
+        arguments: { file_path: relativeArtifact(run, '00-requirements.md'), content: 'x' },
+        ...actor,
+      } as never)
+      expect(locked.isError).toBe(true)
+      expect((locked as { error?: { message?: string } }).error?.message ?? '').toContain('locked-artifact write denial')
     } finally {
       await ctx.fiber.dispose()
     }

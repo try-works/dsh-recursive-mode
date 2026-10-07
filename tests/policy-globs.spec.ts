@@ -28,7 +28,7 @@ import {
   type ToolPolicy, type ToolPolicyRule, type ToolPolicyContext, type Verdict,
 } from '../src/policy-globs.ts'
 import { withPhaseBaseline, phaseBaselineRules, policyVerdictRank } from '../src/phase-rules.ts'
-import { lockHashFromContent } from '../src/lock.ts'
+import { lockHashFromContent, getLockStatus } from '../src/lock.ts'
 
 // NOTE: nothing here calls `setBuiltInToolPolicy`. That is deliberate and is the
 // regression guard for the import cycle this module graph once had: this spec
@@ -237,6 +237,83 @@ describe('T16 — the absent-file fallback reproduces today\'s behaviour', () =>
     // list does not turn every call into an `ask`.
     const allowed = evaluateToolPolicy(loaded.policy, 'recursive_status', {}, ctx)
     expect(allowed.kind).toBe('allow')
+  })
+
+  it('the absent fallback denies the SAME locked artifact named REPO-RELATIVELY — the two forms agree', () => {
+    const repo = repoWithPolicy(null)
+    const runDir = join(repo, '.recursive', 'run', 'r1')
+    mkdirSync(runDir, { recursive: true })
+    const content = 'Run: r1\nPhase: 0\nStatus: LOCKED\nCoverage: PASS\nApproval: PASS\n## TODO\n- [x] d\n'
+    const hash = lockHashFromContent(content + 'LockedAt: 2026-01-01T00:00:00Z\nLockHash: ' + '0'.repeat(64) + '\n')
+    writeFileSync(join(runDir, '00-requirements.md'), content + 'LockedAt: 2026-01-01T00:00:00Z\nLockHash: ' + hash + '\n', 'utf8')
+    // A DRAFT artifact in the SAME run, so the control below proves the match is CONDITIONAL
+    // on the lock rather than a blanket denial of every run-tree write.
+    writeFileSync(join(runDir, '01-as-is.md'), 'Run: r1\nPhase: 1\nStatus: DRAFT\n## TODO\n- [ ] x\n', 'utf8')
+
+    const loaded = loadToolPolicyFile(repo)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) return
+    const ctx: ToolPolicyContext = { args: {}, runDir, runId: 'r1', worktreeRoot: repo }
+    // The control below is only meaningful if the files are what it claims: the locked one
+    // really lock-valid, the other really unlocked. Asserted rather than assumed, so an
+    // `allow` cannot pass because a file was MISSING and the rule abstained for that reason.
+    expect(getLockStatus(join(runDir, '00-requirements.md'))).toBe('LOCKED')
+    expect(getLockStatus(join(runDir, '01-as-is.md'))).toBe('DRAFT')
+
+    // ⚠ THE REGRESSION these assertions pin: `lockedWriteRule` admitted a target only when the
+    // STRING it was handed contained `/.recursive/run/`, and a repo-relative path has no
+    // separator before `.recursive` — so the relative spelling of this locked artifact was
+    // ALLOWED while the absolute spelling of the same file was DENIED. Both spellings resolve
+    // to one file and must get one verdict, for the POSIX form a model types, its backslash
+    // form, and the `./`-prefixed form (which only ever matched by accident).
+    const relativeTargets = [
+      '.recursive/run/r1/00-requirements.md',
+      '.recursive\\run\\r1\\00-requirements.md',
+      './.recursive/run/r1/00-requirements.md',
+    ]
+    for (const target of relativeTargets) {
+      const denied = evaluateToolPolicy(loaded.policy, 'write', { file_path: target }, ctx)
+      expect(denied.kind, 'target ' + target + ' names a LOCKED artifact and must be denied').toBe('deny')
+      expect(denied.reason, target).toContain('locked-artifact write denial')
+      // The label, not merely the verdict: a denial for some OTHER reason would not prove the
+      // locked-artifact rule fired.
+      expect(denied.rule, target).toBe('locked-write')
+    }
+
+    // The absolute spelling asserted BESIDE them, so a change that only learned relative paths
+    // (or that dropped the resolved-path test again) cannot pass.
+    const absolute = evaluateToolPolicy(loaded.policy, 'write', { file_path: join(runDir, '00-requirements.md') }, ctx)
+    expect(absolute.kind).toBe('deny')
+    expect(absolute.reason).toContain('locked-artifact write denial')
+    expect(absolute.rule).toBe('locked-write')
+
+    // CONTROL — same run, same relative form, artifact NOT locked: still allowed.
+    const draft = evaluateToolPolicy(loaded.policy, 'write', { file_path: '.recursive/run/r1/01-as-is.md' }, ctx)
+    expect(draft.kind).toBe('allow')
+  })
+
+  it('the admission test still scopes the locked-write rule to the run tree', () => {
+    const repo = repoWithPolicy(null)
+    const runDir = join(repo, '.recursive', 'run', 'r1')
+    mkdirSync(runDir, { recursive: true })
+    // A LOCK-VALID `*.md` outside any run tree: the rule is about run artifacts, so its
+    // admission test must still abstain here. Without that test (a locked-write rule that
+    // denied any lock-valid file it was handed) this file would be denied instead of allowed.
+    const content = 'Status: LOCKED\nCoverage: PASS\nApproval: PASS\n## TODO\n- [x] d\n'
+    const hash = lockHashFromContent(content + 'LockedAt: 2026-01-01T00:00:00Z\nLockHash: ' + '0'.repeat(64) + '\n')
+    writeFileSync(join(repo, 'notes.md'), content + 'LockedAt: 2026-01-01T00:00:00Z\nLockHash: ' + hash + '\n', 'utf8')
+
+    const loaded = loadToolPolicyFile(repo)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) return
+    // Precondition, so the `allow` below cannot pass because the file was MISSING (the rule
+    // abstains on MISSING too): `notes.md` must really be lock-valid and outside a run tree.
+    expect(getLockStatus(join(repo, 'notes.md'))).toBe('LOCKED')
+    const ctx: ToolPolicyContext = { args: {}, runDir, runId: 'r1', worktreeRoot: repo }
+    for (const target of ['notes.md', join(repo, 'notes.md')]) {
+      const decision = evaluateToolPolicy(loaded.policy, 'write', { file_path: target }, ctx)
+      expect(decision.kind, 'target ' + target + ' is not a run-tree artifact').toBe('allow')
+    }
   })
 
   it('the absent fallback denies an out-of-order recursive_lock', () => {

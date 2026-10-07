@@ -325,7 +325,15 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
       const late = teamCtx.get('agentTeams') as TeamRuntimeLike | undefined
       if (late === undefined || late === null) return
       auditTeamRegistered = true
-      // Registered in the injecting scope, so the fiber that owns this plugin withdraws it again.
+      // ⚠ CORRECTED COMMENT. This registers through the OUTER plugin context (`ctx`), NOT through the
+      // injecting `teamCtx` — `teamCtx` is used on the line above only to READ the late service, and the
+      // sibling `subagents`/`llm` injects use their callback context the same way. The comment that used to
+      // sit here claimed the injecting scope owned the registration, which is not what this call does.
+      //
+      // WHAT IS NOT CLAIMED: that the fiber withdraws this registration. Nobody has observed that — no test
+      // covers the late `recursive_audit_team` being withdrawn — and the disposer returned here is not
+      // retained, unlike the eager registration above, which pushes its own onto `disposers`. Until a test
+      // observes the withdrawal, this comment promises nothing about it.
       ctx.tools.register(createRecursiveAuditTeamTool(late))
     })
 

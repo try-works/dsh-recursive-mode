@@ -419,14 +419,36 @@ function lockOrderRule(artifact: unknown, runDir: string | undefined): ToolPolic
 /**
  * Locked-artifact write rule: a denial when the target carries
  * `Status: LOCKED`, `null` otherwise. Only a run-tree `*.md` is a candidate —
- * the same admission test the pre-T16 branch used.
+ * the same admission test the pre-T16 branch used, now asked of the RESOLVED
+ * path as well (see the ADMISSION note below).
+ *
+ * A caller with no `worktreeRoot` still gets `null` for every target, absolute
+ * ones included: that is the pre-existing behaviour and it is left alone here —
+ * the guard always carries a root, so nothing that reaches it changes.
  */
 function lockedWriteRule(target: string | null, worktreeRoot: string | undefined): ToolPolicyPredicateMatch | null {
   if (!target || !worktreeRoot) return null
   const normalized = target.replace(/\\/g, '/')
-  if (!normalized.endsWith('.md') || !normalized.includes('/.recursive/run/')) return null
+  if (!normalized.endsWith('.md')) return null
   const abs = resolveFrom(worktreeRoot, normalized)
-  if (!abs || getLockStatus(abs) !== 'LOCKED') return null
+  if (!abs) return null
+  // ADMISSION — a target is a candidate when it NAMES the run tree, and the marker is
+  // looked for on the path the target RESOLVES to as well as on the string as written.
+  //
+  // The string test alone requires a separator BEFORE `.recursive`, so it admitted an
+  // ABSOLUTE target and missed a REPO-RELATIVE one (`.recursive/run/<id>/00-requirements.md`,
+  // the form a model actually types, and its backslash spelling too). The rule then
+  // ABSTAINED, the phase baseline saw a write INSIDE the run tree — allowed by design — and
+  // the catch-all allowed a write to an artifact whose `Status:` is LOCKED. The resolved test
+  // is the fix, and it is the same question asked of the path the string names; `getLockStatus`
+  // below already used `abs`, so the two halves of this rule now agree on one path.
+  //
+  // The string test is KEPT rather than replaced, so that no absolute spelling denied today
+  // becomes allowed: a literal target that carries the marker but resolves away from it
+  // (`…/.recursive/run/../…`) is still admitted, exactly as before.
+  const resolved = abs.replace(/\\/g, '/')
+  if (!normalized.includes('/.recursive/run/') && !resolved.includes('/.recursive/run/')) return null
+  if (getLockStatus(abs) !== 'LOCKED') return null
   return { verdict: 'deny', detail: normalized + ' carries Status: LOCKED (reopen explicitly to edit)' }
 }
 

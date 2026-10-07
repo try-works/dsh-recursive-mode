@@ -24,7 +24,7 @@ import { createRecursiveAskTool } from './recursive_ask.tool.ts'
 import { createRecursivePreviewTool } from './recursive_preview.tool.ts'
 import type { SubagentsRuntimeLike } from './delegation.ts'
 import { registerRecursiveCommand } from './commands.ts'
-import { evaluateToolGuard, coerceAskToDecision, type ToolGuardDecision } from './enforcement.ts'
+import { evaluateToolGuard, coerceAskToDecision, tamperCandidatePath, type ToolGuardDecision } from './enforcement.ts'
 import { appendGuardDecision, appendObservedTamper, type GuardDecisionRecord } from './guard-log.ts'
 import type { GoalServiceLike } from './goals-projection.ts'
 import type { TeamRuntimeLike } from './teams-loop.ts'
@@ -528,16 +528,26 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
           if (!displayPath) return
           // Cheap shape test BEFORE any filesystem work: fs/observed fires on reads
           // too, so enumerating runs for every observation would be a readdir per
-          // file touch. This is EXACTLY detectTamper's own admission test (same
-          // normalized string, same two conditions), so it can never reject a
-          // candidate detectTamper would have accepted.
-          const normalized = displayPath.replace(/\\/g, '/')
-          if (!normalized.endsWith('.md') || !normalized.includes('/.recursive/run/')) return
-          // The actor is the tool execution. This event cannot await, so the root is
-          // the actor's session cwd (the same B4 sync shortcut fsPolicyIntent takes:
-          // the session cwd is authoritative, the registry path is async-only).
+          // file touch. The actor is the tool execution. This event cannot await, so
+          // the root is the actor's session cwd (the same B4 sync shortcut
+          // fsPolicyIntent takes: the session cwd is authoritative, the registry
+          // path is async-only). Resolving the cwd first is free — plain property
+          // reads — and the admission test needs it.
           const cwd = (actor as { agent?: { session?: { header?: { cwd?: string } } } } | null)?.agent?.session?.header?.cwd ?? ''
           if (!cwd) return
+          // ⚠ AND THIS IS `detectTamper`'s OWN ADMISSION TEST, CALLED RATHER THAN COPIED.
+          //
+          // It used to be an inline hand-copy — `endsWith('.md') && includes('/.recursive/run/')`
+          // — and a hand-copy is what made the tamper guard blind to one spelling of one
+          // path: the substring test needs a separator BEFORE `.recursive`, which a
+          // repo-relative target (`displayPath` as a model would type it) does not have, so
+          // the listener rejected the candidate here and `detectTamper` was never reached.
+          // Widening only `detectTamper` would have changed nothing observable. The test now
+          // lives in one place (`tamperCandidatePath`), so the two cannot disagree; it stays
+          // pure path arithmetic, so the "no filesystem work before admission" property the
+          // shape check exists for is preserved.
+          const normalized = displayPath.replace(/\\/g, '/')
+          if (!tamperCandidatePath(normalized, cwd)) return
           const runId = resolveRunDir(cwd)?.runId ?? ''
           const tamper = recursive.detectTamper(normalized, cwd, runId)
           if (!tamper) return

@@ -37,11 +37,12 @@
  */
 import { describe, it, expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync, unlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RecursiveRuntime } from '../src/runtime.ts'
 import { validateReceiptChain, receiptPath, readReceipt, lockHashFromContent } from '../src/lock.ts'
+import { writeCompliantRun } from './compliant-artifact.ts'
 
 const RUN = 'chain-run'
 const HEAD = '00-requirements.md'
@@ -61,12 +62,12 @@ async function mount(phases: string[]): Promise<Mounted> {
   await ctx.plugin(RecursiveRuntime, { repoRoot: repo })
   await ctx.recursive.initRun(RUN)
   const runDir = join(repo, '.recursive', 'run', RUN)
-  for (const phase of phases) {
-    const path = join(runDir, phase)
-    if (existsSync(path)) {
-      writeFileSync(path, 'Run: `x`\nStatus: `DRAFT`\n\n## TODO\n\n- [x] done\n\nCoverage: PASS\nApproval: PASS\n', 'utf8')
-    }
-  }
+  // T32 locks these phases for real, and `lockArtifact` refuses an artifact below its
+  // phase standard — so the fixtures are AUTHORED to it (see compliant-artifact.ts)
+  // rather than written as skeletons. The scaffold's own `00-worktree.md` records the
+  // placeholder diff basis the linter rejects at run level, which would refuse every
+  // lock in the run and leave this spec testing nothing.
+  writeCompliantRun(repo, RUN, phases)
   for (const phase of phases) await ctx.recursive.lockArtifact(RUN, phase)
   return {
     ctx,

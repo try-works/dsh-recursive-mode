@@ -30,6 +30,7 @@ import { RecursiveRuntime } from '../src/runtime.ts'
 import { pendingWork } from '../src/status.ts'
 import { createHandoff, replyPath } from '../src/handoff.ts'
 import { TOOL_ERRORS } from '../src/errors.ts'
+import { writeCompliantRun } from './compliant-artifact.ts'
 
 const RUN = 'q-run'
 
@@ -45,6 +46,12 @@ async function mount(): Promise<Mount> {
   const ctx = new Context()
   await ctx.plugin(RecursiveRuntime, { repoRoot: repo })
   await ctx.recursive.initRun(RUN)
+  // T18 drives the LOCK path, and `lockArtifact` refuses an artifact below its phase
+  // standard, so the two phase-0 artifacts are authored to it. The scaffold alone
+  // cannot lock at all: its `00-worktree.md` holds the placeholder diff basis the
+  // linter rejects at run level, and the missing memory plane is a second run-level
+  // FAIL — neither of which is what this item is about.
+  writeCompliantRun(repo, RUN, ['00-requirements.md', '00-worktree.md'])
   return {
     ctx,
     repo,

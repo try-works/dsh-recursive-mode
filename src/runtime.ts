@@ -1470,6 +1470,35 @@ export class RecursiveRuntime extends Service {
     if (inFlight.length > 0) {
       throw new Error(toolError('PENDING_WORK', inFlight.map((p) => p.detail).join('; ')))
     }
+    // README §4.1 — THE STANDARD GATE. `recursive_lock` promises that it "refuses
+    // if the artifact does not meet the standard", and until this gate existed it
+    // checked existence, re-lock, lock ORDER and quiescence and never consulted the
+    // linter, so a 14-FAIL artifact locked cleanly and its receipt certified work no
+    // check had accepted. The linter is the authority on the standard, so the same
+    // entry point the `recursive_lint` tool calls is consulted here.
+    //
+    // PLACED LAST among the refusals, immediately before the LOCKED-fields mutation:
+    // every cheaper refusal keeps its existing precedence, and in particular LOCK
+    // ORDER STAYS FIRST — a run that is both out of order AND below standard still
+    // reports ordering, exactly as it did before this gate. The already-LOCKED check
+    // and the `reopen` branch precede this point too, so nothing previously locked is
+    // disturbed and reopen does not suddenly demand a standard it never had.
+    //
+    // A plain `Error`, in the same style as the refusals above, rather than a new
+    // `toolError` code: no registry entry describes "below the phase standard", and
+    // inventing one would add a code `tests/errors.spec.ts` has to be taught, for a
+    // refusal whose remedy is the FAIL list it already carries.
+    //
+    // CONSERVATIVE WHEN THE LINT CANNOT RUN: a lint whose job was killed or failed
+    // returns `passed: false` with the reason in `errors`, so an artifact that could
+    // not be checked is refused rather than waved through — "not measured" is not
+    // "meets the standard".
+    const lint = await this.lintArtifact(runId, artifact, agent)
+    if (!lint.passed) {
+      throw new Error(
+        'Artifact ' + artifact + ' does not meet the phase standard, so it was not locked: ' + lint.errors.join('; '),
+      )
+    }
     let content = readFileSync(artifactPath, 'utf8')
     const lockedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
     content = setOrInsertField(content, 'Status', 'LOCKED', ['Phase'])

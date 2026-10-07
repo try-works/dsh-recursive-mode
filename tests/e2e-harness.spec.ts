@@ -18,8 +18,17 @@
  * sequence of tool calls that produced it rather than a bare assertion message.
  *
  * ⚠ IT DRIVES THE WORKFLOW THE WAY A MODEL WOULD: `recursive_init`, then per phase `recursive_phase`
- * (the rules) → satisfy the gate vocabulary the rules name → `recursive_lock`, then the closeout,
- * status and preview tools. Nothing is called that a host could not call.
+ * (the rules) → AUTHOR the artifact to those rules → `recursive_lock`, then the closeout, status and
+ * preview tools. Nothing is called that a host could not call.
+ *
+ * ⚠ AND IT AUTHORES RATHER THAN PATCHES, which is a repair rather than a preference. This harness used
+ * to write the SCAFFOLD and edit its gate lines (`Coverage: FAIL` → `PASS`), and that was only ever
+ * enough while `recursive_lock` checked nothing but existence, order and quiescence. README §4.1
+ * promises the lock *"refuses if the artifact does not meet the standard"*, that gate is now real, and
+ * a text patch cannot make a skeleton meet it — so every phase artifact here is AUTHORED to its
+ * standard (see `compliant-artifact.ts`), including a real run diff that the audited phases reconcile
+ * against. The three tests below are unchanged in what they assert: the lock order, the single gate
+ * ask, and the closeout report.
  */
 import { describe, it, expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -32,6 +41,9 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import * as plugin from '../src/index.ts'
 import { runPhase8Trigger, spawnExtractorRunner, TRAINING_EXTRACTOR_ENV } from '../src/training.ts'
+import { AUDITED_PHASE_FILES } from '../src/phase-rules.ts'
+import { getGateStatus } from '../src/ts-lint.ts'
+import { authorCompliantPhase, prepareCompliantRun, COMPLIANT_PHASES } from './compliant-artifact.ts'
 
 /** The scratch root: `E:` by default, overridable, with a tmpdir fallback for a machine without it. */
 function scratchRoot(): string {
@@ -41,39 +53,41 @@ function scratchRoot(): string {
   return parent
 }
 
-/** The canonical phase order the workflow locks in. */
-const PHASES = [
-  '00-requirements.md', '00-worktree.md', '01-as-is.md', '01.5-root-cause.md', '02-to-be-plan.md',
-  '03-implementation-summary.md', '03.5-code-review.md', '04-test-summary.md', '05-manual-qa.md',
-  '06-decisions-update.md', '07-state-update.md', '08-memory-impact.md',
-]
+/**
+ * The canonical phase order the workflow locks in.
+ *
+ * ⚠ ONE LIST, NOT TWO. This is the fixture's authored phase list verbatim
+ * (`compliant-artifact.ts`), because a phase that is locked but never AUTHORED would
+ * be locked while below the standard — the divergence this harness is about — and a
+ * private copy here could drift from the author list without anything noticing.
+ */
+const PHASES: readonly string[] = COMPLIANT_PHASES
 
 interface Call { tool: string; args: Record<string, unknown>; ok: boolean; detail: string }
 
 /**
- * Make a scaffolded artifact SATISFY its own gate vocabulary.
+ * Read back the gate lines a phase artifact must carry before it can lock, with the
+ * LINTER'S own reader — and REFUSE TO CONTINUE if one of them is not `PASS`.
  *
- * The templates ship `Coverage: FAIL` / `Approval: FAIL` and (for audited phases) an `Audit:` line, so
- * the harness has to do what a model does: read the rules the plugin gave it and fill them in. This is
- * deliberately a TEXT edit of the gate lines rather than a wholesale rewrite — the point is to prove the
- * vocabulary the policy names is the vocabulary that unlocks the phase.
+ * ⚠ THIS REPLACES `satisfyGates`, AND THE REPLACEMENT IS THE POINT. The old helper
+ * edited the scaffold's gate lines (`Coverage: FAIL` → `PASS`) and nothing else,
+ * which was sufficient only while `recursive_lock` consulted no standard. It is not
+ * sufficient now: a gate line that had to be PATCHED into a skeleton is exactly the
+ * "fixture that passes for the wrong reason" this harness exists to catch, so the
+ * harness authors the artifact (`compliant-artifact.ts`) and this asserts the gates
+ * were authored, not patched. Throwing rather than warning keeps it honest — a
+ * fixture that lost a gate fails the test whose fixture it is.
  */
-function satisfyGates(text: string): { text: string; changed: string[] } {
-  const changed: string[] = []
-  let out = text
-  const set = (label: string, value: string) => {
-    const pattern = new RegExp('^(- )?' + label + ':\\s*.*$', 'm')
-    if (pattern.test(out)) {
-      out = out.replace(pattern, label + ': ' + value)
-      changed.push(label + '=' + value)
-    }
+function gateSummary(phase: string, text: string): string {
+  const required = ['Coverage', 'Approval']
+  if (AUDITED_PHASE_FILES.has(phase)) required.push('Audit')
+  if (phase === '03-implementation-summary.md') required.push('TDD Compliance')
+  const summary = required.map((gate) => gate + '=' + getGateStatus(text, gate)).join(', ')
+  const notPassing = required.filter((gate) => getGateStatus(text, gate) !== 'PASS')
+  if (notPassing.length > 0) {
+    throw new Error('authored ' + phase + ' does not carry ' + notPassing.join(', ') + ' (' + summary + ')')
   }
-  set('Coverage', 'PASS')
-  set('Approval', 'PASS')
-  set('Audit', 'PASS')
-  set('TDD Mode', 'pragmatic')
-  set('QA Execution Mode', 'agent-operated')
-  return { text: out, changed }
+  return summary
 }
 
 async function runWorkflow(options: {
@@ -138,6 +152,15 @@ async function runWorkflow(options: {
   const runId = 'e2e-run'
   await call('recursive_init', { runId })
   const runDir = join(root, '.recursive', 'run', runId)
+  // ⚠ THE FIXTURE RUN IS PREPARED BEFORE THE FIRST LOCK, and the worktree artifact is
+  // part of that preparation — MEASURED, not guessed. While `00-worktree.md` still
+  // holds the scaffold's `<resolve-before-locking>`, `lintRun` reports
+  // `Unable to verify git diff basis` against the RUN DIRECTORY, a FAIL line that
+  // names no artifact and is therefore attributed by `parseLintOutput` to whatever
+  // artifact was asked about: the FIRST lock of the run is refused for a reason that
+  // belongs to phase 2. `prepareCompliantRun` writes the executable basis (and the
+  // memory plane, and the run's real change) so the run is lockable from step one.
+  const run = prepareCompliantRun(root, runId)
 
 /** The closeout stub key for the five phases whose receipt stub is scaffolded at phase entry. */
 const CLOSEOUT_KEY: Record<string, string> = {
@@ -163,11 +186,11 @@ const CLOSEOUT_KEY: Record<string, string> = {
     if (closeoutKey !== undefined) await call('recursive_closeout', { runId, phase: closeoutKey })
     // 1. What does the policy say this phase needs?
     await call('recursive_phase', { runId })
-    // 2. Satisfy the gate vocabulary the templates ship.
-    const before = readFileSync(artifact, 'utf8')
-    const { text, changed } = satisfyGates(before)
-    if (changed.length > 0) writeFileSync(artifact, text, 'utf8')
-    calls.push({ tool: '(gates)', args: { phase }, ok: true, detail: 'set ' + (changed.join(', ') || 'nothing (no gate lines present)') })
+    // 2. AUTHOR the artifact to that standard — the scaffold is a skeleton, and `recursive_lock`
+    //    now refuses anything that does not meet it. This is the step that used to be a gate-line
+    //    text patch; see `gateSummary` for why patching is no longer the same thing as satisfying.
+    authorCompliantPhase(run, phase)
+    calls.push({ tool: '(author)', args: { phase }, ok: true, detail: 'authored to the phase standard; gates: ' + gateSummary(phase, readFileSync(artifact, 'utf8')) })
     // 3. The lint verdict BEFORE the lock, so the report shows what enforcement said.
     await call('recursive_lint', { runId, artifact: phase })
     // 4. The lock itself.
@@ -649,7 +672,12 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
 
       await call('recursive_init', { runId: 'fu7-run' })
       // The workflow must actually BE at phase 03 for its gate to be owed: lock 00..02 in order.
+      // ⚠ AND THE LOCKED PHASES ARE AUTHORED TO THEIR STANDARD, because `recursive_lock` refuses an
+      // artifact that does not meet it — a scaffolded `00-requirements.md` cannot lock at all, and a
+      // run that never reaches phase 03 would leave this test asserting its own setup failure.
+      const run = prepareCompliantRun(root, 'fu7-run')
       for (const artifact of ['00-requirements.md', '00-worktree.md', '01-as-is.md', '01.5-root-cause.md', '02-to-be-plan.md']) {
+        authorCompliantPhase(run, artifact)
         await call('recursive_lock', { runId: 'fu7-run', artifact })
       }
 

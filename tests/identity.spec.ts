@@ -32,6 +32,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RecursiveRuntime } from '../src/runtime.ts'
 import { lockHashFromContent } from '../src/lock.ts'
+import { writeCompliantArtifact, writeCompliantRun } from './compliant-artifact.ts'
 import {
   canonicalInput,
   idempotencyKey,
@@ -209,13 +210,16 @@ describe('T19 — reopen identity at the real seam', () => {
     await ctx.plugin(RecursiveRuntime, { repoRoot: repo })
     await ctx.recursive.initRun(RUN)
     const dir = join(repo, '.recursive', 'run', RUN)
-    writeFileSync(
-      join(dir, ARTIFACT),
-      'Run: `x`\nStatus: `DRAFT`\n\n## TODO\n\n- [x] done\n\nCoverage: PASS\nApproval: PASS\n',
-      'utf8',
-    )
+    // T19 (and now the §4.1 standard gate): these cases drive the LOCK/REOPEN path,
+    // so the artifact must MEET its phase standard — `lockArtifact` refuses one that
+    // does not, and the subject here is reopen identity, not compliance. Both phase-0
+    // artifacts are authored: leaving the scaffolded `00-worktree.md` in place holds
+    // the placeholder diff basis the linter rejects at RUN level, which would refuse
+    // every lock in the run for a reason that has nothing to do with this item.
+    writeCompliantRun(repo, RUN, [ARTIFACT, '00-worktree.md'])
     return {
       ctx,
+      repo,
       dir,
       dispose: async () => {
         await ctx.fiber.dispose()
@@ -276,11 +280,11 @@ describe('T19 — reopen identity at the real seam', () => {
       await m.ctx.recursive.lockArtifact(RUN, ARTIFACT, true)
       // THE FIX — the step that makes this a different operation. Without it the
       // artifact would re-lock to the identical hash (see the boundary case below).
-      writeFileSync(
-        join(m.dir, ARTIFACT),
-        'Run: `x`\nStatus: `DRAFT`\n\n## TODO\n\n- [x] done\n\nCoverage: PASS\nApproval: PASS\n\n## Notes\n\nrepaired\n',
-        'utf8',
-      )
+      // The repaired content is still authored to the phase standard, because the
+      // re-lock below is a real lock and the gate consults the linter.
+      writeCompliantArtifact(m.repo, RUN, ARTIFACT, {
+        note: 'Repaired after the reopen: the requirement set gained an audit note.',
+      })
       await m.ctx.recursive.lockArtifact(RUN, ARTIFACT)
       const second = await m.ctx.recursive.lockArtifact(RUN, ARTIFACT, true)
       // A reopen RESULTS in DRAFT — that is what it is for.

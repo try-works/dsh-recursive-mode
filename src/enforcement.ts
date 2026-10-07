@@ -362,9 +362,55 @@ function resolveTargetPath(target: string, worktreeRoot: string): string | null 
 }
 
 /**
+ * The ADMISSION test for the tamper path: the resolved absolute path when
+ * `targetPath` names a run-tree `*.md` — a tamper CANDIDATE — and `null`
+ * otherwise. Pure path arithmetic on every branch (no filesystem work), so a
+ * caller may use it as a cheap shape check before paying for `existsSync`.
+ *
+ * ⚠ THE BLIND SPOT THIS FUNCTION EXISTS TO CLOSE. The admission test used to be a
+ * substring test on the target STRING alone, looking for `/.recursive/run/`. A
+ * repo-relative path has no separator before `.recursive`, so
+ * `.recursive/run/<id>/00-requirements.md` — the spelling a model actually types,
+ * and its backslash form — was rejected before ANYTHING was examined, and
+ * tampering with a locked artifact through that spelling was invisible
+ * (measured: `detectTamper` returned a record for the absolute path and `null`
+ * for the relative one, on the same file). The identical defect, in the identical
+ * spelling, was fixed one module over in `policy-globs.ts` `lockedWriteRule`; this
+ * is that fix's shape, reused rather than reinvented.
+ *
+ * So the marker is looked for on the path the target RESOLVES to as well as on
+ * the string as written. The `||` is load-bearing and the string test is KEPT
+ * rather than replaced, because a resolved-only test would SHRINK the admitted
+ * set: an absolute target that literally carries the marker but resolves away
+ * from it (`…/.recursive/run/../…`) was caught before and must stay caught. The
+ * net effect is a strict SUPERSET of the previous behaviour, so no tamper that
+ * was visible before can become invisible.
+ *
+ * EXPORTED because `src/index.ts`'s `fs/observed` listener must apply the SAME
+ * admission test before calling `detectTamper`. That listener used to carry a
+ * hand-copied mirror of this test, and a mirror is exactly what leaves half the
+ * defect behind: widening `detectTamper` alone changes nothing, because the
+ * listener rejects the spelling first. One function cannot disagree with itself.
+ */
+export function tamperCandidatePath(targetPath: string, worktreeRoot: string): string | null {
+  const normalized = targetPath.replace(/\\/g, '/')
+  if (!normalized.endsWith('.md')) return null
+  const abs = resolveTargetPath(normalized, worktreeRoot)
+  if (!abs) return null
+  const resolved = abs.replace(/\\/g, '/')
+  if (!normalized.includes('/.recursive/run/') && !resolved.includes('/.recursive/run/')) return null
+  return abs
+}
+
+/**
  * Layer 8 - fs/observed lock-tamper detection.
  * A locked *.md whose observed version differs from the stored LockHash is
  * a tamper. Returns a tamper reason (or null when clean/not-applicable).
+ *
+ * The admission test lives in `tamperCandidatePath` (above), shared with the
+ * `fs/observed` listener in `src/index.ts` — see the note there for why sharing
+ * it is the point and not a tidiness preference. What this function reports is
+ * unchanged: the same record shape, carrying the target AS WRITTEN.
  */
 export function detectTamper(
   targetPath: string,
@@ -372,8 +418,7 @@ export function detectTamper(
   activeRunId: string,
 ): { runId: string; path: string; reason: string } | null {
   const normalized = targetPath.replace(/\\/g, '/')
-  if (!normalized.endsWith('.md') || !normalized.includes('/.recursive/run/')) return null
-  const abs = resolveTargetPath(normalized, worktreeRoot)
+  const abs = tamperCandidatePath(normalized, worktreeRoot)
   if (!abs || !existsSync(abs)) return null
   const status = getLockStatus(abs)
   if (status === 'STALE_LOCK') {

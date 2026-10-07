@@ -10,7 +10,7 @@
  * Everything asserted here is a fact about the tree, checked by RUNNING the code
  * that owns the contract — never by re-reading it.
  *
- * FIVE ASSERTIONS — the plan's four, plus the README edge the measured drift added:
+ * SIX ASSERTIONS — the plan's four, plus the two README edges the measured drift added:
  *   (a) every repo-relative path a shipped document names as an existing file of
  *       THIS repo exists;
  *   (b) package.json's description agrees with the tool surface actually
@@ -20,7 +20,12 @@
  *       repo's own writer produced;
  *   (d) no shipped prompt or skill names a withdrawn tool, phase artifact or verb;
  *   (e) README.md's ONLY tool enumeration — its §4.1 table — names exactly the tools
- *       package.json's description declares: none missing, none invented.
+ *       package.json's description declares: none missing, none invented;
+ *   (f) every `recursive_<name>` the README mentions ANYWHERE ELSE — §8's ✅/✅ capability
+ *       matrix, the mermaid node labels, single-tool prose — is a tool src/index.ts really
+ *       registers. (e) guards the table; (f) guards the promises around it, and it classifies
+ *       EVERY `recursive_` occurrence the README does not use for a tool, so the list of
+ *       non-tool forms cannot rot into a place where a withdrawn name hides.
  *
  * (e) IS THE MEASURED FIX, AND NOT A NICETY. Nothing in this file used to read
  * README.md at all: (b) pins the description to the registered surface and
@@ -596,8 +601,10 @@ describe('T25 (d) — no shipped prompt or skill names a withdrawn tool, phase o
  * README's only enumeration: every other `recursive_*` occurrence is single-tool prose
  * ("`recursive_ask` is not a subagent tool"), a mermaid node (`REQ["recursive_review(phase)"]`)
  * or a row of the ✅/✅ feature matrix in §8 — a repo-wide regex would read those as the
- * enumeration and fail on text that is not drift. So the table is located by HEADING and
- * by ROW SHAPE:
+ * enumeration and fail on text that is not drift. (Those mentions are not left unguarded:
+ * (f) below reads exactly them, for the different question of whether each one names a
+ * registered tool. Reading them as THIS enumeration would still be wrong.) So the table is
+ * located by HEADING and by ROW SHAPE:
  *   1. the heading `### 4.1 …` must appear EXACTLY ONCE (the anchor is the section
  *      number; two matches make "the §4.1 table" ambiguous);
  *   2. the table must be the FIRST markdown table under that heading, with a `| Tool | … |`
@@ -1007,5 +1014,380 @@ describe('T25 (e) — README §4.1 enumerates exactly the tools package.json dec
     expect(reordered.invented).toEqual([])
     expect(reordered.duplicated).toEqual([])
     expect(reordered.documented).not.toEqual(toolEnumerationDrift(PACKAGE_DESCRIPTION, README_TEXT).documented)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// (f) every `recursive_<name>` mention in README.md — not only §4.1's table
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * WHY THIS EXISTS — (e) guards ONE table, and README.md promises a tool in four more places.
+ * Measured on this document, `recursive_review` alone is named seven times: README.md:180
+ * (§4.1's row — the only one (e) reads), :349 and :434 (mermaid node labels), :481 and :490
+ * (single-tool prose), :499 (§8's ✅/✅ capability matrix) and :508 (the "three delegation
+ * paths" paragraph). Withdraw `recursive_review` from src/** and delete its §4.1 row — the edit
+ * a withdrawal is supposed to make — and (e) is satisfied by the shrunken table while the
+ * matrix still says it works, both diagrams still route through it and the prose still teaches
+ * it: three places promising a tool that no longer exists, and no gate reading any of them.
+ * (f) reads every `recursive_<name>` occurrence in the document, wherever it sits.
+ *
+ * (f) IS A DIFFERENT QUESTION FROM (e), NOT A WIDER VERSION OF IT. (e) asks "does the README's
+ * ENUMERATION agree with package.json's?" — which is exactly why it must refuse to read
+ * anything but the one table (a repo-wide regex would read the matrix as the enumeration and
+ * fail on text that is not drift). (f) asks "is every tool NAME the README uses the name of a
+ * registered tool?" — a MEMBERSHIP question the table cannot answer alone. Both are needed:
+ * (e) catches a tool MISSING from the table, (f) catches a name still promised after its row
+ * was correctly deleted. The registered set is REGISTERED_TOOL_IDS, the set (b)/(e) derive from
+ * src/index.ts: the extraction is REUSED here, never re-derived, so there is one definition of
+ * "the tool surface" in this file.
+ *
+ * THE PREFIX IS NOT TOOL-EXCLUSIVE, SO EVERY `recursive_` OCCURRENCE IS CLASSIFIED. The whole
+ * difficulty is that the README legitimately uses the prefix for things that are not tools, and
+ * a guard that skips whatever it does not recognise is how a withdrawn tool survives its own
+ * withdrawal — a skipped line reads as "checked, clean". So the scan accounts for EVERY
+ * `recursive_`-prefixed occurrence in the document, sorts it into one of three classes, and
+ * REPORTS (`problems`) any occurrence that falls outside them instead of ignoring it:
+ *
+ *   class 1  name      `recursive_<lower-case letters, digits, underscores>` — a TOOL MENTION,
+ *                      membership-checked. Measured when this guard was written: 31 mentions on
+ *                      28 lines, naming all 13 registered tools.
+ *   class 2  glob      `recursive_*` — README.md:120 (`TOOLSET["13 recursive_* tools"]`) and
+ *                      README.md:935 (`| Surfaces | `recursive_*.tool.ts` (13), … |`). The `*`
+ *                      is not a name and no tool id can contain one, so this form names NO
+ *                      tool: nothing can be withdrawn from a glob, and a withdrawal cannot hide
+ *                      in one. What it CAN hide is a stale COUNT, and that is the one thing (f)
+ *                      does not cover — see the limits below.
+ *   class 3  constant  the SCREAMING_SNAKE environment variables the memory-training plane
+ *                      documents: RECURSIVE_TRAINING_EXTRACTOR_CMD (README.md:616, 635) and
+ *                      RECURSIVE_TRAINING_RESPONSE_FILE (README.md:617, 635). They are operator
+ *                      CONFIGURATION KEYS consumed by the injected extractor spawn and by the
+ *                      response-file path — not tools. Every registered tool id is lower-case
+ *                      (`name: 'recursive_…'` in src/**), so an upper-case prefix is a different
+ *                      naming convention, and the excluded pair is an EXACT, TWO-WAY allow-list
+ *                      (NON_TOOL_PREFIX_FORMS) asserted below: a constant that DISAPPEARS from
+ *                      the README fails exactly as loudly as an unlisted one appearing, so the
+ *                      exclusion can neither rot nor quietly grow to cover a new name.
+ *
+ * WHY THE HYPHEN/COLON/DOT FORMS NEED NO CLASS AT ALL — and are deliberately not allow-listed.
+ * `recursive-mode` (the preset, the workflow and the package: README.md:1, 5, 51, 112),
+ * `recursive-router.json` (267), the strict profiles `recursive-mode-audit-v2`/`-v1` (517),
+ * `@try-works/dsh-recursive-mode` (730), `recursive-realm` (746, 819) and `dsh-recursive-mode`
+ * (958) are hyphenated; `preset/recursive.patch.yml` (738, 780) and the `.recursive/` control
+ * plane (69, 123, 264, 293) are dot-separated; `recursive:policy` (747) is colon-separated.
+ * None of them contains the `recursive_` UNDERSCORE prefix — and every registered tool id does —
+ * so the extraction cannot reach them, and none of them can spell a tool name. An allow-list
+ * entry for a form the scan cannot produce would be dead weight whose rot nothing would catch;
+ * the occurrence audit already reports any NEW `recursive_`-prefixed form that is not one of
+ * the three classes, which is where a form this guard has not been taught lands.
+ *
+ * WHAT (f) DOES NOT CATCH — stated here so the gap is not mistaken for coverage:
+ *   - COUNT claims. "13 recursive_* tools" (120), "the thirteen tools" (725), "13 tools" (747)
+ *     and "`recursive_*.tool.ts` (13)" (935) name no tool, so a withdrawal that leaves a count
+ *     stale is invisible to this assertion; (b) pins only package.json's own count, and pinning
+ *     the README's numbers would be a separate guard. Made executable below, not assumed.
+ *   - A name written with a different CASE (`Recursive_Review`). It is not read as a tool
+ *     mention — tool ids are lower-case, so such text would not resolve at call time either —
+ *     but it is NOT silently skipped: it lands in the occurrence audit's `problems`, which
+ *     fails the guard and forces a human to classify the form.
+ *   - A mention whose SEPARATOR was re-spelled (`recursive-review`). Distinguishing that from
+ *     the hyphenated preset/workflow/profile names above would require allow-listing a form
+ *     that CAN spell a tool name, which is the exclusion this guard refuses to make. So a
+ *     withdrawal whose every prose mention was re-spelled that way would go unseen by (f).
+ *   - The reverse direction ("every registered tool is mentioned"): (e) already requires §4.1
+ *     to document each one; (f) only asserts its own scan is not vacuous.
+ */
+
+/** `recursive_<lower-case name>`: the tool-mention shape (b)/(d)/(e) also match. */
+const TOOL_MENTION_SHAPE = /^recursive_[a-z0-9_]+$/
+
+/**
+ * Every `recursive_`-prefixed form the README uses that is NOT a tool mention, with the reason
+ * it cannot hide a withdrawal. EXACT strings, not a pattern: a pattern would silently cover
+ * names nobody has classified. The first test below asserts this list is exactly what the
+ * document contains — both directions — so it fails on a removed entry as well as a new one.
+ */
+const NON_TOOL_PREFIX_FORMS: { token: string; why: string }[] = [
+  {
+    token: 'RECURSIVE_TRAINING_EXTRACTOR_CMD',
+    why: "the memory-training gate's extractor command: an operator environment variable read by the injected spawn (README.md:616, 635), not a tool",
+  },
+  {
+    token: 'RECURSIVE_TRAINING_RESPONSE_FILE',
+    why: "the extractor's response-file environment variable (README.md:617, 635); upper-case by the environment-variable convention, while every registered tool id is lower-case",
+  },
+]
+
+interface PrefixOccurrence {
+  /** 1-based line in the scanned text, so a failure names the line to fix */
+  line: number
+  /** the occurrence as the document writes it: `recursive_review`, `recursive_*`, `RECURSIVE_…` */
+  token: string
+  /** 'name' = a tool mention (membership-checked); 'glob'/'constant' = the documented non-tools */
+  klass: 'name' | 'glob' | 'constant'
+}
+
+interface PrefixScan {
+  occurrences: PrefixOccurrence[]
+  /** reasons the classification cannot be trusted; any entry makes the guard fail */
+  problems: string[]
+}
+
+/** A short single-line excerpt around `at`, for failure text that can be acted on. */
+function excerpt(line: string, at: number): string {
+  const from = Math.max(0, at - 16)
+  const to = Math.min(line.length, at + 44)
+  return (from > 0 ? '…' : '') + line.slice(from, to) + (to < line.length ? '…' : '')
+}
+
+/**
+ * Classify EVERY `recursive_`-prefixed occurrence in `readme`. PURE and taking the text as a
+ * parameter, so the falsification cases below run it over MODIFIED COPIES without ever writing
+ * README.md — the artefact under guard cannot be edited by the test that guards it.
+ */
+function scanPrefixOccurrences(readme: string): PrefixScan {
+  const occurrences: PrefixOccurrence[] = []
+  const problems: string[] = []
+  const lines = readme.split(/\r?\n/)
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index] ?? ''
+    const prefix = /recursive_/gi
+    let match: RegExpExecArray | null
+    while ((match = prefix.exec(line)) !== null) {
+      const start = match.index
+      const head = match[0] // `recursive_`, or a case variant of it (`RECURSIVE_`)
+      const tail = /^[A-Za-z0-9_]*/.exec(line.slice(start + head.length))?.[0] ?? ''
+      const token = head + tail
+      prefix.lastIndex = start + token.length // never re-read a token, whatever its class
+      const before = start === 0 ? '' : (line[start - 1] ?? '')
+      if (/[A-Za-z0-9_]/.test(before)) {
+        problems.push(
+          `README.md:${index + 1} writes \`recursive_\` inside a longer word (${JSON.stringify(excerpt(line, start))}), so no tool mention can be read from it: a tool name is never written that way — classify the form instead of skipping it.`,
+        )
+        continue
+      }
+      if (TOOL_MENTION_SHAPE.test(token)) {
+        occurrences.push({ line: index + 1, token, klass: 'name' })
+        continue
+      }
+      // `recursive_*`: the `*` ends the name run, so `token` is the bare prefix and the glob's
+      // own character is the next one. See class 2 above for why this names no tool.
+      if (token === 'recursive_' && (line[start + token.length] ?? '') === '*') {
+        occurrences.push({ line: index + 1, token: 'recursive_*', klass: 'glob' })
+        continue
+      }
+      if (NON_TOOL_PREFIX_FORMS.some((form) => form.token === token)) {
+        occurrences.push({ line: index + 1, token, klass: 'constant' })
+        continue
+      }
+      problems.push(
+        `README.md:${index + 1} has a \`recursive_\`-prefixed token that is neither a lower-case tool name, nor the \`recursive_*\` glob, nor one of the ${NON_TOOL_PREFIX_FORMS.length} documented non-tool environment variables: ${JSON.stringify(token)} in ${JSON.stringify(excerpt(line, start))} — either add it to NON_TOOL_PREFIX_FORMS with the reason it cannot hide a withdrawal, or register the tool it names.`,
+      )
+    }
+  }
+  return { occurrences, problems }
+}
+
+/** The class-1 mentions whose name is NOT registered: the drift this assertion exists for. */
+function unregisteredToolMentions(readme: string, registered: readonly string[]): PrefixOccurrence[] {
+  return scanPrefixOccurrences(readme)
+    .occurrences.filter((occurrence) => occurrence.klass === 'name' && !registered.includes(occurrence.token))
+    .sort((a, b) => a.line - b.line || a.token.localeCompare(b.token))
+}
+
+/** Failure text: which promise, on which line, with the line itself — fixable from the output. */
+function mentionReport(readme: string, registered: readonly string[]): string {
+  const scan = scanPrefixOccurrences(readme)
+  const lines = readme.split(/\r?\n/)
+  const out = [
+    `every \`recursive_<name>\` README.md mentions — §4.1's table, §8's ✅/✅ matrix, the mermaid labels, prose — must be a tool the plugin registers (${registered.length} registered).`,
+  ]
+  for (const occurrence of unregisteredToolMentions(readme, registered)) {
+    out.push(
+      `  README.md:${occurrence.line} promises ${occurrence.token}, which is not registered: ${(lines[occurrence.line - 1] ?? '').trim().slice(0, 140)}`,
+    )
+  }
+  if (scan.problems.length > 0) {
+    out.push(`EXTRACTION PROBLEMS — the prefix scan could not be trusted:\n  - ${scan.problems.join('\n  - ')}`)
+  }
+  return out.join('\n')
+}
+
+// ── mutated copies of the REAL README, for the falsification cases ────────────
+
+/** A mutated COPY with `lines` inserted after the first line matching `anchor`, plus their line numbers. */
+function withLinesAfterAnchor(readme: string, anchor: RegExp, lines: string[]): { text: string; insertedAt: number[] } {
+  const all = readme.split(/\r?\n/)
+  const at = all.findIndex((line) => anchor.test(line))
+  if (at < 0) throw new Error(`T25 (f): no README.md line matches ${anchor} — the falsification anchor moved; re-anchor it.`)
+  const copy = [...all]
+  copy.splice(at + 1, 0, ...lines)
+  return { text: copy.join('\n'), insertedAt: lines.map((_, offset) => at + 2 + offset) }
+}
+
+/** A mutated COPY with `lines` appended — the excluded forms restated in the document's own voice. */
+function withAppendedLines(readme: string, lines: string[]): string {
+  return readme + '\n' + lines.join('\n') + '\n'
+}
+
+/** How many occurrences of a class a text holds; used to prove an exclusion was really exercised. */
+function countClass(readme: string, klass: PrefixOccurrence['klass']): number {
+  return scanPrefixOccurrences(readme).occurrences.filter((occurrence) => occurrence.klass === klass).length
+}
+
+describe('T25 (f) — every `recursive_<name>` mention in README.md names a registered tool', () => {
+  it('the prefix scan classifies every `recursive_` occurrence, and its non-tool classes are exactly the documented ones', () => {
+    const scan = scanPrefixOccurrences(README_TEXT)
+    expect(scan.problems).toEqual([])
+    const names = scan.occurrences.filter((occurrence) => occurrence.klass === 'name')
+    // non-vacuity: the scan found the whole tool surface, not a token or two
+    expect([...new Set(names.map((occurrence) => occurrence.token))].length).toBeGreaterThanOrEqual(REGISTERED_TOOL_IDS.length)
+    // the glob exclusion is exercised by the REAL document, so it is a live rule and not a
+    // branch nothing reaches (a rule no text exercises is a rule no test can falsify)
+    expect(scan.occurrences.filter((occurrence) => occurrence.klass === 'glob').length).toBeGreaterThanOrEqual(1)
+    // the constant allow-list is EXACT in BOTH directions: it may not keep an entry the document
+    // no longer uses (rot), and it may not be missing one the document does use (a new form must
+    // be classified by hand, never absorbed by a pattern)
+    const found = [
+      ...new Set(scan.occurrences.filter((occurrence) => occurrence.klass === 'constant').map((occurrence) => occurrence.token)),
+    ].sort()
+    expect(found).toEqual(NON_TOOL_PREFIX_FORMS.map((form) => form.token).sort())
+    for (const form of NON_TOOL_PREFIX_FORMS) {
+      expect(form.why.length, `${form.token} must record WHY it cannot hide a withdrawal`).toBeGreaterThan(20)
+      // ... nor may it be a REGISTERED tool id in the wrong case. That entry is precisely the
+      // exclusion that would let a real name slip through, so it is refused outright rather
+      // than left to the `why` text: `RECURSIVE_TRAINING_EXTRACTOR_CMD` lower-cases to no tool,
+      // while an allow-listed `RECURSIVE_REVIEW` would lower-case to a live tool id and fail here.
+      expect(
+        REGISTERED_TOOL_IDS,
+        `${form.token} is a registered tool id in the wrong case — allow-listing it would hide that tool`,
+      ).not.toContain(form.token.toLowerCase())
+    }
+  })
+
+  it('every tool name the README mentions — in the table, the ✅ matrix, a diagram or prose — is registered', () => {
+    const scan = scanPrefixOccurrences(README_TEXT)
+    expect(scan.problems, mentionReport(README_TEXT, REGISTERED_TOOL_IDS)).toEqual([])
+    const withdrawn = unregisteredToolMentions(README_TEXT, REGISTERED_TOOL_IDS)
+    expect(withdrawn, mentionReport(README_TEXT, REGISTERED_TOOL_IDS)).toEqual([])
+    // non-vacuity, and the point of the whole assertion: those mentions are NOT confined to
+    // §4.1's table, which is the only thing (e) reads. If they ever were, (f) would be (e).
+    const tableLines = new Set(readToolTable(README_TEXT).rows.map((row) => row.line))
+    const outsideTable = scan.occurrences.filter(
+      (occurrence) => occurrence.klass === 'name' && !tableLines.has(occurrence.line),
+    )
+    expect(outsideTable.length).toBeGreaterThan(0)
+    expect(outsideTable.some((occurrence) => occurrence.token === 'recursive_review')).toBe(true)
+  })
+
+  /**
+   * FALSIFICATION — the guard is shown to FAIL on a withdrawal and NOT to fire on the prefix's
+   * legitimate non-tool uses, on MODIFIED COPIES of the real README built in memory. README.md is
+   * never written: it is the artefact under guard, and a guard "proved" by editing the thing it
+   * guards proves nothing. Injected text is placed under REAL anchors in the real forms, so the
+   * evidence travels with the document — if a section these cases anchor on is rewritten, they
+   * fail loudly instead of quietly testing a stale copy.
+   */
+  it('the guard has teeth: an unregistered promise anywhere is reported, while every non-tool form is not', () => {
+    expect(unregisteredToolMentions(README_TEXT, REGISTERED_TOOL_IDS)).toEqual([])
+
+    // (1) A NAME THE README PROMISES THAT NO TOOL REGISTERS, injected in the three places (e)
+    //     cannot see: a mermaid node label, single-tool prose, and §8's ✅/✅ capability matrix.
+    //     The insertions run in DOCUMENT ORDER (§7's diagram, then §8's prose, then the matrix),
+    //     so each recorded line number stays valid in the text the next one is built from.
+    const mermaid = withLinesAfterAnchor(README_TEXT, /^\s*REQ\["recursive_review\(phase\)"\]/, [
+      '    WD["recursive_withdrawn(phase)"] --> NOPE["no such tool"]',
+    ])
+    const prose = withLinesAfterAnchor(mermaid.text, /\*\*`recursive_ask` is not a subagent tool\.\*\*/, [
+      '4. **`recursive_withdrawn` is not a subagent tool.** It was withdrawn from src/**.',
+    ])
+    const matrix = withLinesAfterAnchor(prose.text, /^>\s*\|\s*`recursive_review` works\s*\|/, [
+      '> | `recursive_withdrawn` works | ✅ | ✅ |',
+    ])
+    // EVERY injected site is reported, at its own line — not just the first one found
+    expect(unregisteredToolMentions(matrix.text, REGISTERED_TOOL_IDS).map((occurrence) => `${occurrence.line}:${occurrence.token}`)).toEqual([
+      `${mermaid.insertedAt[0]}:recursive_withdrawn`,
+      `${prose.insertedAt[0]}:recursive_withdrawn`,
+      `${matrix.insertedAt[0]}:recursive_withdrawn`,
+    ])
+    expect(mentionReport(matrix.text, REGISTERED_TOOL_IDS)).toContain('recursive_withdrawn')
+
+    // ... AND THE §4.1 TABLE GUARD IS BLIND TO IT — the gap this assertion closes, made
+    // executable: the table is untouched, so (e) reports no problem, no missing tool and no
+    // invented tool on the very document that promises `recursive_withdrawn` three times.
+    const enumeration = toolEnumerationDrift(PACKAGE_DESCRIPTION, matrix.text)
+    expect(enumeration.problems).toEqual([])
+    expect({ missing: enumeration.missing, invented: enumeration.invented }).toEqual({ missing: [], invented: [] })
+
+    // (2) THE FALSE-POSITIVE GUARD: every non-tool use of the prefix, re-stated in the document's
+    //     own voice. None of them may be reported — a guard that cried wolf here would be turned
+    //     off, and turning it off is how the drift returns.
+    const nonTools = withAppendedLines(README_TEXT, [
+      '| Surfaces | `recursive_*.tool.ts` (13), `commands.ts` |',
+      '| Files | `recursive_review.tool.ts` (a real tool stem in a filename) |',
+      '**recursive-mode** is the workflow; the strict profiles are `recursive-mode-audit-v2` and `recursive-mode-audit-v1`.',
+      'A preset is declared by `preset/recursive.patch.yml`; the surface lives inside `- id: recursive-realm`.',
+      'The control plane lives in `.recursive/`, and the policy service is `recursive:policy`.',
+      'One slash command, `/recursive <verb>` — e.g. `/recursive status` or `/recursive memory <query>`.',
+      'The extractor reads `RECURSIVE_TRAINING_EXTRACTOR_CMD` or `RECURSIVE_TRAINING_RESPONSE_FILE`.',
+    ])
+    const nonToolScan = scanPrefixOccurrences(nonTools)
+    expect(nonToolScan.problems).toEqual([])
+    expect(unregisteredToolMentions(nonTools, REGISTERED_TOOL_IDS)).toEqual([])
+    // the two exclusions were really EXERCISED by that text — a scan that never saw the excluded
+    // forms would satisfy the two assertions above while proving nothing about them
+    expect(countClass(nonTools, 'glob')).toBe(countClass(README_TEXT, 'glob') + 1)
+    expect(countClass(nonTools, 'constant')).toBe(countClass(README_TEXT, 'constant') + 2)
+
+    // (3) THE EXCLUSIONS CANNOT SWALLOW A WITHDRAWAL: one line carrying the glob, the hyphenated
+    //     names, the service id and an environment variable — AND a withdrawn tool name. Exactly
+    //     the withdrawn name is reported, so no exclusion is a hiding place.
+    const mixed = withAppendedLines(README_TEXT, [
+      '| Surfaces | `recursive_*.tool.ts` (13) — the withdrawn `recursive_withdrawn` shipped here; also `recursive-mode`, `recursive:policy` and `RECURSIVE_TRAINING_EXTRACTOR_CMD` |',
+    ])
+    expect(unregisteredToolMentions(mixed, REGISTERED_TOOL_IDS).map((occurrence) => occurrence.token)).toEqual([
+      'recursive_withdrawn',
+    ])
+
+    // (4) WITHDRAWING A TOOL FROM THE CODE FAILS EVERY README MENTION OF IT — every form, every
+    //     section. The registered set is a PARAMETER of the check, so the withdrawal is simulated
+    //     by handing the scan the set without that tool; src/index.ts is never touched.
+    const readmeLines = README_TEXT.split(/\r?\n/)
+    for (const tool of REGISTERED_TOOL_IDS) {
+      const reported = unregisteredToolMentions(README_TEXT, REGISTERED_TOOL_IDS.filter((id) => id !== tool))
+      const mentionedOn = readmeLines
+        .map((line, index) => ({ line, index }))
+        .filter(({ line }) => line.includes(tool))
+        .map(({ index }) => index + 1)
+      expect(mentionedOn.length, `${tool} must be promised by README.md for this case to mean anything`).toBeGreaterThan(0)
+      expect([...new Set(reported.map((occurrence) => occurrence.line))], `${tool}: EVERY README mention must fail`).toEqual(mentionedOn)
+      expect(reported.every((occurrence) => occurrence.token === tool)).toBe(true)
+    }
+    // and for the tools whose promises live outside §4.1, the table guard alone would have missed
+    // the withdrawal entirely: the review withdrawal is caught in all three forms the gap named.
+    const tableLines = new Set(readToolTable(README_TEXT).rows.map((row) => row.line))
+    expect([...tableLines].some((line) => readmeLines[line - 1]?.includes('recursive_review'))).toBe(true)
+    const reviewLines = unregisteredToolMentions(README_TEXT, REGISTERED_TOOL_IDS.filter((id) => id !== 'recursive_review')).map(
+      (occurrence) => readmeLines[occurrence.line - 1] ?? '',
+    )
+    expect(reviewLines.some((line) => line.includes('✅'))).toBe(true) // §8's ✅/✅ capability matrix
+    expect(reviewLines.some((line) => line.includes('["recursive_review'))).toBe(true) // a mermaid node label
+    expect(
+      reviewLines.some((line) => /`recursive_review`/.test(line) && !/^\s*[>|]/.test(line) && !line.includes('["')),
+    ).toBe(true) // single-tool prose
+
+    // (5) THE DOCUMENTED LIMIT, made executable rather than assumed: `recursive_*` names no tool,
+    //     so a stale COUNT standing behind it is invisible to this assertion. Pinning README's
+    //     numbers is a separate guard; what matters here is that (f) does not pretend to do it.
+    const recounted = withAppendedLines(README_TEXT, ['| Surfaces | `recursive_*.tool.ts` (99), `commands.ts` |'])
+    expect(unregisteredToolMentions(recounted, REGISTERED_TOOL_IDS)).toEqual([])
+
+    // (6) A NEW non-tool form is REPORTED, never skipped — the classification is exhaustive, so a
+    //     form the guard has not been taught (here: a tool name in the wrong case, and a
+    //     placeholder shape) cannot become a hiding place. Both would otherwise be silent.
+    const miscased = withAppendedLines(README_TEXT, ['| `RECURSIVE_REVIEW` | a tool name in the wrong case |'])
+    expect(scanPrefixOccurrences(miscased).problems.join('\n')).toContain('RECURSIVE_REVIEW')
+    const placeholder = withAppendedLines(README_TEXT, ['| `recursive_<name>` | a shape, not a name |'])
+    expect(scanPrefixOccurrences(placeholder).problems.join('\n')).toContain('recursive_<name>')
   })
 })

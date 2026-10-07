@@ -52,7 +52,7 @@ It exists to reduce blind doc-by-doc scanning. It is not a second workflow spec.
 - Working on memory behavior:
   - `/.recursive/memory/MEMORY.md`
   - the installed `recursive-training` skill
-  - `/.recursive/scripts/recursive-training-loader.py`
+  - `/.recursive/scripts/recursive-training-loader.py` (optional helper; NOT present in this checkout - read the shards under `/.recursive/memory/` directly)
   - `/.recursive/memory/training/`
   - `/.recursive/memory/skills/SKILLS.md`
 

@@ -10,7 +10,7 @@
  * Everything asserted here is a fact about the tree, checked by RUNNING the code
  * that owns the contract — never by re-reading it.
  *
- * FOUR ASSERTIONS (plan T25 "What"):
+ * FIVE ASSERTIONS — the plan's four, plus the README edge the measured drift added:
  *   (a) every repo-relative path a shipped document names as an existing file of
  *       THIS repo exists;
  *   (b) package.json's description agrees with the tool surface actually
@@ -18,7 +18,17 @@
  *   (c) every marker string the linter requires is emitted by the writer that
  *       produces it — proven by executing the repo's OWN linter over a record the
  *       repo's own writer produced;
- *   (d) no shipped prompt or skill names a withdrawn tool, phase artifact or verb.
+ *   (d) no shipped prompt or skill names a withdrawn tool, phase artifact or verb;
+ *   (e) README.md's ONLY tool enumeration — its §4.1 table — names exactly the tools
+ *       package.json's description declares: none missing, none invented.
+ *
+ * (e) IS THE MEASURED FIX, AND NOT A NICETY. Nothing in this file used to read
+ * README.md at all: (b) pins the description to the registered surface and
+ * GUARDED_DOCS covers PROPOSAL.md, STRENGTHENING-PLAN.md and skills/**, which left
+ * the README's own account of the tool surface unguarded — and that is where it
+ * drifted. §4.1's table listed TWELVE tools and omitted `recursive_delegate`
+ * ENTIRELY while every gate below stayed green. The table has since been corrected
+ * to thirteen rows in the description's order; (e) makes the same drift fail.
  *
  * (a) IS DELIBERATELY NOT "every referenced path exists". The plan's sentence, taken
  * literally, is unworkable, and a naive implementation would be wrong in three ways.
@@ -559,5 +569,443 @@ describe('T25 (d) — no shipped prompt or skill names a withdrawn tool, phase o
     expect(named.size).toBeGreaterThanOrEqual(5) // the scan is not vacuous
     const withdrawn = [...named].filter((file) => !(PHASE_SEQUENCE as readonly string[]).includes(file)).sort()
     expect(withdrawn).toEqual([])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// (e) README §4.1 enumerates exactly the tools package.json declares
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * WHY THIS EXISTS — a measured gap, not a nicety (see the file header).
+ *
+ * README.md was the ONE document this spec never read, and it drifted there: §4.1's
+ * table listed twelve tools and omitted `recursive_delegate` entirely while every gate
+ * stayed green. The table is now correct (thirteen rows); this guard is what makes the
+ * same drift FAIL instead of shipping.
+ *
+ * THE README EDGE CLOSES THE TRIANGLE. (b) proves description ⟷ registered surface (the
+ * stated count equals the registered count, every registered id is named, every name in
+ * the description is registered). (e) proves README §4.1 ⟷ the description's own
+ * enumeration, and refuses a description whose enumeration disagrees with its own count
+ * claim. Composed, the README table is pinned to the code transitively: a tool that is
+ * registered but absent from the README fails HERE, and a name the README invents — or a
+ * tool the code withdrew while the README kept it — fails here too.
+ *
+ * HOW THE README'S ENUMERATION IS LOCATED, AND WHAT WOULD BREAK THAT. §4.1 is the
+ * README's only enumeration: every other `recursive_*` occurrence is single-tool prose
+ * ("`recursive_ask` is not a subagent tool"), a mermaid node (`REQ["recursive_review(phase)"]`)
+ * or a row of the ✅/✅ feature matrix in §8 — a repo-wide regex would read those as the
+ * enumeration and fail on text that is not drift. So the table is located by HEADING and
+ * by ROW SHAPE:
+ *   1. the heading `### 4.1 …` must appear EXACTLY ONCE (the anchor is the section
+ *      number; two matches make "the §4.1 table" ambiguous);
+ *   2. the table must be the FIRST markdown table under that heading, with a `| Tool | … |`
+ *      header and a delimiter row of the same width;
+ *   3. a data row counts as a tool row only when its first cell is EXACTLY one backticked
+ *      `recursive_*` name — the shape §4.1 uses. A row that does not match is REPORTED,
+ *      never skipped: skipping is how a table loses a tool behind the guard's back;
+ *   4. any further tool-shaped row in the same section is REPORTED too, so a second
+ *      enumeration cannot sit unread below the first.
+ * What breaks it: renumbering §4.1, moving the table under another heading, retitling the
+ * header cell away from `Tool`, inserting a different table between the heading and this
+ * one, dropping the backticks from a tool cell, or adding a second tool table in §4.1.
+ * Each of those fails LOUDLY, naming the heading, the row and the line — the fix is either
+ * the document or this anchor, never a silent pass.
+ */
+const README_TEXT = readRepo('README.md')
+
+/** `| \`recursive_name\` | … |` — §4.1's row shape; any further columns are ignored. */
+const TOOL_ROW_RE = /^\|\s*`(recursive_[a-z0-9_]+)`\s*\|/
+
+/** Cells of a markdown row: the leading and trailing `|` are delimiters, not cells. */
+function tableCells(raw: string): string[] {
+  const trimmed = raw.trim()
+  const withoutLeading = trimmed.startsWith('|') ? trimmed.slice(1) : trimmed
+  const body = withoutLeading.endsWith('|') ? withoutLeading.slice(0, -1) : withoutLeading
+  return body.split('|')
+}
+
+interface ToolTableRow {
+  /** 0-based index into the readme text's lines — the falsification cases mutate by index. */
+  index: number
+  /** 1-based line number, so a failure names the line to fix. */
+  line: number
+  raw: string
+  /** the tool this row names, or null when its first cell is not §4.1's row shape. */
+  tool: string | null
+}
+
+interface ToolTable {
+  heading: string
+  headingLine: number
+  rows: ToolTableRow[]
+  /** Why the extraction cannot be trusted. Any entry ⇒ the guard fails instead of passing. */
+  problems: string[]
+}
+
+/** Locate and read README §4.1's tool table. See the block comment above for the rules. */
+function readToolTable(readme: string): ToolTable {
+  const lines = readme.split(/\r?\n/)
+  const problems: string[] = []
+  const headings = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => /^#{2,4}\s+4\.1(?![0-9.])(\s|$)/.test(line))
+  if (headings.length !== 1) {
+    const first = headings[0]
+    return {
+      heading: first?.line ?? '',
+      headingLine: first === undefined ? 0 : first.index + 1,
+      rows: [],
+      problems: [
+        headings.length === 0
+          ? 'README.md has no `### 4.1 …` heading. The anchor IS the section number, so a renumbering lands here — loudly — instead of silently checking nothing: update this anchor.'
+          : `README.md has ${headings.length} headings numbered 4.1 (lines ${headings.map((h) => h.index + 1).join(', ')}), so "the §4.1 table" is ambiguous.`,
+      ],
+    }
+  }
+  const heading = headings[0] as { line: string; index: number }
+  const headingLine = heading.index + 1
+
+  // The section runs to the next heading of any level; the table is its first markdown table.
+  let start = -1
+  let sectionEnd = lines.length
+  for (let i = heading.index + 1; i < lines.length; i++) {
+    const line = lines[i] ?? ''
+    if (/^#{1,6}\s/.test(line)) {
+      sectionEnd = i
+      break
+    }
+    if (start < 0 && /^\s*\|/.test(line)) start = i
+  }
+  if (start < 0) {
+    return {
+      heading: heading.line,
+      headingLine,
+      rows: [],
+      problems: [`no markdown table follows README.md:${headingLine} (${heading.line.trim()}): this section holds no enumeration to check.`],
+    }
+  }
+  const block: { index: number; raw: string }[] = []
+  for (let i = start; i < sectionEnd; i++) {
+    const line = lines[i] ?? ''
+    if (!/^\s*\|/.test(line)) break
+    block.push({ index: i, raw: line })
+  }
+
+  const header = block[0]
+  const delimiter = block[1]
+  if (header === undefined || delimiter === undefined) {
+    problems.push(`the table at README.md:${start + 1} has ${block.length} row(s); a header row and a delimiter row are required.`)
+  }
+  const headerCells = header ? tableCells(header.raw) : []
+  const delimiterCells = delimiter ? tableCells(delimiter.raw) : []
+  if (headerCells.length < 2) {
+    problems.push(`the table at README.md:${(header?.index ?? start) + 1} has ${headerCells.length} column(s); the §4.1 tool table has at least two (tool, description).`)
+  }
+  if ((headerCells[0] ?? '').trim().toLowerCase() !== 'tool') {
+    problems.push(
+      `the first header cell at README.md:${(header?.index ?? start) + 1} is ${JSON.stringify((headerCells[0] ?? '').trim())}, not "Tool": this cell is the row shape that identifies the tool table, so the guard refuses to guess at another table.`,
+    )
+  }
+  if (delimiterCells.length !== headerCells.length || !delimiterCells.every((cell) => /^:?-{2,}:?$/.test(cell.trim()))) {
+    problems.push(
+      `the delimiter row at README.md:${(delimiter?.index ?? start + 1) + 1} (${delimiter?.raw.trim() ?? 'missing'}) does not match the header's ${headerCells.length} column(s).`,
+    )
+  }
+
+  const rows: ToolTableRow[] = []
+  for (const { index, raw } of block.slice(2)) {
+    const tool = TOOL_ROW_RE.exec(raw)?.[1] ?? null
+    rows.push({ index, line: index + 1, raw, tool })
+    if (tool === null) {
+      problems.push(
+        `README.md:${index + 1} is a §4.1 row whose first cell is not a backticked \`recursive_*\` name, so no tool can be read from it: ${raw.trim()}`,
+      )
+    }
+  }
+  if (rows.length === 0) {
+    problems.push(`the §4.1 table has no data rows (from README.md:${start + 1}): an empty table would make every membership assertion pass vacuously.`)
+  }
+
+  // The reader takes the FIRST table only, so a second enumeration in the same section
+  // must be reported rather than ignored.
+  for (let i = start + block.length; i < sectionEnd; i++) {
+    const line = lines[i] ?? ''
+    if (TOOL_ROW_RE.test(line)) {
+      problems.push(
+        `README.md:${i + 1} is another tool-shaped row inside §4.1 (${line.trim()}): the guard reads the first table only, so §4.1 must hold exactly one enumeration — or this reader must learn about the second.`,
+      )
+    }
+  }
+
+  return { heading: heading.line, headingLine, rows, problems }
+}
+
+/**
+ * The tool enumeration package.json's description states: the parenthesised list that
+ * follows its own count claim (`… 13 recursive_* tools (a, b, …)`). Anchored on the count
+ * because the description makes TWO statements about its tool set — the number and the
+ * list — and a source of truth that disagrees with itself is not one. The count is checked
+ * against the list here and against the registered surface by (b); the enumeration is also
+ * required to be the description's COMPLETE tool set, so a name mentioned only in prose
+ * cannot sit outside the list the README is compared against.
+ */
+function declaredTools(description: string): { tools: string[]; problems: string[] } {
+  const problems: string[] = []
+  const claim = /(\d+)\s+recursive_\*\s+tools\s*\(([^)]*)\)/.exec(description)
+  if (!claim) {
+    return {
+      tools: [],
+      problems: [`package.json's description states no \`<n> recursive_* tools (…)\` enumeration: ${JSON.stringify(description)}`],
+    }
+  }
+  const stated = Number(claim[1] ?? '')
+  const tools: string[] = []
+  for (const entry of (claim[2] ?? '').split(',').map((part) => part.trim()).filter((part) => part !== '')) {
+    if (!/^recursive_[a-z0-9_]+$/.test(entry)) {
+      problems.push(`the description's enumeration has an entry that is not a tool name: ${JSON.stringify(entry)}`)
+      continue
+    }
+    tools.push(entry)
+  }
+  if (tools.length !== stated) {
+    problems.push(`the description states ${stated} tools but enumerates ${tools.length}: ${tools.join(', ')}`)
+  }
+  const mentioned = new Set([...description.matchAll(/\brecursive_[a-z0-9_]+\b/g)].map((match) => match[0]))
+  const outside = [...mentioned].filter((name) => !tools.includes(name)).sort()
+  if (outside.length > 0) {
+    problems.push(`the description names ${outside.join(', ')} outside its enumeration, so the enumeration is not its complete tool set`)
+  }
+  return { tools, problems }
+}
+
+interface ToolEnumerationDrift {
+  /** tools the description declares, in the order it names them */
+  declared: string[]
+  /** tools README §4.1 documents, in the order the rows appear */
+  documented: string[]
+  /** declared minus documented — the README forgot a tool (`recursive_delegate`, historically) */
+  missing: string[]
+  /** documented minus declared — the README invented a tool, or code withdrew one it kept */
+  invented: string[]
+  /** a name repeated inside ONE enumeration: set equality would pass while a row is wrong */
+  duplicated: string[]
+  /** the extraction itself could not be trusted, so no membership claim below is meaningful */
+  problems: string[]
+}
+
+/** Names appearing more than once, sorted. */
+function duplicatedNames(names: string[]): string[] {
+  const seen = new Set<string>()
+  const twice = new Set<string>()
+  for (const name of names) {
+    if (seen.has(name)) twice.add(name)
+    seen.add(name)
+  }
+  return [...twice].sort()
+}
+
+/**
+ * PURE, and taking both texts as parameters so the falsification cases below can run it
+ * over modified copies without touching README.md.
+ *
+ * MEMBERSHIP IS ENFORCED; ORDER IS NOT, DELIBERATELY.
+ *
+ * The description's order carries no code meaning: src/index.ts registers
+ * `recursive_audit_team` OUTSIDE the array that registers the other twelve (it is
+ * conditional on the optional `agentTeams` seam), so "…audit_team, review, delegate…" is a
+ * documentation convention, not the registration order. Asserting order would therefore
+ * fail on a harmless — arguably better — edit (alphabetising the table, or moving a tool
+ * next to its peers) while catching no drift membership does not already catch: any real
+ * drift (a tool added, removed or renamed) changes the SET. What not asserting order lets
+ * through is rows in a different sequence than the description; nothing reads that
+ * sequence. Set equality in BOTH directions plus a duplicate check pins the row count
+ * itself, so a guard that merely counted rows cannot be fooled by a swap.
+ */
+function toolEnumerationDrift(description: string, readme: string): ToolEnumerationDrift {
+  const declared = declaredTools(description)
+  const table = readToolTable(readme)
+  const documented = table.rows.map((row) => row.tool).filter((tool): tool is string => tool !== null)
+  return {
+    declared: declared.tools,
+    documented,
+    missing: declared.tools.filter((tool) => !documented.includes(tool)),
+    invented: documented.filter((tool) => !declared.tools.includes(tool)),
+    duplicated: [
+      ...duplicatedNames(declared.tools).map((name) => `package.json description: ${name}`),
+      ...duplicatedNames(documented).map((name) => `README §4.1: ${name}`),
+    ],
+    problems: [...declared.problems, ...table.problems],
+  }
+}
+
+/** The failure text: enough to fix the drift from the output alone. */
+function driftReport(drift: ToolEnumerationDrift): string {
+  const lines = [
+    "README §4.1 is the README's ONLY tool enumeration; package.json's description is its source of truth.",
+    `declared by package.json (${drift.declared.length}): ${drift.declared.join(', ')}`,
+    `documented by README §4.1 (${drift.documented.length}): ${drift.documented.join(', ')}`,
+  ]
+  if (drift.missing.length > 0) {
+    lines.push(`MISSING from the README table — add a row for each: ${drift.missing.join(', ')}`)
+  }
+  if (drift.invented.length > 0) {
+    lines.push(`INVENTED by the README table — no tool of this name is declared (delete the row, or fix the name): ${drift.invented.join(', ')}`)
+  }
+  if (drift.duplicated.length > 0) {
+    lines.push(`named TWICE inside one enumeration — a duplicate row is how a table loses a tool while keeping its length: ${drift.duplicated.join(', ')}`)
+  }
+  if (drift.problems.length > 0) {
+    lines.push(`EXTRACTION PROBLEMS — the enumeration could not be read:\n  - ${drift.problems.join('\n  - ')}`)
+  }
+  return lines.join('\n')
+}
+
+// ── mutated copies of the REAL texts, for the falsification cases ─────────────
+
+/** The §4.1 data row naming `tool`, located by the same reader the guard uses. */
+function toolRow(readme: string, tool: string): ToolTableRow {
+  const row = readToolTable(readme).rows.find((candidate) => candidate.tool === tool)
+  if (!row) throw new Error(`no README §4.1 table row names ${tool}`)
+  return row
+}
+
+function withoutToolRow(readme: string, tool: string): string {
+  const lines = readme.split(/\r?\n/)
+  lines.splice(toolRow(readme, tool).index, 1)
+  return lines.join('\n')
+}
+
+function withToolRowAfter(readme: string, tool: string, row: string): string {
+  const lines = readme.split(/\r?\n/)
+  lines.splice(toolRow(readme, tool).index + 1, 0, row)
+  return lines.join('\n')
+}
+
+/** A second enumeration under the same §4.1 heading: `row`, detached by a blank line. */
+function withSecondTableAfter(readme: string, tool: string, row: string): string {
+  return withToolRowAfter(withToolRowAfter(readme, tool, row), tool, '')
+}
+
+/** The §4.1 data rows in reverse — a cosmetic edit that is NOT drift. */
+function withToolRowsReversed(readme: string): string {
+  const rows = readToolTable(readme).rows
+  const lines = readme.split(/\r?\n/)
+  const reversed = [...rows].reverse()
+  rows.forEach((row, position) => lines.splice(row.index, 1, reversed[position]?.raw ?? ''))
+  return lines.join('\n')
+}
+
+describe('T25 (e) — README §4.1 enumerates exactly the tools package.json declares', () => {
+  it('the description is a self-consistent enumeration (the source of truth is guarded too)', () => {
+    const declared = declaredTools(PACKAGE_DESCRIPTION)
+    expect(declared.problems).toEqual([])
+    // (b) pins this count to the registered surface; pinning it here as well means the
+    // README edge cannot pass vacuously through a shrunken enumeration.
+    expect(declared.tools.length).toBe(REGISTERED_TOOL_IDS.length)
+  })
+
+  it('README §4.1 lists every declared tool, and nothing the description does not name', () => {
+    const drift = toolEnumerationDrift(PACKAGE_DESCRIPTION, README_TEXT)
+    expect(drift.problems, driftReport(drift)).toEqual([])
+    expect({ missing: drift.missing, invented: drift.invented, duplicated: drift.duplicated }, driftReport(drift)).toEqual({
+      missing: [],
+      invented: [],
+      duplicated: [],
+    })
+    // non-vacuity: the table really was located, really read, and really is that size
+    expect(drift.documented.length).toBe(drift.declared.length)
+  })
+
+  /**
+   * FALSIFICATION — the guard is shown to FAIL on drift, using MODIFIED COPIES of the real
+   * texts built here in memory. README.md is never written: it is the artefact under guard,
+   * and a guard "proved" by editing the thing it guards proves nothing. Every case mutates
+   * the REAL text, so the evidence travels with the document — reshape §4.1 and these cases
+   * break with it instead of quietly testing a stale copy of a table that no longer exists.
+   */
+  it('the guard has teeth: a dropped row, an invented row, a swap and a duplicate are each reported', () => {
+    const clean = toolEnumerationDrift(PACKAGE_DESCRIPTION, README_TEXT)
+    expect(clean.problems).toEqual([])
+    expect(clean.missing).toEqual([])
+    expect(clean.invented).toEqual([])
+
+    // (1) DROP THE ROW THAT DRIFTED — `recursive_delegate`, the tool the real table once
+    //     omitted. A guard that cannot see this cannot see the drift it exists for.
+    const dropped = toolEnumerationDrift(PACKAGE_DESCRIPTION, withoutToolRow(README_TEXT, 'recursive_delegate'))
+    // The SAME object the passing test asserts to be empty, over the drifted table: this is
+    // what the guard's own expect() would have compared, and it is not the empty object.
+    expect({ missing: dropped.missing, invented: dropped.invented, duplicated: dropped.duplicated }).toEqual({
+      missing: ['recursive_delegate'],
+      invented: [],
+      duplicated: [],
+    })
+    expect(driftReport(dropped)).toContain('recursive_delegate')
+
+    // (2) INVENT A TOOL no description names.
+    const invented = toolEnumerationDrift(
+      PACKAGE_DESCRIPTION,
+      withToolRowAfter(README_TEXT, 'recursive_preview', '| `recursive_not_a_tool` | invented by this test |'),
+    )
+    expect(invented.invented).toEqual(['recursive_not_a_tool'])
+    expect(invented.missing).toEqual([])
+
+    // (3) A SWAP — the counterexample that rules out a count-only guard: the table still has
+    //     thirteen rows, so "13 rows" passes while the set is wrong in BOTH directions.
+    const swapped = toolEnumerationDrift(
+      PACKAGE_DESCRIPTION,
+      withToolRowAfter(withoutToolRow(README_TEXT, 'recursive_delegate'), 'recursive_preview', '| `recursive_not_a_tool` | invented by this test |'),
+    )
+    expect(swapped.documented.length).toBe(clean.documented.length)
+    expect(swapped.missing).toEqual(['recursive_delegate'])
+    expect(swapped.invented).toEqual(['recursive_not_a_tool'])
+
+    // (4) A DUPLICATE keeps the length at thirteen while losing a tool — the other half of
+    //     the same counterexample.
+    const duplicated = toolEnumerationDrift(
+      PACKAGE_DESCRIPTION,
+      withToolRowAfter(withoutToolRow(README_TEXT, 'recursive_delegate'), 'recursive_preview', '| `recursive_preview` | a duplicate row |'),
+    )
+    expect(duplicated.documented.length).toBe(clean.documented.length)
+    expect(duplicated.duplicated).toEqual(['README §4.1: recursive_preview'])
+    expect(duplicated.missing).toEqual(['recursive_delegate'])
+  })
+
+  it('the guard reports unreadable input, refuses a second enumeration, and does not fire on a harmless reorder', () => {
+    // (5) A ROW THAT LOSES ITS SHAPE is reported as a problem, never skipped — skipping is
+    //     how a table could shrink behind the guard's back.
+    const unshaped = toolEnumerationDrift(PACKAGE_DESCRIPTION, README_TEXT.replace('| `recursive_delegate` |', '| recursive_delegate |'))
+    expect(unshaped.problems.join('\n')).toContain('recursive_delegate')
+    expect(unshaped.missing).toEqual(['recursive_delegate'])
+
+    // (6) A SECOND ENUMERATION under §4.1 is refused: the reader takes the first table only,
+    //     so it must say so rather than let the second one go unchecked.
+    const second = toolEnumerationDrift(
+      PACKAGE_DESCRIPTION,
+      withSecondTableAfter(README_TEXT, 'recursive_preview', '| `recursive_shadow` | a second enumeration the guard must not ignore |'),
+    )
+    expect(second.problems.join('\n')).toContain('another tool-shaped row inside §4.1')
+
+    // (7) A SHRUNKEN SOURCE OF TRUTH is caught on the description side: dropping a name from
+    //     the enumeration breaks its own count claim, and the README row then reads invented.
+    const shrunk = toolEnumerationDrift(PACKAGE_DESCRIPTION.replace(', recursive_preview', ''), README_TEXT)
+    expect(shrunk.problems.join('\n')).toContain('states 13 tools but enumerates 12')
+    expect(shrunk.invented).toEqual(['recursive_preview'])
+
+    // (8) A NAME MENTIONED ONLY IN PROSE would otherwise never be required of the README.
+    const stray = toolEnumerationDrift(PACKAGE_DESCRIPTION + ' Not to be confused with recursive_stray.', README_TEXT)
+    expect(stray.problems.join('\n')).toContain('outside its enumeration')
+
+    // (9) REORDERING IS NOT DRIFT — the decision not to assert order, made executable: the
+    //     description's order is a documentation convention (src/index.ts registers
+    //     `recursive_audit_team` conditionally, outside the array that registers the other
+    //     twelve), so a reordered table is a cosmetic difference, not drift.
+    const reordered = toolEnumerationDrift(PACKAGE_DESCRIPTION, withToolRowsReversed(README_TEXT))
+    expect(reordered.problems).toEqual([])
+    expect(reordered.missing).toEqual([])
+    expect(reordered.invented).toEqual([])
+    expect(reordered.duplicated).toEqual([])
+    expect(reordered.documented).not.toEqual(toolEnumerationDrift(PACKAGE_DESCRIPTION, README_TEXT).documented)
   })
 })

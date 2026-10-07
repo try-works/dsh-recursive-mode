@@ -10,7 +10,7 @@ be skipped by an agent that is in a hurry.
 - **13 tools** on the agent surface, one slash command, a workspace control plane, and a memory plane that
   learns from what actually got used.
 - **Zero runtime dependencies** beyond the harness itself — everything is a structural seam.
-- **928 tests across 91 files**, three parity specs against the reference implementation, a live-session
+- **A full test suite**, three parity specs against the reference implementation, a live-session
   harness, and a fresh-clone check that runs unattended.
 
 > **Honest status, up front.** One capability in this repository is **implemented but NOT VERIFIED live**: the
@@ -892,11 +892,11 @@ surface arrives when a session opts into the `recursive` preset. See
 
 | Claim | How it is established |
 |---|---|
-| The workflow's own rules hold | `pnpm test` — **928 tests, 103 files**, including three **parity specs** (lock, status, lint) against the reference implementation |
+| The workflow's own rules hold | `pnpm test` — the whole suite, including three **parity specs** (lock, status, lint) against the reference implementation |
 | The tree is sound | `pnpm typecheck` (0 errors), `pnpm build` (0) |
-| The docs match the code | `docs-contract.spec.ts` — 15 tests asserting documented paths, tools, and sections exist |
+| The docs match the code | `docs-contract.spec.ts` — asserts that documented paths, tools, sections and the README tool table all match the code |
 | The plugin runs under a real harness | `pnpm e2e` — the FU-1 harness, **10/10**, including the behaviour test where removing one shard changes what the agent is told |
-| A fresh checkout works unattended | `git clone` → `pnpm install` → **928/928**, verified in the closing sweep |
+| A fresh checkout works unattended | `git clone` → `pnpm install` → **the suite passes**, verified in the closing sweep |
 | The plugin runs in a real CLI session | `scripts/live-session-plugin.mjs` — headless CLI, temp HOME, scripted LLM; the run reaches the review tool and the control plane is written |
 | Memory actually reaches the model | the P5 harness test, end to end |
 | The guard refuses locked writes | enforcement specs plus the live probe that found the overwrite defect |
@@ -959,6 +959,6 @@ pointer files a workspace gets), `scripts/` (harness, e2e, live-session, install
 sections, monotonic locks with receipts, a guard that refuses writes to locked artifacts, an independent review
 routed to whichever provider is actually available, a memory plane whose scoring is printed on demand, and a
 closeout that lints the whole run and writes a receipt instead of touching the agent's work. It is verified by
-928 tests, three parity specs against the reference implementation, a live-session harness, and an unattended
+a full test suite, three parity specs against the reference implementation, a live-session harness, and an unattended
 fresh-clone check — and it reports the one capability it has not managed to prove live, with the host-side
 reason, rather than describing it as working.

@@ -435,6 +435,10 @@ flowchart TB
     P035 ==>|"the review phase"| REV
     P08 -.->|"memory-auditor role"| REV
 
+    DELEG["recursive_delegate(phase)<br/>the phase's WORK, handed to a durable child<br/>the child produces · the main agent judges"]
+    P01 -.->|"work delegation, in any phase"| DELEG
+    P03 -.->|"the phase's actual work"| DELEG
+
     TEAM["recursive_audit_team<br/>one phase per ROLE, one item per reviewer"]
     P01 -.-> TEAM
     P02 -.-> TEAM
@@ -501,7 +505,7 @@ progress reads as a per-phase per-role review rather than an undifferentiated pi
 > phase's skill carries `audited: yes — this phase needs a delegated audit` or `audited: no`
 > (`skills-phase.ts`), so the expectation is stated per phase rather than implied.
 >
-> **Two delegation paths exist, and they are different animals.** The workflow's own — `recursive_review`,
+> **Three delegation paths exist, and they are different animals.** `recursive_delegate` hands the *work itself* to a durable child and the main agent judges what comes back; `recursive_review` asks for an *independent judgement* and carries a repair leg; `recursive_audit_team` fans a phase out across roles. The first produces, the second judges, the third multiplies. The workflow's own — `recursive_review`,
 > `recursive_audit_team` — is phase-aware and writes evidence **into the run** (brief, reply, action record,
 > settlement), which is what makes the per-phase contract checkable. The harness's generic subagent and team
 > tools are always available and know nothing about phases; work delegated through those leaves no run-scoped

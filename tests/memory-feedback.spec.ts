@@ -1,9 +1,10 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   FEEDBACK_FILE,
+  LEGACY_FEEDBACK_FILE,
   type FeedbackBook,
   feedbackBonus,
   readFeedback,
@@ -95,6 +96,63 @@ describe('FU-13 P3: memory feedback counters', () => {
     expect(second).not.toBe(first)
     expect(readFeedback(root)['memory/domains/a.md']?.applied).toBe(2)
     // …and a corrupt sidecar is an empty book, never a crash.
+    writeFileSync(join(root, FEEDBACK_FILE), '{ not json', 'utf8')
+    expect(readFeedback(root)).toEqual({})
+  })
+
+  /**
+   * THE PATH ITSELF, ASSERTED RATHER THAN DESCRIBED.
+   *
+   * This is the defect the two tests around it exist for: the constant used to read `memory/.feedback.json`
+   * — no `.recursive/` prefix — while this module's own doc comment (and README §6's control-plane tree)
+   * said `.recursive/memory/.feedback.json`. Joined onto the repo root, the old value wrote the counter
+   * into the PRODUCT TREE, where the linter's diff audit (`getPhaseOwnedActualChangedFiles`) hands it to
+   * EVERY diff-audited phase; under `.recursive/memory/` it belongs to the memory phase (08) alone, which
+   * is always authored after the file exists. Measured before the fix: a completed fixture run ended at
+   * FAIL: 4, all four naming `memory/.feedback.json` against phases 03 and 03.5, whose audits had been
+   * authored before the first `settleInjections` (phase 04's closeout) wrote it.
+   */
+  it('writes the counters INTO the memory plane the doc comment names, not the product tree', () => {
+    recordInjection(runDir, [entry('memory/domains/locks.md', 'Lock chain ordering')], '04')
+    settleInjections(root, runDir, ['04'])
+    expect(FEEDBACK_FILE).toBe('.recursive/memory/.feedback.json')
+    expect(readFileSync(join(root, FEEDBACK_FILE), 'utf8')).toContain('"applied": 1')
+    // Nothing was written at the pre-fix path, which is the whole point of the move.
+    expect(existsSync(join(root, LEGACY_FEEDBACK_FILE))).toBe(false)
+  })
+
+  /**
+   * THE MIGRATION, AND WHY IT IS A READ AND NOT A MOVE.
+   *
+   * A checkout from before this fix may hold a counter at the old path. It is READ — so the evidence a
+   * previous run recorded is not thrown away — and folded forward by the next settle, because the first
+   * version of this change simply ignored it, which is a counter lost. It is NOT moved or deleted, for the
+   * reason `LEGACY_FEEDBACK_FILE` documents: a delete is the one action that could put a `D` entry into a
+   * run's diff mid-flight and re-create the retro-invalidation this change removes.
+   */
+  it('READS a counter left at the pre-fix path and folds it forward rather than losing it', () => {
+    mkdirSync(dirname(join(root, LEGACY_FEEDBACK_FILE)), { recursive: true })
+    writeFileSync(join(root, LEGACY_FEEDBACK_FILE),
+      JSON.stringify({ 'memory/domains/locks.md': { applied: 3, contradicted: 1 } }), 'utf8')
+    // Before this run settles, the old book is what the ranking gets — not an empty one.
+    expect(readFeedback(root)['memory/domains/locks.md']).toEqual({ applied: 3, contradicted: 1 })
+
+    recordInjection(runDir, [entry('memory/domains/locks.md', 'Lock chain ordering')], '04')
+    settleInjections(root, runDir, ['04'])
+    // Carried forward, not summed: the two files are snapshots of ONE counter, so this settle adds its own
+    // 1 to the legacy 3 rather than treating the copies as independent evidence.
+    expect(readFeedback(root)['memory/domains/locks.md']).toEqual({ applied: 4, contradicted: 1 })
+    expect(existsSync(join(root, LEGACY_FEEDBACK_FILE))).toBe(true)
+  })
+
+  it('prefers the current file when both exist, so a stale legacy copy cannot double-count', () => {
+    mkdirSync(dirname(join(root, FEEDBACK_FILE)), { recursive: true })
+    writeFileSync(join(root, FEEDBACK_FILE), JSON.stringify({ a: { applied: 2, contradicted: 0 } }), 'utf8')
+    mkdirSync(dirname(join(root, LEGACY_FEEDBACK_FILE)), { recursive: true })
+    writeFileSync(join(root, LEGACY_FEEDBACK_FILE), JSON.stringify({ a: { applied: 9, contradicted: 0 } }), 'utf8')
+    expect(readFeedback(root)).toEqual({ a: { applied: 2, contradicted: 0 } })
+    // And a CURRENT file that does not parse is the empty book this function has always promised — not a
+    // licence to fall back to the other one, which would be a silent substitution.
     writeFileSync(join(root, FEEDBACK_FILE), '{ not json', 'utf8')
     expect(readFeedback(root)).toEqual({})
   })

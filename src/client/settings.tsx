@@ -12,7 +12,7 @@ export interface RecursiveSettingsProps {
 export function RecursiveSettings({ close }: RecursiveSettingsProps) {
   return createElement('div', { className: 'rec-settings' },
     createElement('h2', {}, 'Recursive'),
-    createElement('p', {}, 'Enforcement policy, scratch format, provider defaults, and preset install path are configured on the host. The client is read-only (§11.9).'),
+    createElement('p', {}, 'Enforcement policy, scratch format, and provider defaults are configured on the host. This panel reports that; the client is read-only (§11.9).'),
     createElement('button', { onClick: close }, 'Close'),
   )
 }

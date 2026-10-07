@@ -18,7 +18,7 @@
  *    present-but-empty value would stop the deferral and pin the choice to nothing, which is a different state
  *    from "unconfigured" and not one a user can see. Absence is the honest representation of "I have no opinion".
  *
- * 3. **WRITE ATOMICALLY.** A temp file and a rename, the same pattern the preset installer uses. A policy file
+ * 3. **WRITE ATOMICALLY.** A temp file and a rename, the same pattern the preset installer used, before it was retired. A policy file
  *    half-written because a process died mid-write would make `loadRouterPolicy` fall back to the built-in
  *    self-audit policy — and it does that SILENTLY, on purpose (it never throws). So a torn write here would look
  *    exactly like "the user configured nothing", for every role, until someone read the file.

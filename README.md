@@ -10,7 +10,7 @@ be skipped by an agent that is in a hurry.
 - **13 tools** on the agent surface, one slash command, a workspace control plane, and a memory plane that
   learns from what actually got used.
 - **Zero runtime dependencies** beyond the harness itself — everything is a structural seam.
-- **862 tests across 91 files**, three parity specs against the reference implementation, a live-session
+- **928 tests across 91 files**, three parity specs against the reference implementation, a live-session
   harness, and a fresh-clone check that runs unattended.
 
 > **Honest status, up front.** One capability in this repository is **implemented but NOT VERIFIED live**: the
@@ -164,7 +164,7 @@ control plane on disk is the only state it trusts across restarts.
 
 ## 4. Capabilities
 
-### 4.1 The twelve tools
+### 4.1 The thirteen tools
 
 | Tool | What it does |
 |---|---|
@@ -173,11 +173,12 @@ control plane on disk is the only state it trusts across restarts.
 | `recursive_lock` | Lock a phase — refuses if the artifact does not meet the standard |
 | `recursive_lint` | Lint a run or an artifact against the phase standard, with remediation text |
 | `recursive_closeout` | Report what a phase artifact is missing; **writes a receipt, never the artifact** |
-| `recursive_phase` | Read the phase graph: what is required, what is next, what is blocked |
-| `recursive_worktree` | Create/promote a git worktree for a run, so work is isolated |
 | `recursive_scratch` | The child's scratch space: durable, per-run working notes |
-| `recursive_review` | **Independent review** of the phase artifact, with a repair path |
+| `recursive_worktree` | Create/promote a git worktree for a run, so work is isolated |
+| `recursive_phase` | Read the phase graph: what is required, what is next, what is blocked |
 | `recursive_audit_team` | Fan a phase out across roles (audit) |
+| `recursive_review` | **Independent review** of the phase artifact, with a repair path |
+| `recursive_delegate` | **Delegate the work of a phase** to a durable child; it produces, you judge |
 | `recursive_ask` | Ask the workspace a question, with the control plane as context |
 | `recursive_preview` | Preview what a tool would do, without doing it |
 
@@ -717,7 +718,7 @@ The plugin ships **two halves that mount in different planes**, and knowing whic
 | Half | Artifact | Plane | What it carries |
 |---|---|---|---|
 | **Bundle** | `cordis.patch.yml` (declared as `dsh.bundle.patch`) | **profile** | one enabled row so the host's ClientModuleRegistry can discover the UI half |
-| **Agent preset** | `preset/recursive/agent.cordis.yml` + `preset/recursive/preset.yml` | **agent plane** | **the entire server surface**: the `RecursiveRuntime` service, the twelve tools, `/recursive`, the policy prompt section |
+| **Agent preset** | `preset/recursive/agent.cordis.yml` + `preset/recursive/preset.yml` | **agent plane** | **the entire server surface**: the `RecursiveRuntime` service, the thirteen tools, `/recursive`, the policy prompt section |
 
 ```mermaid
 flowchart TB
@@ -887,11 +888,11 @@ surface arrives when a session opts into the `recursive` preset. See
 
 | Claim | How it is established |
 |---|---|
-| The workflow's own rules hold | `pnpm test` — **862 tests, 91 files**, including three **parity specs** (lock, status, lint) against the reference implementation |
+| The workflow's own rules hold | `pnpm test` — **928 tests, 103 files**, including three **parity specs** (lock, status, lint) against the reference implementation |
 | The tree is sound | `pnpm typecheck` (0 errors), `pnpm build` (0) |
 | The docs match the code | `docs-contract.spec.ts` — 15 tests asserting documented paths, tools, and sections exist |
 | The plugin runs under a real harness | `pnpm e2e` — the FU-1 harness, **10/10**, including the behaviour test where removing one shard changes what the agent is told |
-| A fresh checkout works unattended | `git clone` → `pnpm install` → **862/862**, verified in the closing sweep |
+| A fresh checkout works unattended | `git clone` → `pnpm install` → **928/928**, verified in the closing sweep |
 | The plugin runs in a real CLI session | `scripts/live-session-plugin.mjs` — headless CLI, temp HOME, scripted LLM; the run reaches the review tool and the control plane is written |
 | Memory actually reaches the model | the P5 harness test, end to end |
 | The guard refuses locked writes | enforcement specs plus the live probe that found the overwrite defect |
@@ -927,7 +928,7 @@ unverified.**
 | The guard | `enforcement.ts`, `policy-globs.ts`, `fs-intent.ts`, `guard-log.ts`, `errors.ts` |
 | Delegation & review | `delegation.ts`, `router.ts`, `role-route.ts`, `review.ts`, `review-round.ts`, `settlement.ts`, `handoff.ts`, `teams-loop.ts`, `live-route.ts` |
 | Memory | `memory.ts`, `memory-select.ts`, `memory-feedback.ts` |
-| Surfaces | `recursive_*.tool.ts` (12), `commands.ts`, `hooks.ts`, `status.ts` |
+| Surfaces | `recursive_*.tool.ts` (13), `commands.ts`, `hooks.ts`, `status.ts` |
 | Infrastructure | `jobs-runner.ts`, `job-log.ts`, `goals-projection.ts`, `lifecycle.ts`, `bootstrap.ts`, `init-templates.ts`, `worktree.ts`, `git-context.ts`, `scratch.ts`, `skills.ts`, `skills-phase.ts`, `training.ts`, `workflow-audit.ts`, `plan-gate.ts`, `result-cap.ts`, `json-safe.ts`, `identity.ts`, `policy.ts` |
 
 **Documents:**
@@ -954,6 +955,6 @@ pointer files a workspace gets), `scripts/` (harness, e2e, live-session, install
 sections, monotonic locks with receipts, a guard that refuses writes to locked artifacts, an independent review
 routed to whichever provider is actually available, a memory plane whose scoring is printed on demand, and a
 closeout that lints the whole run and writes a receipt instead of touching the agent's work. It is verified by
-862 tests, three parity specs against the reference implementation, a live-session harness, and an unattended
+928 tests, three parity specs against the reference implementation, a live-session harness, and an unattended
 fresh-clone check — and it reports the one capability it has not managed to prove live, with the host-side
 reason, rather than describing it as working.

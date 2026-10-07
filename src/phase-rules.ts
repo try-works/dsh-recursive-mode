@@ -490,7 +490,16 @@ export function resolveFrom(worktreeRoot: string, target: string): string | null
   const normalized = target.replace(/\\/g, '/').trim()
   if (!normalized) return null
   if (/^[A-Za-z]:\//.test(normalized) || normalized.startsWith('/')) return resolve(normalized)
-  return resolve(join(worktreeRoot, normalized.replace(/^\.?\/?/, '')))
+  // ⚠ FIX 2 — THIS USED TO STRIP A LEADING DOT, WHICH IS NOT THE SAME AS STRIPPING `./`.
+  //
+  // The regex was `/^\.?\/?/`: an optional dot followed by an optional slash. Its intent was plainly to normalise a
+  // `./relative` path, but on a DOTFILE path it removed the dot and kept the name — so `.recursive/run/<id>/01.md`
+  // resolved to `<root>/recursive/run/<id>/01.md`, OUTSIDE the run tree it names. Under strict enforcement the phase
+  // guard denies writes outside the run tree, and a live verification pass recorded five denials out of five while
+  // trying to author phase artifacts — the model could not write the very files the workflow is about.
+  //
+  // Only `./` is a relative-path prefix. A bare leading dot is part of the name.
+  return resolve(join(worktreeRoot, normalized.replace(/^\.\//, '')))
 }
 
 /** The tool-target path of a call (same key order enforcement.ts uses). */

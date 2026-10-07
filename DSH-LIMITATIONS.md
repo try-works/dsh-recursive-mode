@@ -21,6 +21,8 @@ it, and where the observation was indirect that is stated.
 > - Status: failed
 > ```
 >
+> **⚠ SUPERSEDED - THE OPPOSITE WAS OBSERVED ON THE CURRENT COMPOSITION.** A live verification pass recorded `Execution Mode: native (continuable)`, `tier native, provider spawn`, and a child id plus a brief per round, so a child WAS started. The retraction below was true of an older state, not of this one.
+>
 > **The delegation never happened.** The plugin fell back to self-audit because it could not resolve the
 > subagents service, so no child was ever started — which is why there was no child session, no settlement and
 > no reply. The child directory I kept pointing at is written by the **plugin's own brief writer**, before any
@@ -223,7 +225,7 @@ records the consequence for a **caller**:
 
 - the original error is **replaced inside the host**, before any of it reaches the plugin that called
   `startContinuable`;
-- **nothing is logged.** A full live run leaves `stderr.txt` and `stderr-resume.txt` at **0 KB**, no log
+- **⚠ CORRECTED - THE MASK HIDES THE CAUSE, NOT ITS EXISTENCE.** A live verification pass observed the masked text VERBATIM in the plugin own action record (`Failure: ... Cannot read properties of undefined (reading 'aborted') ...`), so the failure is not invisible to the plugin. What is destroyed is the ORIGINAL error, inside the host. Nothing is logged *by the host*: a full live run leaves `stderr.txt` and `stderr-resume.txt` at **0 KB**, no log
   directory, and a session log whose only mention of the failure is the plugin's own record of the masked
   message;
 - and the plugin **cannot** work around it: the operations that would surface it (re-delivering the prompt,

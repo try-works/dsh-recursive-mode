@@ -7,7 +7,7 @@ plans, plans before code, independent review before a lock, tests before a claim
 that says who locked it and on what evidence. The discipline lives in the harness, not in a prompt, so it cannot
 be skipped by an agent that is in a hurry.
 
-- **12 tools** on the agent surface, one slash command, a workspace control plane, and a memory plane that
+- **13 tools** on the agent surface, one slash command, a workspace control plane, and a memory plane that
   learns from what actually got used.
 - **Zero runtime dependencies** beyond the harness itself — everything is a structural seam.
 - **862 tests across 91 files**, three parity specs against the reference implementation, a live-session
@@ -117,7 +117,7 @@ flowchart TB
         LOCK["lock.ts<br/>monotonic locks + receipts"]
         DELEG["delegation.ts + router.ts<br/>who reviews"]
         MEM["memory*.ts<br/>what gets injected"]
-        TOOLSET["12 recursive_* tools"]
+        TOOLSET["13 recursive_* tools"]
     end
 
     subgraph disk["Workspace control plane (.recursive/)"]
@@ -739,7 +739,7 @@ flowchart TB
         SEL["session selects the recursive preset<br/>registered by the bundle row"]
         STD["the standard coding agent surface<br/>+ tool-presentation mode: both"]
         REALM["group recursive-realm<br/>isolate: true"]
-        SURF["RecursiveRuntime + 12 tools<br/>+ /recursive + recursive:policy"]
+        SURF["RecursiveRuntime + 13 tools<br/>+ /recursive + recursive:policy"]
         SEL --> STD
         SEL --> REALM --> SURF
     end

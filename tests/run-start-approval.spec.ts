@@ -539,3 +539,325 @@ describe('PHASE 0 — the gate data is well formed and the workflow gates are un
     expect(() => validateAskAnswerFor('tdd-mode', 'maybe')).toThrow(/strict \| pragmatic/)
   })
 })
+
+/**
+ * PHASE 0 — THE FAILURE PATH, AND THE ROUTE OUT OF IT.
+ *
+ * ⚠ WHAT WENT WRONG, so these tests can fail if it comes back. `askRunStartDirectly` wrapped the blocking
+ * human question in a bare `catch { return null }` AND returned `null` for an answer it did not recognise,
+ * so the caller could not tell "the channel threw NO_PROVIDER" from "the person skipped the question". The
+ * refusal built from that `null` asserted the one cause it could not know — *"so no person was asked"* —
+ * and its `Next:` clause prescribed the very call that had just failed, while the relayed answer was
+ * refused by design. Net effect in a live composition whose channel failed: NO ROUTE TO START A RUN, and
+ * no way to find out why (measured: the call failed 22.9 s in with the cause discarded).
+ *
+ * ⚠ THE TWO PROPERTIES THESE TESTS HOLD APART. (1) A failing channel must produce a DIAGNOSIS: the cause
+ * the channel threw, visible to the model in the refusal and asserted here as data. (2) A failing channel
+ * must leave a ROUTE: `relay=true` with an explicit `answer` starts the run and reports the decision as
+ * relayed. And the line between them and consent is asserted too — a channel that RESOLVED (a person
+ * answered, even badly) is not relayable, and neither is a failure that means the person cancelled.
+ */
+describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the route out', () => {
+  /** A channel error shaped like the harness's own: a `UserQuestionError` carrying a stable code. */
+  function channelError(code: string, message: string): Error {
+    const error = new Error(message) as Error & { code: string }
+    error.name = 'UserQuestionError'
+    error.code = code
+    return error
+  }
+
+  it('a channel that THROWS yields a diagnosable refusal: the cause, the question, and the route', async () => {
+    const root = tempRepo('rm-runstart-')
+    const ctx = new Context()
+    const goals = fakeGoals()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      ctx.recursive.attachGoals(goals.service)
+      await ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('rs-init'),
+        name: 'recursive_init',
+        arguments: { runId: 'r1' },
+        agent: agentFor(root),
+      } as never)
+
+      // The real service's shape for a composition with no answerer: it REJECTS, with a code.
+      ctx.recursive.attachUserQuestions({
+        ask: () => Promise.reject(channelError('NO_PROVIDER', 'no user-questions answerer accepted the request')),
+      })
+      const refused = payload(await ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('rs-diagnosed'),
+        name: 'recursive_ask',
+        arguments: { gate: RUN_START_GATE_ID, runId: 'r1' },
+        agent: agentFor(root),
+      } as never))
+
+      // (1) THE CAUSE SURVIVES, both in the sentence a model reads and as data a consumer can branch on.
+      // This is the assertion the old code could not pass: its refusal named no cause at all.
+      expect(String(refused.error)).toContain('RM5503')
+      expect(String(refused.error)).toContain('NO_PROVIDER')
+      expect(refused.channel).toEqual({ outcome: 'unavailable', cause: 'NO_PROVIDER', relayable: true })
+
+      // (2) AND IT NO LONGER CLAIMS A CAUSE IT DOES NOT KNOW. The old sentence asserted "so no person was
+      // asked" for every failure — including, in the live composition, a request that had been delivered.
+      expect(String(refused.error)).not.toContain('no person was asked')
+
+      // (3) THE ADVICE IS A ROUTE, NOT THE CALL THAT JUST FAILED. The old `Next:` said to re-issue this
+      // exact call "to surface the question"; the new one names the relay and the answer it needs.
+      expect(String(refused.error)).toContain('relay=true')
+      expect(String(refused.error)).toContain(RUN_START_APPROVE)
+
+      // (4) THE QUESTION TRAVELS WITH THE REFUSAL, so a composition whose channel cannot render a card can
+      // still put the exact decision to the person in the transcript.
+      expect((refused.question as { options: Array<{ label: string }> }).options.map((o) => o.label))
+        .toEqual([RUN_START_APPROVE, RUN_START_HOLD])
+
+      // Nothing was recorded and nothing was armed: a diagnosis is not a decision.
+      expect(goals.store.created).toBe(0)
+      expect(readFileSync(join(root, '.recursive', 'run', 'r1', RUN_START_ARTIFACT), 'utf8')).not.toContain(RUN_START_MARKER)
+
+      // An UNCODED throw is diagnosed too — a channel that rejects with a plain Error must not become an
+      // opaque refusal. The channel's own words travel verbatim rather than as this plugin's paraphrase.
+      ctx.recursive.attachUserQuestions({ ask: () => Promise.reject(new Error('the answerer exploded while rendering')) })
+      const plain = payload(await ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('rs-uncoded'),
+        name: 'recursive_ask',
+        arguments: { gate: RUN_START_GATE_ID, runId: 'r1' },
+        agent: agentFor(root),
+      } as never))
+      expect(plain.channel).toEqual({ outcome: 'unavailable', cause: 'Error', relayable: true })
+      expect(String(plain.error)).toContain('the answerer exploded while rendering')
+
+      // ⚠ AND A RELAY WITH NOTHING TO RELAY IS NOT RM5502. The composition DOES mount a channel, so the
+      // "mounts no user-questions channel" sentence would be false; the refusal keeps the channel's cause
+      // and says why there was nothing to record.
+      const emptyRelay = payload(await ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('rs-empty-relay'),
+        name: 'recursive_ask',
+        arguments: { gate: RUN_START_GATE_ID, runId: 'r1', relay: true },
+        agent: agentFor(root),
+      } as never))
+      expect(String(emptyRelay.error)).toContain('RM5503')
+      expect(String(emptyRelay.error)).not.toContain('RM5502')
+      expect(String(emptyRelay.error)).toContain('no answer was supplied')
+      expect(goals.store.created).toBe(0)
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('the relay STARTS THE RUN when the channel cannot deliver the question, and says it was relayed', async () => {
+    const root = tempRepo('rm-runstart-')
+    const ctx = new Context()
+    const goals = fakeGoals()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      ctx.recursive.attachGoals(goals.service)
+      await ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('rs-init'),
+        name: 'recursive_init',
+        arguments: { runId: 'r1' },
+        agent: agentFor(root),
+      } as never)
+
+      let asked = 0
+      ctx.recursive.attachUserQuestions({
+        ask: () => { asked += 1; return Promise.reject(channelError('CALLER_NOT_LIVE', 'human interaction requires the exact live calling agent when an agent is supplied')) },
+      })
+
+      // ⚠ WITHOUT THE RELAY THE SAME CALL REFUSES. Both halves are asserted here because "the relay is the
+      // route" is only a real property if the failure alone does not silently start the run.
+      const refused = payload(await ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('rs-fail-only'),
+        name: 'recursive_ask',
+        arguments: { gate: RUN_START_GATE_ID, runId: 'r1', answer: RUN_START_APPROVE },
+        agent: agentFor(root),
+      } as never))
+      expect(String(refused.error)).toContain('RM5503')
+      expect(goals.store.created).toBe(0)
+
+      const started = payload(await ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('rs-relayed'),
+        name: 'recursive_ask',
+        arguments: { gate: RUN_START_GATE_ID, runId: 'r1', answer: RUN_START_APPROVE, relay: true },
+        agent: agentFor(root),
+      } as never))
+
+      // The person was still asked first, every time — the relay is a fallback, never a bypass.
+      expect(asked, 'the channel was skipped').toBe(2)
+      // The approval is durable, and it is ARMED.
+      expect(readFileSync(join(root, '.recursive', 'run', 'r1', RUN_START_ARTIFACT), 'utf8'))
+        .toContain('- ' + RUN_START_MARKER + ': ' + RUN_START_APPROVE)
+      expect(started.armed).toBe(true)
+      expect(goals.store.created).toBe(1)
+      // ⚠ AND THE RECORD IS HONEST ABOUT ITS SOURCE: a relayed approval is not a person's own selection, and
+      // the failure that forced it travels with the result.
+      expect(started.source).toBe('relayed')
+      expect(started.channel).toMatchObject({ outcome: 'unavailable', cause: 'CALLER_NOT_LIVE', relayed: true })
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('a failure that means the PERSON settled the question is NEVER relayable', async () => {
+    const root = tempRepo('rm-runstart-')
+    const ctx = new Context()
+    const goals = fakeGoals()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      ctx.recursive.attachGoals(goals.service)
+      await ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('rs-init'),
+        name: 'recursive_init',
+        arguments: { runId: 'r1' },
+        agent: agentFor(root),
+      } as never)
+
+      // The person dismissed the card (or the turn was cancelled while the card stood). Asking for the
+      // relay immediately afterwards must NOT convert the person's own cancellation into an approval.
+      ctx.recursive.attachUserQuestions({
+        ask: () => Promise.reject(channelError('ASK_CANCELLED', 'the user cancelled ask_user_question')),
+      })
+      const refused = payload(await ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('rs-cancelled'),
+        name: 'recursive_ask',
+        arguments: { gate: RUN_START_GATE_ID, runId: 'r1', answer: RUN_START_APPROVE, relay: true },
+        agent: agentFor(root),
+      } as never))
+
+      expect(String(refused.error)).toContain('RM5503')
+      expect(String(refused.error)).toContain('ASK_CANCELLED')
+      expect(refused.channel).toEqual({ outcome: 'unavailable', cause: 'ASK_CANCELLED', relayable: false })
+      expect(goals.store.created, 'a person cancelled and a goal was armed anyway').toBe(0)
+      expect(readFileSync(join(root, '.recursive', 'run', 'r1', RUN_START_ARTIFACT), 'utf8')).not.toContain(RUN_START_MARKER)
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('a person who WAS reached and did not approve gets its own accurate refusal (RM5504), relay or not', async () => {
+    const root = tempRepo('rm-runstart-')
+    const ctx = new Context()
+    const goals = fakeGoals()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      ctx.recursive.attachGoals(goals.service)
+      await ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('rs-init'),
+        name: 'recursive_init',
+        arguments: { runId: 'r1' },
+        agent: agentFor(root),
+      } as never)
+
+      const call = (id: string) => ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId(id),
+        name: 'recursive_ask',
+        arguments: { gate: RUN_START_GATE_ID, runId: 'r1', answer: RUN_START_APPROVE, relay: true },
+        agent: agentFor(root),
+      } as never)
+
+      // A skip: the channel RESOLVED, so a person was asked and declined to choose.
+      ctx.recursive.attachUserQuestions({
+        ask: () => Promise.resolve({ answers: [{ id: RUN_START_GATE_ID, selected: [] }] }),
+      })
+      const skipped = payload(await call('rs-skip'))
+      expect(String(skipped.error)).toContain('RM5504')
+      expect(String(skipped.error)).toContain('skip')
+      // The old code called this "no person was asked" and refused to say anything else.
+      expect(String(skipped.error)).not.toContain('no person was asked')
+
+      // A custom value: a person typed an answer the gate never offered. Also not an approval — and the
+      // caller's own `relay` + `answer: Start run` in the same call must not override it.
+      ctx.recursive.attachUserQuestions({
+        ask: () => Promise.resolve({ answers: [{ id: RUN_START_GATE_ID, selected: [], custom: 'maybe later' }] }),
+      })
+      const custom = payload(await call('rs-custom'))
+      expect(String(custom.error)).toContain('RM5504')
+      expect(String(custom.error)).toContain('maybe later')
+
+      // A label this gate never offered, returned as a selection rather than as free text. The refusal says
+      // WHICH labels were unrecognised, so the reader is not left guessing what the UI sent.
+      ctx.recursive.attachUserQuestions({
+        ask: () => Promise.resolve({ answers: [{ id: RUN_START_GATE_ID, selected: ['yes'] }] }),
+      })
+      const unknownLabel = payload(await call('rs-unknown-label'))
+      expect(String(unknownLabel.error)).toContain('RM5504')
+      expect(String(unknownLabel.error)).toContain('yes')
+      expect(String(unknownLabel.error)).toContain('none of those name a label this gate offered')
+
+      expect(goals.store.created, 'a person did not approve and a goal was armed anyway').toBe(0)
+      expect(readFileSync(join(root, '.recursive', 'run', 'r1', RUN_START_ARTIFACT), 'utf8')).not.toContain(RUN_START_MARKER)
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('relay is refused for the three workflow gates, which never ask the channel at all', async () => {
+    const root = tempRepo('rm-runstart-')
+    const ctx = new Context()
+    const goals = fakeGoals()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      ctx.recursive.attachGoals(goals.service)
+      await ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('rs-init'),
+        name: 'recursive_init',
+        arguments: { runId: 'r1' },
+        agent: agentFor(root),
+      } as never)
+
+      // A channel that would be a problem if anyone consulted it: it throws, and it counts.
+      let asked = 0
+      ctx.recursive.attachUserQuestions({
+        ask: () => { asked += 1; return Promise.reject(channelError('NO_PROVIDER', 'no user-questions answerer accepted the request')) },
+      })
+      const call = (args: Record<string, unknown>, id: string) => ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId(id),
+        name: 'recursive_ask',
+        arguments: args,
+        agent: agentFor(root),
+      } as never)
+
+      // `relay` is a run-start concept; claiming it here would report a fallback that never happened.
+      const misused = payload(await call({ gate: 'tdd-mode', runId: 'r1', answer: 'strict', relay: true }, 'rs-relay-misuse'))
+      expect(String(misused.error)).toContain('RM1150')
+
+      // The three gates are RELAY gates: asking surfaces the question, answering records it — and the
+      // channel is never involved, so a broken one cannot affect them.
+      const askedQuestion = payload(await call({ gate: 'tdd-mode', runId: 'r1' }, 'rs-tdd-ask'))
+      expect((askedQuestion.question as { options: Array<{ label: string }> }).options.map((o) => o.label)).toEqual(['strict', 'pragmatic'])
+      const answered = payload(await call({ gate: 'gate-block', runId: 'r1', artifact: '04-test-summary.md', answer: 'fix' }, 'rs-block-answer'))
+      expect(answered.marker).toBe('- Gate Resolution: fix')
+      expect(asked, 'a workflow gate consulted the human-question channel').toBe(0)
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})

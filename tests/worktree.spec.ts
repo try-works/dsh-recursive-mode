@@ -16,9 +16,24 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { RecursiveRuntime } from '../src/runtime.ts'
+import { TOOL_ERRORS } from '../src/errors.ts'
 
 function git(repo: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+}
+
+/**
+ * EVERY ref under `prefix`, as an array, so "no branch was created" can be
+ * asserted EXACTLY rather than by trying to look up one guessed name.
+ *
+ * `git branch --list recursive/..\escaped-run` cannot answer this question: the
+ * id is a malformed ref, so the lookup fails for reasons that have nothing to do
+ * with whether a branch exists, and a glob would be a second thing to get wrong.
+ * `for-each-ref` with a prefix lists what IS in the namespace, which is the
+ * question the test actually has.
+ */
+function refsUnder(repo: string, prefix: string): string[] {
+  return git(repo, 'for-each-ref', '--format=%(refname)', prefix).split(/\r?\n/).filter((line) => line !== '')
 }
 
 function freshGitRepo(tag: string): string {
@@ -166,6 +181,106 @@ describe('recursive_worktree tool', () => {
       disposer()
       await ctx.fiber.dispose()
     } finally { rmSync(repo, { recursive: true, force: true }) }
+  })
+
+  /**
+   * A RUN ID IS A NAME, NOT A PATH — AND HERE A PATH-SHAPED ONE HAS TWO SIDE
+   * EFFECTS, NOT ONE. `createLinkedWorktree` builds the worktree directory
+   * `.worktrees/<runId>` AND cuts the branch `recursive/<runId>`.
+   *
+   * MEASURED pre-fix on this host, per id, by calling `createLinkedWorktree`
+   * directly against a fresh repo: `nested/child-run` returned `ok: true` and
+   * created BOTH `.worktrees/nested/child-run` and the ref
+   * `refs/heads/recursive/nested/child-run` — git accepts '/' inside a ref
+   * component, so this id is a legal ref name even though it is a path. The
+   * other shapes below were refused only by GIT itself, after the worktree add
+   * was already attempted (`recursive//tmp/x`, `recursive/C:…`, `.hidden-run`
+   * and the trailing space all fail as ref syntax), which is why one of them
+   * left `.recursive\run` behind in the original report: the mess comes from the
+   * attempt, not from the decision.
+   *
+   * So BOTH halves are asserted below — the directory and the ref — because a
+   * filesystem-only check would have missed the branch for `nested/child-run`.
+   * The ref half also names why the rule cannot be replaced by "let git decide":
+   * a name like `nested` is a legal run id AND a legal ref, and it cannot be
+   * created once `refs/heads/recursive/nested/child-run` exists (git: "cannot
+   * lock ref … D/F conflict"), so a separator-shaped id takes a whole namespace
+   * away from a run that never broke a rule.
+   */
+  describe('recursive_worktree refuses a run id that is a path, not a name', () => {
+    const PATH_SHAPED: ReadonlyArray<readonly [string, string]> = [
+      ['..\\escaped-run', 'path separator'], // the id measured to escape the run layer for recursive_init
+      ['nested/child-run', 'path separator'], // MEASURED pre-fix: ok:true + dir + ref. The case a dir-only check misses.
+      ['/tmp/x', 'path separator'],
+      ['C:relative-drive-run', 'drive-qualified'],
+      ['.hidden-run', 'hidden name'],
+      ['03 trailing space', 'whitespace'],
+    ]
+    for (const [runId, expected] of PATH_SHAPED) {
+      it('refuses ' + JSON.stringify(runId) + ' and creates neither the worktree nor the branch', async () => {
+        const repo = freshGitRepo('wt-id')
+        try {
+          const ctx = new Context()
+          await ctx.plugin(SystemPrompt)
+          await ctx.plugin(ToolRuntime)
+          await ctx.plugin(RecursiveRuntime, { repoRoot: repo })
+          const disposer = ctx.tools.register(createRecursiveWorktreeTool(ctx.recursive))
+          const signal = new AbortController().signal
+          const out = await ctx.tools.execute({
+            signal, callId: ToolCallId('wt-id'),
+            name: 'recursive_worktree',
+            arguments: { action: 'create', runId, baseBranch: 'main' },
+          })
+          expect(out.isError).toBe(false)
+          const value = out.value as { error?: string; ok?: boolean; worktreeDir?: string; worktreeBranch?: string }
+          expect(value.error, 'a path-shaped runId was not refused').toBeTruthy()
+          expect(value.error!.startsWith(TOOL_ERRORS.BAD_RUN_ID.code + ' ' + TOOL_ERRORS.BAD_RUN_ID.klass + ': ')).toBe(true)
+          expect(value.error).toContain(expected)
+          // Not a refusal-shaped success: no worktree result was returned at all.
+          expect(value.ok).toBeUndefined()
+          // (1) THE REF: nothing entered refs/heads/recursive/ — the half a filesystem check misses.
+          expect(refsUnder(repo, 'refs/heads/recursive'), 'a refused runId still created a branch').toEqual([])
+          // (2) THE DIRECTORY. `.worktrees` itself is the assertion rather than a guessed leaf path: pre-fix
+          //     this ran `git worktree add`, which creates the parent, so a refused id used to leave a
+          //     `.worktrees` tree behind even when git was the thing that said no.
+          expect(existsSync(join(repo, '.worktrees')), '.worktrees was created by a refused runId').toBe(false)
+          // (3) AND git agrees no worktree was added: the repo is still the only one.
+          expect(listWorktrees(repo)).toHaveLength(1)
+          expect(git(repo, 'branch', '--show-current')).toBe('main')
+          disposer()
+          await ctx.fiber.dispose()
+        } finally { rmSync(repo, { recursive: true, force: true }) }
+      })
+    }
+
+    it('still creates the worktree and the branch for every legitimate naming shape', async () => {
+      // The other half of the contract: the rule must not cost a real run its worktree.
+      const repo = freshGitRepo('wt-ok')
+      try {
+        const ctx = new Context()
+        await ctx.plugin(SystemPrompt)
+        await ctx.plugin(ToolRuntime)
+        await ctx.plugin(RecursiveRuntime, { repoRoot: repo })
+        const disposer = ctx.tools.register(createRecursiveWorktreeTool(ctx.recursive))
+        const signal = new AbortController().signal
+        for (const [i, runId] of ['05-feature', 'fixture-run', '01-calculator-lib'].entries()) {
+          const out = await ctx.tools.execute({
+            signal, callId: ToolCallId('wt-ok-' + i),
+            name: 'recursive_worktree',
+            arguments: { action: 'create', runId, baseBranch: 'main' },
+          })
+          expect(out.isError).toBe(false)
+          const value = out.value as { ok?: boolean; worktreeDir?: string; worktreeBranch?: string; error?: string }
+          expect(value.error, runId + ' was refused').toBeUndefined()
+          expect(value.ok).toBe(true)
+          expect(value.worktreeBranch).toBe('recursive/' + runId)
+          expect(existsSync(value.worktreeDir!)).toBe(true)
+          expect(refsUnder(repo, 'refs/heads/recursive')).toContain('refs/heads/recursive/' + runId)
+        }
+        disposer()
+        await ctx.fiber.dispose()
+      } finally { rmSync(repo, { recursive: true, force: true }) }
+    })
   })
 })
 

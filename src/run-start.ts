@@ -20,9 +20,15 @@
  *      and nothing else, so the presence of a `Run Start` line is never on its own consent.
  *   2. IT IS ASKED, NOT ASSUMED. When the composition mounts `ctx.userQuestions` — the harness's own
  *      blocking human channel, the same one plan-mode's exit uses — the question is PUT TO THE PERSON and
- *      only their selection is recorded; a caller-supplied answer cannot stand in for it, and a channel
- *      that cannot reach anyone ends the call without a decision (RM5503). Only a composition with no
- *      channel at all falls back to the relayed answer, which is the contract the other three gates have.
+ *      only their selection is recorded; a caller-supplied answer cannot stand in for it. A channel that
+ *      RESOLVES with an answer the gate does not recognise is a person's decision the gate cannot record
+ *      and it ends the call (RM5504). A channel that FAILS ends the call too (RM5503), naming the cause the
+ *      channel threw — and there the caller may take the relayed route deliberately, with `relay=true`,
+ *      which the result reports as `source: "relayed"` rather than as a person's own selection, so a
+ *      composition whose channel cannot deliver the question can still start a run. A failure that means
+ *      the question was cancelled, aborted, or timed out is never relayable. Only a composition with no
+ *      channel at all falls back to the relayed answer unconditionally, which is the contract the other
+ *      three gates have.
  *   3. THE GOAL CANNOT BE CREATED WITHOUT IT. `syncRunGoal` refuses to create a goal for a run whose
  *      approval record is absent, in EVERY branch that would create one — not only the "no goal yet"
  *      branch. That is the property `tests/run-start-approval.spec.ts` asserts, because a single

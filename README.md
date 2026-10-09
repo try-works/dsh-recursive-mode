@@ -179,7 +179,7 @@ control plane on disk is the only state it trusts across restarts.
 | `recursive_audit_team` | Fan a phase out across roles (audit) |
 | `recursive_review` | **Independent review** of the phase artifact, with a repair path |
 | `recursive_delegate` | **Delegate the work of a phase** to a durable child; it produces, you judge |
-| `recursive_ask` | Ask the workspace a question, with the control plane as context |
+| `recursive_ask` | Ask a **human** gate as a structured decision: `tdd-mode`, `qa-signoff`, `gate-block`, or `run-start` — the phase-0 approval that decides whether the run goal exists |
 | `recursive_preview` | Preview what a tool would do, without doing it |
 
 ### 4.2 The command surface
@@ -405,9 +405,20 @@ prove. Three facts shape the picture:
    the audit contract: `01-as-is`, `01.5-root-cause`, `02-to-be-plan`, `03-implementation-summary`,
    `03.5-code-review`, `04-test-summary`, `06-decisions-update`, `07-state-update`, `08-memory-impact`.
    `00-requirements`, `00-worktree` and `05-manual-qa` are not in it.
-3. **`recursive_ask` is not a subagent tool.** It carries the workflow's three **human** gates —
-   `ASK_GATE_IDS = ['tdd-mode', 'qa-signoff', 'gate-block']` — as structured decisions rather than prose, so the
-   answer is validated and citeable.
+3. **`recursive_ask` is not a subagent tool.** It carries the workflow's **four human gates** —
+   `tdd-mode`, `qa-signoff` and `gate-block` (the list in `ASK_GATE_IDS`), plus **`run-start`**, the
+   phase-0 approval that decides whether a run's goal exists at all — as structured decisions rather
+   than prose, so the answer is validated and citeable.
+
+   `run-start` is unlike the other three: it is the only gate that asks the harness's **blocking
+   human channel**, and the only one that **arms a goal**. Creating a spec therefore creates no goal;
+   nothing runs unattended until a person approves it. When the mounted channel cannot deliver the
+   question, the refusal **names the channel's own cause** (`RM5503`) instead of asserting one — and a
+   composition that cannot render a card at all can still record the decision explicitly by passing
+   `answer` with `relay: true`, which is reported as relayed rather than as a person's selection. A
+   person's own answer always wins, and a question that was cancelled, aborted or timed out is **never**
+   relayable. A channel that *did* reach a person whose answer was not one of the offered labels is
+   `RM5504`, which is a different event from `RM5503`.
 
 ```mermaid
 flowchart TB

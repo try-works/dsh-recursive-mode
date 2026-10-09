@@ -294,23 +294,30 @@ export function pendingGateFor(artifactFile: string, artifactText: string | null
 export function createRecursiveAskTool(recursive: RecursiveRuntime) {
   return defineTool({
     name: 'recursive_ask',
-    description: 'Ask a human gate as a structured decision (tdd-mode, qa-signoff, gate-block), or ASK TO START A RUN (run-start: nothing runs, and no goal exists, until this gate is approved). Call without `answer` to ask; call with it to write the answer into the artifact as a durable marker. One ask per step.',
+    description: 'Ask a human gate as a structured decision (tdd-mode, qa-signoff, gate-block), or ASK TO START A RUN (run-start: nothing runs, and no goal exists, until this gate is approved). Call without `answer` to ask; call with it to write the answer into the artifact as a durable marker. For run-start the mounted human channel is asked first and its own selection wins; when that channel cannot deliver the question, the refusal names the cause and `relay=true` with an explicit `answer` records the person\'s relayed approval. One ask per step.',
     parameters: {
       gate: { type: 'string', description: 'tdd-mode | qa-signoff | gate-block | run-start. Required. `run-start` is phase 0: approving it records the approval and arms the run goal, which is what makes the harness drive rounds.' },
       runId: { type: 'string', description: 'Run id. Required; must resolve inside the current workspace.' },
       artifact: { type: 'string', description: 'Artifact file the answer belongs in. Optional; defaults per gate (gate-block has none, so it is required for that gate; run-start is always recorded in 00-requirements.md).' },
       answer: { type: 'string', description: 'One of the gate\'s option labels. Omit to ASK. For run-start, the labels are: ' + RUN_START_GATE.options.map((option) => option.label).join(' | ') + '.' },
+      relay: { type: 'boolean', description: 'run-start only, and only after the person has approved in this conversation. Set relay=true when the mounted user-questions channel cannot deliver the run-start question: `answer` then stands in for the channel\'s selection and the result reports source: "relayed" instead of a direct selection. It is refused when the channel reports the question was cancelled, aborted, or timed out, and it is not needed when the person answers the card.' },
     },
     output: {
       schema: { type: 'json' },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     },
-    async execute(args: { gate?: string; runId?: string; artifact?: string; answer?: string }, exec) {
+    async execute(args: { gate?: string; runId?: string; artifact?: string; answer?: string; relay?: boolean }, exec) {
       const gateId = (args.gate ?? '').trim() as AskAnyGateId
       const runId = args.runId?.trim() ?? ''
       if (runId === '') return { error: toolError('MISSING_RUN_ID') } as const
       if (!askGateIds().includes(gateId)) {
         return { error: toolError('BAD_ASK_GATE', 'gate must be one of ' + askGateIds().join(' | ')) } as const
+      }
+      // ⚠ `relay` IS RUN-START ONLY, AND SAYING SO IS THE POINT. The other three gates never consult the
+      // channel, so accepting the flag there would report a fallback that did not happen — the same class
+      // of false claim this tool was fixed for.
+      if (args.relay === true && !isRunStartGate(gateId)) {
+        return { error: toolError('RELAY_ONLY_FOR_RUN_START', 'gate is ' + gateId) } as const
       }
       const root = await recursive.resolveWorkspaceRoot(exec.agent)
       if (!root) return { error: toolError('NO_WORKSPACE') } as const
@@ -334,7 +341,9 @@ export function createRecursiveAskTool(recursive: RecursiveRuntime) {
       // question is answered by relaying a label, so "no answer means ask". Starting a run is the decision
       // that creates the armed goal, so when this composition mounts the blocking human channel the
       // question is PUT TO THE PERSON whether or not an answer argument arrived — a caller cannot skip the
-      // person by supplying one. Only a composition with no channel falls back to the relayed answer.
+      // person by supplying one. Only a composition with no channel falls back to the relayed answer, and
+      // a channel that FAILED is a third case: it is reported with its cause, and the relayed answer is
+      // taken only when the caller asks for the relay in so many words (see `recordRunStartAnswer`).
       const channelMounted = recursive.userQuestionsChannel !== null
       if (args.answer === undefined && !(isRunStartGate(gateId) && channelMounted)) {
         return { gate: gateId, marker: isRunStartGate(gateId) ? RUN_START_GATE.marker : ASK_GATES[gateId as AskGateId].marker, artifact, question } as unknown as JsonValue
@@ -355,7 +364,7 @@ export function createRecursiveAskTool(recursive: RecursiveRuntime) {
         return { error: toolError('MISSING_ASK_ARTIFACT', 'this gate needs an explicit artifact to record into') } as const
       }
       if (isRunStartGate(gateId)) {
-        return recordRunStartAnswer(recursive, root, runId, answer, exec) as unknown as JsonValue
+        return recordRunStartAnswer(recursive, root, runId, answer, exec, args.relay === true) as unknown as JsonValue
       }
       const marker = answerMarker(gateId as AskGateId, answer as string)
       const written = recursive.recordAskAnswer(root, runId, artifact, marker)
@@ -367,21 +376,35 @@ export function createRecursiveAskTool(recursive: RecursiveRuntime) {
 /**
  * PHASE 0 — record the answer to the run-start gate, and start the run only if it says so.
  *
- * ⚠ THIS GATE NEVER ACCEPTS A RELAYED ANSWER WHILE A HUMAN CHANNEL IS MOUNTED. That is the rule that makes
- * an approval a human act rather than an inference: when `ctx.userQuestions` is present, the question is
- * PUT TO THE PERSON and nothing else can settle it — not the caller's own `answer` argument, and not a
- * fabrication, because `ask()` resolves only with a real selection. A person's decline is likewise final
- * for that call and cannot be overridden by a model that asked for `Start run` in the same breath.
+ * ⚠ THREE OUTCOMES, AND TELLING THEM APART IS THE FIX. The first version of this function collapsed all of
+ * them into one `null`: "the channel threw", "the channel resolved with something unrecognisable", and
+ * "nobody answered" produced the same refusal, whose text asserted a cause ("so no person was asked") the
+ * plugin had already thrown away. A live session paid for that: the call failed after 22.9 s, the operator
+ * could not be told why, and the refusal's own advice prescribed the call that had just failed. So:
  *
- * ⚠ AND WHEN NO CHANNEL IS MOUNTED, THE RELAYED ANSWER IS THE ONLY POSSIBLE SOURCE, so it is used — that
- * is the same contract the other three gates have always had, and refusing it would leave a composition
- * without the channel unable to start any run at all. The question is surfaced first by the ASK branch
- * (the card data the host renders), and the model's `answer` is that person's selection coming back.
+ *   1. A PERSON WAS REACHED (`unusable`): the channel resolved, so somebody answered, and their answer is
+ *      not a label this gate offered — a skip, a custom value, several labels at once. That is a DECISION
+ *      the gate cannot record, and it is final: neither the caller's `answer` nor `relay=true` may replace
+ *      it. (RM5504)
+ *   2. THE CHANNEL FAILED (`unavailable`): no decision came back at all, and the refusal NAMES THE CAUSE
+ *      from the error the channel threw. Here the run can still be started, because a composition whose
+ *      channel cannot deliver the question would otherwise be unable to start any run — but only by the
+ *      caller asking for the relay in so many words (`relay=true`), which the result reports as
+ *      `source: "relayed"` rather than as a person's own selection. (RM5503)
+ *   3. NO CHANNEL IS MOUNTED: the relayed answer is the only possible source, exactly as before. (RM5502
+ *      when there is no answer either)
  *
- * ⚠ WHAT THE GATE THEREFORE DOES *NOT* CLAIM, stated rather than implied: in a composition with no
- * `userQuestions` channel, a plugin cannot verify that a person was really asked, so a model could in
- * principle relay a label nobody gave. That is a property of the relay, not of this gate — and it is the
- * reason the channel is consulted in preference whenever it exists. See the header of `run-start.ts`.
+ * ⚠ AND A CANCELLED OR CLOSED QUESTION IS NEVER RELAYABLE. `ASK_CANCELLED`, `ASK_ABORTED` and
+ * `ASK_TIMED_OUT` are the codes that mean the question was settled from outside this gate — the card was
+ * dismissed, the turn was cancelled, or a foreground window ended. The relay is refused for those, so a
+ * question the operator stopped cannot be turned into an approval by asking again in the same breath.
+ * Every other failure is a composition or capability failure — the question reached nobody — which is the
+ * class the relay exists for.
+ *
+ * ⚠ WHAT THE GATE STILL DOES *NOT* CLAIM: a relayed approval is a relayed approval. The plugin cannot
+ * verify that a person gave the label, and it does not pretend otherwise — the result's `source` and
+ * `channel` fields say where the decision came from, and a direct selection is preferred whenever the
+ * channel can produce one.
  */
 export async function recordRunStartAnswer(
   recursive: RecursiveRuntime,
@@ -389,22 +412,72 @@ export async function recordRunStartAnswer(
   runId: string,
   answer: string | undefined,
   exec: { agent?: unknown; signal?: unknown; callId?: unknown },
+  relay = false,
 ): Promise<Record<string, unknown>> {
-  // 1. ASK THE PERSON DIRECTLY when this composition mounts the channel. An abort or a dismissal is not
-  //    consent, so it settles nothing — and, because the channel was available, it does not hand the
-  //    decision back to the caller either (that is the refusal below).
+  // The question travels in every refusal: a composition whose channel cannot render a card can still put
+  // the exact decision to the person in the transcript, which is what makes the failure recoverable.
+  const question = buildAskQuestionFor(RUN_START_GATE_ID)
   const channel = recursive.userQuestionsChannel
-  const fromChannel = channel ? await askRunStartDirectly(channel, exec) : null
-  if (channel !== null && fromChannel === null) {
-    // The channel exists, so a person COULD have been asked and was not: no answerer, no live root agent,
-    // a dismissal, an abort, or a selection that is not one of this gate's labels. An approval nobody
-    // gave is not recorded, and neither is the caller's argument.
-    return { error: toolError('RUN_START_UNANSWERED') }
+
+  // 1. ASK THE PERSON DIRECTLY when this composition mounts the channel.
+  const channelOutcome: RunStartChannelOutcome | null = channel ? await askRunStartDirectly(channel, exec) : null
+
+  if (channelOutcome !== null && channelOutcome.kind === 'unusable') {
+    // A person WAS asked. Their answer is not an approval this gate can record, and nothing the caller
+    // supplies can stand in for it.
+    return {
+      error: toolError('RUN_START_ANSWER_UNUSABLE', channelOutcome.detail),
+      gate: RUN_START_GATE_ID,
+      runId,
+      artifact: RUN_START_ARTIFACT,
+      question,
+    }
   }
+
+  if (channelOutcome !== null && channelOutcome.kind === 'unavailable') {
+    const blocked = !relay
+      ? 'the caller did not ask for the relay'
+      : 'the channel reports the question was cancelled, aborted, or timed out, so it is not relayable'
+    if (!relay || !channelOutcome.relayable) {
+      return {
+        error: toolError('RUN_START_UNANSWERED', channelOutcome.detail + ' (' + blocked + ')'),
+        gate: RUN_START_GATE_ID,
+        runId,
+        artifact: RUN_START_ARTIFACT,
+        question,
+        // The diagnosis, as data: a model can quote the cause, and a test can assert on it rather than on
+        // the prose of the sentence above.
+        channel: { outcome: 'unavailable', cause: channelOutcome.cause, relayable: channelOutcome.relayable },
+      }
+    }
+    if (answer === undefined) {
+      // ⚠ THE RELAY NEEDS SOMETHING TO RELAY, AND THIS IS NOT RM5502. A channel IS mounted here, so the
+      // "this composition mounts no user-questions channel" sentence would be false — reachable by asking
+      // for the relay without supplying the answer it relays.
+      return {
+        error: toolError('RUN_START_UNANSWERED', channelOutcome.detail + ' (the relay was authorised but no answer was supplied, so there is no decision to record)'),
+        gate: RUN_START_GATE_ID,
+        runId,
+        artifact: RUN_START_ARTIFACT,
+        question,
+        channel: { outcome: 'unavailable', cause: channelOutcome.cause, relayable: channelOutcome.relayable },
+      }
+    }
+  }
+
+  const fromChannel = channelOutcome !== null && channelOutcome.kind === 'answered' ? channelOutcome.answer : null
   const final = fromChannel ?? answer
   if (final === undefined) {
-    // No channel and no answer: there is nothing a person said, so nothing is recorded.
-    return { error: toolError('RUN_START_NO_CHANNEL') }
+    // No channel is mounted and no answer was supplied — the only state left here, because an `answered`
+    // outcome sets `final`, an `unusable` one returned above, and an `unavailable` one either returned
+    // above or carried an answer through the relay. RM5502 says exactly this, and nothing is recorded.
+    return {
+      error: toolError('RUN_START_NO_CHANNEL'),
+      gate: RUN_START_GATE_ID,
+      runId,
+      artifact: RUN_START_ARTIFACT,
+      question,
+    }
   }
 
   // 2. Validate the decision that is about to become durable. A channel selection has already been
@@ -425,8 +498,12 @@ export async function recordRunStartAnswer(
     answer: decided,
     artifact: RUN_START_ARTIFACT,
     // Where the decision came from matters to a reader of the transcript: a direct answer is the person's
-    // own selection; a relayed one came back through the model.
+    // own selection; a relayed one came back through the model. When the relay answered a FAILED channel,
+    // the failure travels with the result, so a relayed approval never reads as a direct selection.
     source: fromChannel === null ? 'relayed' : 'user-questions',
+    ...channelOutcome !== null && channelOutcome.kind === 'unavailable'
+      ? { channel: { outcome: 'unavailable', cause: channelOutcome.cause, relayable: channelOutcome.relayable, relayed: true } }
+      : {},
     path: outcome.path,
     replaced: outcome.replaced,
     // `armed` is the answer to "did the harness get a goal to drive?": the run is started only when the
@@ -438,16 +515,90 @@ export async function recordRunStartAnswer(
 }
 
 /**
- * Ask the run-start question through the blocking channel and return the selection, or null when the
- * person was not reachable (no answerer, no live root agent, a dismissal, an abort).
+ * PHASE 0 — WHAT THE BLOCKING CHANNEL ACTUALLY DID.
  *
- * The selection is filtered to the gate's OWN labels before it is returned: a question a UI answered with
- * a free-text custom value must not become an approval just because it arrived on the right channel.
+ * ⚠ THIS TYPE EXISTS BECAUSE ITS ABSENCE WAS THE DEFECT. The first version returned a bare `null` from a
+ * `catch {}` for every failure and for every unrecognisable selection, so "the channel threw NO_PROVIDER",
+ * "the caller is not the live root agent", "the person skipped the question" and "the person typed a
+ * custom value" were ONE value. The refusal built from it then asserted the one cause it could not know.
+ * An outcome carries the cause, the raw message, and whether the failure is the class a relay may answer.
  */
-async function askRunStartDirectly(
+export type RunStartChannelOutcome =
+  /** The person answered, and their selection is exactly one of the gate's own labels. */
+  | { kind: 'answered'; answer: string }
+  /** The channel RESOLVED, so a person was reached — but the answer is not a label this gate offered. */
+  | { kind: 'unusable'; detail: string }
+  /** The channel THREW: no decision came back, and the cause is named rather than discarded. */
+  | { kind: 'unavailable'; cause: string; detail: string; relayable: boolean }
+
+/**
+ * ⚠ THE CODES THAT MEAN THE QUESTION WAS CANCELLED OR CLOSED rather than never delivered: the person
+ * dismissed the card, their turn was cancelled, or a foreground window ended. A caller may not convert any
+ * of those into an approval by asking for the relay in the same breath. Every other failure means the
+ * question reached nobody — a composition or capability failure, which is the class the relay exists for.
+ */
+export const NON_RELAYABLE_CHANNEL_CODES = ['ASK_CANCELLED', 'ASK_ABORTED', 'ASK_TIMED_OUT'] as const
+
+/**
+ * Name the failure of one `ask()` call, without inventing anything about it.
+ *
+ * The cause is the error's own `code` when it has one (the harness's `UserQuestionError` carries
+ * `NO_PROVIDER`, `CALLER_NOT_LIVE`, `DELEGATED_CALLER`, `ASK_ABORTED`, …), else its `name`, else its
+ * JavaScript type. `detail` keeps the message verbatim so a reader sees the channel's own words rather
+ * than this plugin's paraphrase — the paraphrase is exactly how the previous version came to assert a
+ * cause nobody had.
+ */
+export function classifyChannelFailure(err: unknown): { cause: string; detail: string; relayable: boolean } {
+  const code = (err as { code?: unknown } | null | undefined)?.code
+  const name = err instanceof Error ? err.name : typeof err
+  const message = err instanceof Error ? err.message : String(err)
+  const hasCode = typeof code === 'string' && code.trim() !== ''
+  const cause = hasCode ? (code as string) : name
+  const relayable = !(hasCode && (NON_RELAYABLE_CHANNEL_CODES as readonly string[]).includes(code as string))
+  return { cause, detail: 'channel threw ' + name + '[' + cause + ']: ' + message, relayable }
+}
+
+/** Describe an answer that arrived but is not a decision this gate can record. */
+function describeUnusableAnswer(item: { selected: string[]; custom?: string } | undefined): string {
+  const offered: readonly string[] = RUN_START_GATE.options.map((option) => option.label)
+  const list = (values: readonly string[]): string => JSON.stringify(values.join(' | '))
+  if (item === undefined) {
+    return 'the channel resolved with no answer for question ' + JSON.stringify(RUN_START_GATE.id) + ' at all'
+  }
+  const raw = item.selected ?? []
+  const custom = item.custom?.trim() ?? ''
+  if (raw.length === 0 && custom === '') {
+    return 'the person skipped the question, and a skip is not an approval'
+  }
+  if (raw.length === 0) {
+    return 'the person answered ' + JSON.stringify(custom) + ' as free text rather than one of ' + list(offered)
+  }
+  // ⚠ THE SUBSET MATTERS. A UI can return a label the gate never offered, so "not exactly one of mine" is
+  // not the same statement as "the person chose something I do not know" — and the refusal says which.
+  const recognised = raw.filter((label) => offered.includes(label))
+  if (recognised.length === 0) {
+    return 'the person selected ' + list(raw) + ', and none of those name a label this gate offered (' + offered.join(' | ') + ')'
+  }
+  if (recognised.length === raw.length) {
+    return 'the person selected ' + list(raw) + ', and an approval is exactly one of ' + list(offered)
+  }
+  return 'the person selected ' + list(raw) + ', of which only ' + list(recognised) + ' name this gate\'s labels ' + list(offered)
+}
+
+/**
+ * Ask the run-start question through the blocking channel and report WHAT HAPPENED.
+ *
+ * ⚠ THE CATCH IS THE POINT. It used to be `catch { return null }` — a blocking human question whose
+ * failure cause was erased at the exact moment the cause was the only thing worth knowing. Every path out
+ * of this function now says which path it was.
+ *
+ * The selection is filtered to the gate's OWN labels: a question a UI answered with a free-text custom
+ * value must not become an approval just because it arrived on the right channel.
+ */
+export async function askRunStartDirectly(
   channel: NonNullable<RecursiveRuntime['userQuestionsChannel']>,
   exec: { agent?: unknown; signal?: unknown; callId?: unknown },
-): Promise<string | null> {
+): Promise<RunStartChannelOutcome> {
   const known = RUN_START_GATE.options.map((option) => option.label) as readonly string[]
   try {
     // The agent is passed as the LIVE handle the host gave this tool call. The real service validates it
@@ -467,11 +618,9 @@ async function askRunStartDirectly(
     } as never)
     const item = settled.answers.find((entry) => entry.id === RUN_START_GATE.id)
     const selected = item?.selected?.filter((label) => known.includes(label)) ?? []
-    if (selected.length !== 1) return null
-    return selected[0]
-  } catch {
-    // Quiet by design: the caller reports the situation, and this function's job is only to say whether a
-    // person answered.
-    return null
+    if (selected.length !== 1) return { kind: 'unusable', detail: describeUnusableAnswer(item) }
+    return { kind: 'answered', answer: selected[0] as string }
+  } catch (err) {
+    return { kind: 'unavailable', ...classifyChannelFailure(err) }
   }
 }

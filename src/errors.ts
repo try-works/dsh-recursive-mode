@@ -65,11 +65,29 @@ export const TOOL_ERRORS = {
     problem: 'this gate has no default artifact, so one must be named',
     next: 'pass artifact: <file> so the answer has somewhere durable to land',
   },
+  RELAY_ONLY_FOR_RUN_START: {
+    code: 'RM1150',
+    klass: 'input',
+    problem: 'relay applies only to the run-start gate, which is the only gate that asks the user-questions channel',
+    next: 'drop relay for this gate and answer it with one of its own labels, or call recursive_ask with gate: run-start when the decision is whether to start the run',
+  },
   MISSING_RUN_ID: {
     code: 'RM1101',
     klass: 'input',
     problem: 'runId is required',
     next: 'call recursive_status with no runId to see the latest run id in this workspace',
+  },
+  /**
+   * A run id is the NAME of the run directory and is joined onto the run layer
+   * as one path segment, so a path-shaped id is refused before any directory is
+   * created. See `run-id.ts` for the rule and for why it is not the runtime that
+   * learns to accept a path.
+   */
+  BAD_RUN_ID: {
+    code: 'RM1107',
+    klass: 'input',
+    problem: 'runId is not a single directory name',
+    next: 'pass the run directory name such as 03-something, then call recursive_init again',
   },
   MISSING_ARTIFACT: {
     code: 'RM1102',
@@ -153,11 +171,26 @@ export const TOOL_ERRORS = {
     problem: 'the run-start gate needs an answer, and this composition mounts no user-questions channel to ask one directly',
     next: 'call recursive_ask with gate: run-start and no answer to surface the question, then retry with answer: ' + '"Start run"',
   },
+  /**
+   * ⚠ RM5503 USED TO LIE. Its text asserted "so no person was asked" for EVERY cause, because the caller
+   * that produced it had already thrown the cause away — and a live session showed the cost: the gate
+   * failed 22.9 s into the call with a reason nobody could see, and its `Next:` clause prescribed the very
+   * call that had just failed, so no route to start a run remained. The problem statement now claims only
+   * what the gate knows (no decision came back), and the cause travels in the `detail` the caller
+   * supplies. `RUN_START_ANSWER_UNUSABLE` carries the one case this entry must NOT cover: a person was
+   * reached and their answer was not an approval.
+   */
   RUN_START_UNANSWERED: {
     code: 'RM5503',
     klass: 'runtime',
-    problem: 'the user-questions channel mounted in this composition refused the run-start question, so no person was asked',
-    next: 'use recursive_ask without an answer to surface the question, and retry it with answer: ' + '"Start run" once the user has approved the run start',
+    problem: 'the run-start question reached no decision: the mounted user-questions channel failed before a person answered it',
+    next: 'read the cause named in the detail, fix it and call recursive_ask again, or - when this composition cannot deliver the question at all - call recursive_ask with answer: ' + '"Start run"' + ' and relay=true to record the person\'s explicit approval as a relayed one',
+  },
+  RUN_START_ANSWER_UNUSABLE: {
+    code: 'RM5504',
+    klass: 'runtime',
+    problem: 'a person was asked to start this run and their answer was not one of the labels the run-start gate offered',
+    next: 'call recursive_ask again and have the person choose exactly "Start run" or "Hold"; a skipped or custom answer is not an approval, and no relayed answer can replace a decision the person made',
   },
   RUNTIME_REFUSED: {
     code: 'RM5501',

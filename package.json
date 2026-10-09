@@ -1,7 +1,7 @@
 {
   "name": "@try-works/dsh-recursive-mode",
   "description": "recursive-mode workflow as a DeepSeek Harness bundle: RecursiveRuntime service + 13 recursive_* tools (recursive_status, recursive_init, recursive_lock, recursive_lint, recursive_closeout, recursive_scratch, recursive_worktree, recursive_phase, recursive_audit_team, recursive_review, recursive_delegate, recursive_ask, recursive_preview)",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

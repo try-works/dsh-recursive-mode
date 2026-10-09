@@ -40,10 +40,10 @@
  * just wrote and believes is in force.
  */
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { getLockStatus, getPrerequisiteBlockers } from './lock.ts'
 import { getMdFieldValue } from './status.ts'
-import { policyTargetPath, resolveFrom } from './phase-rules.ts'
+import { phaseNumberForArtifact, policyTargetPath, resolveFrom } from './phase-rules.ts'
 
 /** The three verdicts a rule may carry. */
 export type Verdict = 'allow' | 'deny' | 'ask'
@@ -70,6 +70,18 @@ export interface ToolPolicyContext {
   runDir?: string
   runId?: string
   worktreeRoot?: string
+  /**
+   * The ACTIVE phase artifact of the run — the LOWEST-numbered phase artifact that is not
+   * LOCKED, falling back to the highest when every one of them is locked.
+   *
+   * ⚠ THIS IS NOT A SECOND SELECTOR. It is the answer `currentPhaseArtifact` in
+   * `enforcement.ts` produced for this call, carried here so a rule in THIS module can
+   * compare against it. `policy-globs.ts` cannot import that function (enforcement.ts
+   * imports this module, and the repo has already paid once for a value-level import
+   * cycle), so the value is passed in rather than recomputed. A caller that omits it
+   * gets NO phase-order verdict — the rule abstains rather than guessing a phase.
+   */
+  activePhaseArtifact?: string
 }
 
 /**
@@ -453,11 +465,94 @@ function lockedWriteRule(target: string | null, worktreeRoot: string | undefined
 }
 
 /**
+ * The file name when `abs` is a DIRECT CHILD of `runDir`, and `null` otherwise.
+ *
+ * ⚠ THE DIRECT-CHILD TEST IS NOT TIDINESS — IT IS WHAT KEEPS THE RULE OFF THE SUPPORT
+ * FILES. `phaseNumberForArtifact` reads the leading digits of a NAME, so
+ * `<run>/evidence/01-as-is.md` or `<run>/subagents/child/03-brief.md` would look like
+ * phase 1 and phase 3 artifacts if the name were all that was examined. A phase artifact
+ * is a file the run tree holds DIRECTLY beside the others (`recursive_init` writes all
+ * twelve into `<run>/` itself), so the parent directory is part of the definition.
+ *
+ * The comparison normalizes separators and case: the same run directory reached through
+ * a Windows spelling that differs in case is the same directory, and the rule must not
+ * abstain on one spelling and fire on the other.
+ */
+function directChildName(abs: string, runDir: string): string | null {
+  const normalize = (path: string) => resolve(path).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  if (normalize(dirname(abs)) !== normalize(runDir)) return null
+  return basename(abs)
+}
+
+/**
+ * PHASE-ORDER rule: a denial when the target is a LATER phase's artifact than the phase
+ * currently active, `null` when it is not.
+ *
+ * ⚠ THE HOLE THIS CLOSES. The monotonic rule was enforced on `recursive_lock` ONLY. An
+ * agent could therefore write `08-memory-impact.md` while the run sat at phase 0 — and a
+ * live run did exactly that: twelve artifacts, not one of them locked, written out of
+ * order, with a single line in `operations/operations.jsonl`. Ordering that only binds
+ * the lock tool is not ordering; the model's ordinary `write` is the path that mattered.
+ *
+ * The owner's rule, verbatim: *only one phase may be active at a time, and the phases
+ * should be sequential and the active phase must be locked before proceeding to next
+ * phase*. The ACTIVE phase is the one the selector names (`ctx.activePhaseArtifact`), so:
+ *
+ *   - the target is the ACTIVE artifact, or shares its phase number (`00-requirements.md`
+ *     and `00-worktree.md` are both phase 0; `01-as-is.md` and `01.5-root-cause.md` are
+ *     both phase 1) -> ABSTAIN, the write is allowed;
+ *   - the target is an EARLIER phase -> ABSTAIN. Such an artifact is LOCKED by
+ *     construction (the active phase is the lowest UNLOCKED one), so the locked-artifact
+ *     rule above decides it, and its rule label is preserved;
+ *   - the target is a LATER phase -> DENY: working ahead.
+ *
+ * ⚠ THE ALLOW HALF IS LOAD-BEARING. An enforcement rule in this exact area was once the
+ * bug: strict enforcement denied the run's OWN artifacts in every phase and made the
+ * workflow unusable (see `resolveFrom` and `currentPhaseArtifact`). "The active artifact
+ * stays writable at every phase" is therefore asserted by walking every phase, not by
+ * one case — `tests/strict-run-tree.spec.ts` (d).
+ *
+ * WHAT IT ABSTAINS ON, deliberately:
+ *   - no `activePhaseArtifact` (a caller with no run context, or a run with no phase
+ *     artifacts yet) -> abstain, never guess a phase;
+ *   - a target outside the active run's own directory -> abstain. The rule is about THIS
+ *     run's sequence; another run's tree is a different question and denying it here
+ *     would be a false positive;
+ *   - a support file (anything not a direct child) -> abstain: `evidence/`, `scratch/`,
+ *     `addenda/`, `subagents/`, `operations/` and a plain `<run>/notes.md` are not phases.
+ *
+ * The predicate adds only the per-call particular — which artifact, which phase, which is
+ * active; the rule keeps the static, auditable sentence.
+ */
+function phaseOrderRule(target: string | null, ctx: ToolPolicyContext): ToolPolicyPredicateMatch | null {
+  const active = ctx.activePhaseArtifact
+  if (!target || !ctx.runDir || !ctx.worktreeRoot) return null
+  if (typeof active !== 'string' || active === '') return null
+  const activePhaseText = phaseNumberForArtifact(active)
+  if (!activePhaseText) return null
+  const normalized = target.replace(/\\/g, '/')
+  if (!normalized.endsWith('.md')) return null
+  const abs = resolveFrom(ctx.worktreeRoot, normalized)
+  if (!abs) return null
+  const name = directChildName(abs, ctx.runDir)
+  if (name === null) return null
+  const phaseText = phaseNumberForArtifact(name)
+  if (!phaseText) return null
+  if (Number(phaseText) <= Number(activePhaseText)) return null
+  return {
+    verdict: 'deny',
+    detail: name + ' is phase ' + phaseText + ' but the ACTIVE phase is ' + active
+      + ' (phase ' + activePhaseText + ') - the active phase must be locked before writing a later phase',
+  }
+}
+
+/**
  * The BUILT-IN default rule list — the pre-T16 guard behaviour expressed as
  * data:
  *
  *   `recursive_lock*`  -> the monotonic lock-order denial;
  *   the write-tool ids -> the locked-artifact write denial;
+ *   the write-tool ids -> the phase-order (write-ahead) denial;
  *   `*`                -> allow, so an ordinary tool is not turned into an `ask`.
  *
  * Every `deny` precedes the `allow`, which is what makes "deny wins over allow" a
@@ -486,6 +581,20 @@ export function builtInToolPolicyRules(): ToolPolicyRule[] {
       reason: 'locked-artifact write denial: the target carries Status: LOCKED',
       label: 'locked-write',
       predicate: (id, args, ctx) => (WRITE_TOOL_NAMES.has(id) ? lockedWriteRule(policyTargetPath(args), ctx.worktreeRoot) : null),
+    })
+  }
+  // The SAME write-tool ids get a SECOND conditional deny, the phase-order rule. Two rules
+  // share one pattern on purpose: the engine's predicates ABSTAIN (`null`) when their
+  // condition does not apply, so a clean write falls through both to the catch-all allow,
+  // and a target that is BOTH locked and a later phase is reported by the locked rule
+  // first (file order within a specificity tier), which is the pre-existing wording.
+  for (const name of WRITE_TOOL_NAMES) {
+    rules.push({
+      pattern: name,
+      verdict: 'deny',
+      reason: 'phase order: only one phase may be active at a time - the active phase must be locked before a later phase artifact is written',
+      label: 'phase-order',
+      predicate: (id, args, ctx) => (WRITE_TOOL_NAMES.has(id) ? phaseOrderRule(policyTargetPath(args), ctx) : null),
     })
   }
   rules.push({
@@ -522,6 +631,18 @@ export function attachPolicyPredicate(rule: ToolPolicyRule): ToolPolicyRule {
   if (rule.predicate) return rule
   if (rule.pattern === 'recursive_lock*') {
     return { ...rule, predicate: (id, args, ctx) => (LOCK_TOOL_NAMES.has(id) ? lockOrderRule(args.artifact, ctx.runDir) : null) }
+  }
+  // ⚠ THE LABEL IS CONSULTED BEFORE THE PATTERN, because the phase-order rule and the
+  // locked-artifact rule share EVERY write-tool pattern (see `builtInToolPolicyRules`).
+  // Selecting by pattern alone would give BOTH rules the locked-artifact condition — the
+  // second would then deny a locked target with the wrong reason and the phase-order
+  // condition would never be attached at all, so the hole would stay open in every repo
+  // that ships a policy file. The `label` is already the rule's machine-readable identity
+  // (`firstPolicyDefect` admits it, `decide` surfaces it as the decision's `rule`), so the
+  // label is what names the condition. A rule with NO label keeps the pattern's condition,
+  // exactly as before.
+  if (rule.label === 'phase-order') {
+    return { ...rule, predicate: (id, args, ctx) => (WRITE_TOOL_NAMES.has(id) ? phaseOrderRule(policyTargetPath(args), ctx) : null) }
   }
   if (WRITE_TOOL_NAMES.has(rule.pattern)) {
     return { ...rule, predicate: (id, args, ctx) => (WRITE_TOOL_NAMES.has(id) ? lockedWriteRule(policyTargetPath(args), ctx.worktreeRoot) : null) }

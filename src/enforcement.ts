@@ -129,8 +129,14 @@ export const DEFAULT_ENFORCEMENT: EnforcementConfig = {
  * every allow/deny/ask the guard hands back). `'none'` means no guard predicate
  * fired; `'transition'` marks a decision whose only dissenting gate was the
  * advisory transition gate (see consultTransitionGate).
+ *
+ * `'phase-order'` is the WRITE half of the ordering rule the owner states as *only
+ * one phase may be active at a time, and the phases should be sequential and the
+ * active phase must be locked before proceeding to next phase*: `'lock-order'` refuses
+ * locking ahead, `'phase-order'` refuses WRITING ahead. Two labels rather than one,
+ * because the guard log has to tell the owner which of the two the agent attempted.
  */
-export type GuardRule = 'lock-order' | 'tdd-evidence' | 'locked-write' | 'transition' | 'none'
+export type GuardRule = 'lock-order' | 'phase-order' | 'tdd-evidence' | 'locked-write' | 'transition' | 'none'
 
 /** T15: the transition gate's verdict as attached to a decision (advisory only). */
 export interface GuardTransition {
@@ -179,9 +185,12 @@ export interface ToolExecLike {
  * `recursive:policy` later — can read the effective rules instead of inferring
  * them from a code path.
  */
-export function resolveToolPolicyForGuard(worktreeRoot: string, runId: string): ToolPolicy {
+export function resolveToolPolicyForGuard(worktreeRoot: string, runId: string, activePhaseArtifact?: string): ToolPolicy {
   const loaded = loadToolPolicyFile(worktreeRoot)
-  return withPhaseBaseline(loaded.policy, currentPhaseArtifact(worktreeRoot, runId))
+  // A caller that already asked `currentPhaseArtifact` for this call passes the answer in,
+  // so one guard call reads the run tree's lock statuses ONCE rather than twice. The
+  // no-cache discipline is unchanged: an omitted argument still reads the filesystem here.
+  return withPhaseBaseline(loaded.policy, activePhaseArtifact ?? currentPhaseArtifact(worktreeRoot, runId))
 }
 
 /**
@@ -258,8 +267,14 @@ export function evaluateToolGuard(
   // T16: the verdict comes from the ordered policy, not from branches here. The
   // policy file is re-read per call on purpose: a policy a human just edited
   // must take effect on the next tool call, not after a restart.
-  const policy = resolveToolPolicyForGuard(worktreeRoot, runId)
-  const context: ToolPolicyContext = { args, runDir, runId, worktreeRoot }
+  //
+  // The ACTIVE phase is resolved ONCE, by the ONE selector, and is used twice: it
+  // selects the phase baseline (narrowing rules) and it is carried into the context so
+  // the phase-order rule can refuse a WRITE that is ahead of the active phase. Both
+  // halves of the ordering rule therefore read the same answer for the same call.
+  const activePhaseArtifact = currentPhaseArtifact(worktreeRoot, runId)
+  const policy = resolveToolPolicyForGuard(worktreeRoot, runId, activePhaseArtifact)
+  const context: ToolPolicyContext = { args, runDir, runId, worktreeRoot, activePhaseArtifact }
   const decision = evaluateToolPolicy(policy, name, args, context)
   return advisory(verdictFor(mode, decision), transition)
 }

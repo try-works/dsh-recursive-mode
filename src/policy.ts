@@ -111,6 +111,7 @@ export function renderStableContract(config: EnforcementConfig = DEFAULT_ENFORCE
       + ', tamper detection ' + config.tamper + '.',
     '- A transition that fails its gates is BLOCKED (strict) or warns (advisory); no rejected transition proceeds silently.',
     '- Writes to a Status: LOCKED phase doc are denied/asked; reopen explicitly to edit.',
+    '- Phase order binds WRITES as well as locks: only the ACTIVE phase (the lowest-numbered artifact not yet LOCKED) may be written; a write to a LATER phase artifact is denied/asked. Run support files (evidence/, scratch/, addenda/, subagents/, operations/) are not phases.',
     '- Phase 3 lock requires TDD evidence (strict) or rationale (pragmatic); Phase 5 requires QA evidence.',
     '- The control-plane root is resolved STRICTLY from this session workspace (never scanned from another).',
   ].join('\n')

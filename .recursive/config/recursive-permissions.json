@@ -6,7 +6,7 @@
     "HOW A CALL IS DECIDED",
     "  1. PRECEDENCE IS SPECIFICITY FIRST, THEN FILE ORDER. Among the rules whose pattern matches the tool id, the MOST SPECIFIC pattern decides; among equally specific rules the EARLIER one in this file decides. `*` is least specific, so a catch-all `allow` can never shield an id from a more specific `deny` even when the allow is written above it.",
     "     Specificity tiers, most to least specific: an EXACT id (`write`); a PREFIX glob (`worker::*`, `recursive_*`, `write*`); a glob with a wildcard in the middle (`*_write`); the bare catch-all (`*`). Tiers are coarse on purpose - rules inside a tier are 'equally specific' and are settled by file order.",
-    "  2. A rule may carry a condition the code attaches to it (a locked artifact, an unmet prerequisite). When that condition does not apply, the rule ABSTAINS and does not participate at all, so the next rule in precedence order decides instead of a pattern match alone denying the call. JSON cannot carry a function, so the CONDITION IS SELECTED BY PATTERN: `recursive_lock*` gets the monotonic lock-order condition, and each write-tool id gets the locked-artifact condition. A pattern the code knows nothing about keeps NO condition, so its verdict is ABSOLUTE - which is the honest reading of a rule you write with no condition behind it.",
+    "  2. A rule may carry a condition the code attaches to it (a locked artifact, an unmet prerequisite, a later phase than the one active). When that condition does not apply, the rule ABSTAINS and does not participate at all, so the next rule in precedence order decides instead of a pattern match alone denying the call. JSON cannot carry a function, so the CONDITION IS SELECTED BY LABEL, or by PATTERN when the rule has no label: `recursive_lock*` gets the monotonic lock-order condition; a rule labelled `locked-write`, and any unlabelled write-tool id, gets the locked-artifact condition; a rule labelled `phase-order` gets the write-ahead condition. Two rules therefore share each write-tool pattern - the locked-artifact rule first, then the phase-order rule - and the first one whose condition HOLDS decides. A pattern the code knows nothing about keeps NO condition, so its verdict is ABSOLUTE - which is the honest reading of a rule you write with no condition behind it.",
     "  3. DENY WINS OVER ALLOW because of rule 1, not because of where the rules sit. This file still lists every `deny` above every `allow` - that is a READABILITY convention (a reader sees the refusals first), not the mechanism. Moving the catch-all to the top would change nothing.",
     "  4. NO MATCH YIELDS `ask` - never `deny`, never `allow`. `ask` is coerced by the enforcement mode: `strict` denies it, `advisory` allows it and logs a warning. An unlisted tool is therefore never silently permitted and never bricked.",
     "  5. AN INVALID PATTERN FAILS THE WHOLE POLICY CLOSED: every tool call is denied and the reason names the offending pattern. One typo must not leave a silent hole.",
@@ -24,6 +24,7 @@
     "  `recursive_lock*` -> lock-order: phases lock monotonically. Locking 02 before 01 is locked silently skips the work 01 certifies, so the guard refuses before dispatch and names the blocking artifact and its status.",
     "  `write` / `edit` / `fs_write` / `fs-write` -> locked-write: a LOCKED artifact is the run's evidence. Editing one - even by a character - invalidates every later phase that cited it, and the fold can no longer tell an approved document from a rewritten one. Reopen the artifact explicitly first.",
     "  `pwsh` / `shell` / `bash` / `run_code` -> locked-write: a shell or code runner can redirect into a locked artifact. The guard inspects the call's first path-like argument, so a command that names a locked run artifact is refused.",
+    "  each write id, again -> phase-order: only ONE phase may be active at a time, and the active phase must be locked before the next phase is written. The lock-order rule above binds `recursive_lock` only, so before this rule an agent could write 08-memory-impact.md while the run sat at phase 0 - and a live run did exactly that (twelve artifacts, none locked, written out of order). The ACTIVE phase is the LOWEST-numbered phase artifact that is not LOCKED (the selector is `currentPhaseArtifact` in src/enforcement.ts, and the act of writing is judged against the same answer every other guard call uses). A write to the ACTIVE artifact, or to another artifact sharing its phase number (00-requirements.md and 00-worktree.md are both phase 0; 01-as-is.md and 01.5-root-cause.md are both phase 1), is ALLOWED - the run must always be able to author the phase it is in. A write to a LATER phase is refused as working ahead. A write to an EARLIER phase is decided by the locked-artifact rule above, because an earlier phase is locked by construction. Run support files - evidence/, scratch/, addenda/, subagents/, operations/ and any other file that is not a phase artifact directly in the run directory - are NOT phases and are unaffected.",
     "  each write id is listed SEPARATELY because the guard matches tool ids exactly, not by family: a tool rename can never silently lose the protection.",
     "  `*` allow -> the catch-all ALLOW. It keeps this policy at parity with pre-T16 behaviour: an ordinary tool (recursive_status, read, grep, a delegation) is allowed with rule `none` rather than becoming an `ask` on every call. It is the least specific rule, so it decides only ids that no specific rule names or governs - which is exactly rule 4's case.",
     "",
@@ -86,6 +87,54 @@
       "verdict": "deny",
       "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
       "label": "locked-write"
+    },
+    {
+      "pattern": "write",
+      "verdict": "deny",
+      "reason": "phase order: only one phase may be active at a time - the active phase must be locked before a later phase artifact is written",
+      "label": "phase-order"
+    },
+    {
+      "pattern": "edit",
+      "verdict": "deny",
+      "reason": "phase order: only one phase may be active at a time - the active phase must be locked before a later phase artifact is written",
+      "label": "phase-order"
+    },
+    {
+      "pattern": "fs_write",
+      "verdict": "deny",
+      "reason": "phase order: only one phase may be active at a time - the active phase must be locked before a later phase artifact is written",
+      "label": "phase-order"
+    },
+    {
+      "pattern": "fs-write",
+      "verdict": "deny",
+      "reason": "phase order: only one phase may be active at a time - the active phase must be locked before a later phase artifact is written",
+      "label": "phase-order"
+    },
+    {
+      "pattern": "pwsh",
+      "verdict": "deny",
+      "reason": "phase order: only one phase may be active at a time - the active phase must be locked before a later phase artifact is written",
+      "label": "phase-order"
+    },
+    {
+      "pattern": "shell",
+      "verdict": "deny",
+      "reason": "phase order: only one phase may be active at a time - the active phase must be locked before a later phase artifact is written",
+      "label": "phase-order"
+    },
+    {
+      "pattern": "bash",
+      "verdict": "deny",
+      "reason": "phase order: only one phase may be active at a time - the active phase must be locked before a later phase artifact is written",
+      "label": "phase-order"
+    },
+    {
+      "pattern": "run_code",
+      "verdict": "deny",
+      "reason": "phase order: only one phase may be active at a time - the active phase must be locked before a later phase artifact is written",
+      "label": "phase-order"
     },
     {
       "pattern": "*",

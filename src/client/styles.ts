@@ -14,7 +14,7 @@ const BOARD_CSS = `
 /* ===== dsh-recursive Paper theme (run 16) ===== */
 
 /* Raw tokens: light (default) + dark + shared, scoped to the board/inspector. */
-.rec-board, .rec-inspector {
+.rec-board, .rec-inspector, .rec-spec {
   /* light */
   --rm3-light-background: #FFFFFF;
   --rm3-light-foreground: #111111;
@@ -673,6 +673,9 @@ const BOARD_CSS = `
   line-height: 1.7;
   padding: 0 6px;
   border-left: 2px solid transparent;
+  /* Containing block for the visually-hidden text that carries a task box's tick to a screen reader, so it
+     cannot be positioned against the page instead of against its own line. */
+  position: relative;
 }
 
 .rec-doc-line-current {
@@ -1097,8 +1100,302 @@ dl.rec-settings-rows {
   overflow-wrap: anywhere;
 }
 
+/* ===== Run-start spec sheet (tool.call.toolview key 'recursive_ask') =====
+   The document beside the run-start question. LIGHT is the only theme here: the sheet renders inline in a
+   transcript row, not on the board, so it does not own a data-theme attribute and must not inherit the
+   board's. The body is the ONLY scrolling box (a max-height cap with overflow-y: auto) so the decision
+   controls below it can never be pushed out of reach by a long document. */
+.rec-spec {
+  box-sizing: border-box;
+  margin: 6px 0;
+  padding: var(--board-space-12);
+  border: 1px solid var(--board-border);
+  border-radius: var(--board-radius-lg);
+  background: var(--board-card);
+  color: var(--board-fg);
+  font-family: var(--board-font-sans);
+  font-size: var(--board-text-sm);
+  /* The one transition this sheet has. It is disabled outright under prefers-reduced-motion below. */
+  transition: border-color 160ms ease;
+}
+
+.rec-spec-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--board-space-8);
+}
+
+.rec-spec-title {
+  margin: 0;
+  font-size: var(--board-text-sm);
+  font-weight: var(--board-fw-semibold);
+  letter-spacing: var(--board-tracking-tight);
+  overflow-wrap: anywhere;
+}
+
+.rec-spec-tag {
+  flex: none;
+  font-size: var(--board-text-xs);
+  color: var(--board-muted-fg);
+}
+
+.rec-spec-path {
+  margin: 2px 0 var(--board-space-8);
+  font-family: var(--board-font-mono);
+  font-size: var(--board-text-xs);
+  color: var(--board-muted-fg);
+  overflow-wrap: anywhere;
+}
+
+.rec-spec-notice {
+  margin: 0 0 var(--board-space-8);
+  padding: var(--board-space-8);
+  border: 1px solid var(--board-border);
+  border-radius: var(--board-radius-md);
+  background: var(--board-muted);
+  font-size: var(--board-text-xs);
+  line-height: 1.5;
+}
+
+/* An UNFILLED template is stated as a warning, never as a neutral fact: the whole point of this seat is that
+   nobody is nudged toward approving a hollow document. */
+.rec-spec-notice-unfilled {
+  border-color: var(--board-warning);
+  background: color-mix(in srgb, var(--board-warning) 10%, var(--board-card));
+}
+
+.rec-spec-unfilled-lead {
+  margin: 0 0 6px;
+  font-weight: var(--board-fw-semibold);
+  color: var(--board-warning);
+}
+
+.rec-spec-unfilled-why {
+  margin: 0 0 4px;
+  color: var(--board-muted-fg);
+}
+
+.rec-spec-unfilled-next {
+  margin: 6px 0 0;
+  font-weight: var(--board-fw-medium);
+}
+
+.rec-spec-evidence {
+  margin: 0 0 4px;
+  padding-left: 18px;
+  font-family: var(--board-font-mono);
+  font-size: var(--board-text-xs);
+}
+
+.rec-spec-evidence-item {
+  overflow-wrap: anywhere;
+}
+
+.rec-spec-notice-filled {
+  border-color: var(--board-success);
+  background: color-mix(in srgb, var(--board-success) 8%, var(--board-card));
+}
+
+.rec-spec-notice-error {
+  border-color: var(--board-error);
+}
+
+.rec-spec-question {
+  margin: 0 0 var(--board-space-8);
+}
+
+.rec-spec-question-lead,
+.rec-spec-question-options,
+.rec-spec-question-where {
+  margin: 0 0 4px;
+  font-size: var(--board-text-xs);
+  line-height: 1.5;
+}
+
+.rec-spec-question-where {
+  color: var(--board-muted-fg);
+}
+
+.rec-spec-decision {
+  margin: 0;
+  font-size: var(--board-text-xs);
+  font-weight: var(--board-fw-medium);
+}
+
+/* The document body: the one bounded scroller. Focusable (tabIndex=0) for the keyboard, and the border
+   marks the focus ring's home rather than relying on a colour change alone. */
+.rec-spec-body-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--board-border);
+  border-radius: var(--board-radius-md);
+  background: var(--board-muted);
+}
+
+.rec-spec-body-scroll:focus-visible {
+  outline: 2px solid var(--board-info);
+  outline-offset: 2px;
+}
+
+/* The rendered preview inside that scroller (PreviewLines from doc-viewer.tsx). The line blocks carry their
+   own padding so the marks — task boxes, gate readings — line up in a column down the left edge. */
+.rec-spec-body-scroll .rec-doc-lines {
+  padding: var(--board-space-12);
+}
+
+.rec-spec-body-scroll .rec-doc-line {
+  padding: 0;
+}
+
+/* Raw source is monospace, wrapping, and NOT reflowed: the same characters the preview was built from. */
+.rec-spec-text {
+  margin: 0;
+  padding: var(--board-space-12);
+  font-family: var(--board-font-mono);
+  font-size: var(--board-text-xs);
+  line-height: 1.55;
+  /* The document is shown VERBATIM: only wrapping is normalised, never the characters. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+
+/* ===== The mode control (preview <-> raw source) =====
+   One real button, so Tab reaches it and Enter/Space press it; aria-pressed carries its state to a screen
+   reader and the role=status line beside it names the mode on screen in words. */
+.rec-spec-view {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--board-space-8);
+  margin: 0 0 var(--board-space-8);
+}
+
+.rec-spec-view-toggle {
+  flex: none;
+  padding: 4px 12px;
+  font-family: inherit;
+  font-size: var(--board-text-xs);
+  color: var(--board-fg);
+  background: var(--board-card);
+  border: 1px solid var(--board-border);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rec-spec-view-toggle:hover {
+  background: var(--board-accent);
+}
+
+.rec-spec-view-toggle:focus-visible {
+  outline: 2px solid var(--board-info);
+  outline-offset: 2px;
+}
+
+/* A pressed toggle says "the verbatim source is what you are reading" — marked, and not by colour alone. */
+.rec-spec-view-toggle[aria-pressed='true'] {
+  border-color: var(--board-info);
+  color: var(--board-info);
+  font-weight: var(--board-fw-semibold);
+}
+
+.rec-spec-view-toggle[aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.rec-spec-view-state {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--board-text-xs);
+  color: var(--board-muted-fg);
+  overflow-wrap: anywhere;
+}
+
+/* ===== Marks the PREVIEW must not hide (shared with the phase-doc viewer) =====
+   The scaffolded Phase 0 template ships unticked boxes and two FAIL gates; a preview that drew them as
+   generic body text would make an unfilled form look like a finished spec. */
+.rec-doc-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.rec-doc-todo {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.rec-doc-todo-check {
+  flex: none;
+  font-family: var(--board-font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  letter-spacing: var(--board-tracking-mono);
+}
+
+.rec-doc-todo-check-off {
+  color: var(--board-warning);
+  font-weight: var(--board-fw-semibold);
+}
+
+.rec-doc-todo-check-on {
+  color: var(--board-success);
+}
+
+/* An unticked box is stated, not merely greyed: the warning colour AND the mark together. */
+.rec-doc-todo-open .rec-doc-li-text {
+  color: var(--board-fg);
+}
+
+.rec-doc-todo-done .rec-doc-li-text {
+  color: var(--board-muted-fg);
+}
+
+.rec-doc-gate {
+  font-family: var(--board-font-mono);
+  font-size: var(--board-text-xs);
+  font-weight: var(--board-fw-semibold);
+  letter-spacing: var(--board-tracking-mono);
+  margin: 4px 0;
+  padding: 3px 8px;
+  border: 1px solid var(--board-border);
+  border-radius: var(--board-radius-md);
+  display: inline-block;
+}
+
+.rec-doc-gate-fail {
+  color: var(--board-error);
+  border-color: var(--board-error);
+  background: color-mix(in srgb, var(--board-error) 8%, var(--board-card));
+}
+
+.rec-doc-gate-pass {
+  color: var(--board-success);
+  border-color: var(--board-success);
+  background: color-mix(in srgb, var(--board-success) 8%, var(--board-card));
+}
+
+.rec-spec-empty {
+  margin: 0;
+  padding: var(--board-space-12);
+  color: var(--board-muted-fg);
+  font-size: var(--board-text-xs);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rec-card, .rec-back, .rec-close, .rec-theme-toggle { transition: none; }
+  .rec-spec { transition: none; }
 }
 `
 

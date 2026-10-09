@@ -62,6 +62,16 @@ export interface ClientSlots {
 /** A registered slot's options. */
 export interface SlotOptions {
   name: string
+  /**
+   * The dispatch key of a KEYED seat (`tool.call.toolview` is one), required there and ignored elsewhere.
+   *
+   * ⚠ THIS FIELD WAS MISSING AND ITS ABSENCE WAS NOT COSMETIC: `slots.ts` registers the run-start spec sheet
+   * on `tool.call.toolview` under the tool's wire name, and the harness's own options type makes `key`
+   * mandatory for a keyed slot (`KindOptions` in `packages/client/ui-slots`, where a keyed registration with
+   * no key THROWS `keyed slot "<name>" requires options.key`). Without the field here the face did not match
+   * the API it describes, so `tsc --noEmit` rejected the registration and the sheet was unreachable code.
+   */
+  key?: string
   id?: string
   order?: number
   label?: string

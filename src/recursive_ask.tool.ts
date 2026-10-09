@@ -27,6 +27,7 @@ import {
   RUN_START_ARTIFACT,
   RUN_START_GATE,
   RUN_START_GATE_ID,
+  runStartSpecGuard,
 } from './run-start.ts'
 
 
@@ -294,7 +295,7 @@ export function pendingGateFor(artifactFile: string, artifactText: string | null
 export function createRecursiveAskTool(recursive: RecursiveRuntime) {
   return defineTool({
     name: 'recursive_ask',
-    description: 'Ask a human gate as a structured decision (tdd-mode, qa-signoff, gate-block), or ASK TO START A RUN (run-start: nothing runs, and no goal exists, until this gate is approved). Call without `answer` to ask; call with it to write the answer into the artifact as a durable marker. For run-start the mounted human channel is asked first and its own selection wins; when that channel cannot deliver the question, the refusal names the cause and `relay=true` with an explicit `answer` records the person\'s relayed approval. One ask per step.',
+    description: 'Ask a human gate as a structured decision (tdd-mode, qa-signoff, gate-block), or ASK TO START A RUN (run-start: nothing runs, and no goal exists, until this gate is approved). Call without `answer` to ask; call with it to write the answer into the artifact as a durable marker. For run-start the mounted human channel is asked first and its own selection wins; when that channel cannot deliver the question, the refusal names the cause and `relay=true` with an explicit `answer` records the person\'s relayed approval. The run-start gate is REFUSED while the Phase 0 requirements document is still the unfilled template — the refusal quotes the placeholder lines, and there is nothing to approve until they are written. One ask per step.',
     parameters: {
       gate: { type: 'string', description: 'tdd-mode | qa-signoff | gate-block | run-start. Required. `run-start` is phase 0: approving it records the approval and arms the run goal, which is what makes the harness drive rounds.' },
       runId: { type: 'string', description: 'Run id. Required; must resolve inside the current workspace.' },
@@ -326,6 +327,32 @@ export function createRecursiveAskTool(recursive: RecursiveRuntime) {
       // phase-0 record, and letting a caller aim the approval somewhere else is how an approval ends up
       // in a file no reader looks at. Every other gate keeps its per-gate default and its override.
       const artifact = (isRunStartGate(gateId) ? RUN_START_ARTIFACT : args.artifact ?? GATE_DEFAULT_ARTIFACT[gateId as AskGateId]).trim()
+
+      // ⚠ THE ORDERING GUARD, AND IT COMES BEFORE THE QUESTION IS PUT TO ANYBODY. A scaffolded run's Phase 0
+      // document is a template: placeholder requirements, unchecked lists, FAIL gates. Raising "start this run
+      // or hold?" over that asks a person to approve a document that is not a spec — and until this change
+      // nothing even SHOWED it to them. So the gate refuses while the artifact is still the template, naming
+      // the artifact and quoting the placeholder lines, and records nothing.
+      //
+      // It runs before BOTH branches below on purpose: asking the channel first and refusing afterwards would
+      // put the card in front of the person anyway, which is the defect. A refusal here does not weaken any
+      // part of the gate's contract — the person's own answer still wins everywhere below, a spec still
+      // creates no goal, and the relay rules are untouched.
+      if (isRunStartGate(gateId)) {
+        const guard = runStartSpecGuard(root, runId)
+        if (!guard.ok) {
+          return {
+            error: guard.reason,
+            gate: RUN_START_GATE_ID,
+            runId,
+            artifact: RUN_START_ARTIFACT,
+            // The question travels with the refusal so the caller can put the DECISION in the transcript while
+            // it cannot yet raise the card — the same shape the channel refusals use.
+            question: buildAskQuestionFor(RUN_START_GATE_ID),
+          } as unknown as JsonValue
+        }
+      }
+
       let question: AskQuestion
       try {
         question = buildAskQuestionFor(gateId)

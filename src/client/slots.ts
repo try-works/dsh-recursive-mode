@@ -22,6 +22,7 @@ import { isRecursivePreset, currentWorkspacePath } from './contract.ts'
 import { Board } from './board.tsx'
 import { Inspector } from './inspector.tsx'
 import { RecursiveSettings, RecursiveSettingsLive, type RecursiveSettingsSeatProps } from './settings.tsx'
+import { RunStartSpecSheet, RUN_START_TOOL_NAME } from './spec-sheet.tsx'
 import { useLiveProjection } from './use-live.ts'
 import { boardState, useBoardState } from './open-state.ts'
 import { injectBoardStyles } from './styles.ts'
@@ -137,6 +138,17 @@ export function registerSlots(ctx: ClientContext): () => void {
     if (useSessions === undefined) return null
     return createElement(RecursiveBoardOverlay, { useSessions, useWorkspaces: props?.useWorkspaces })
   })))
+
+  // RUN-START SPEC SHEET (tool.call.toolview, keyed by tool name). The seat that exists exactly while a
+  // `recursive_ask` call is on screen — and the only one that can render BESIDE the question card, because
+  // the composer is a chain and the run-start gate's pending interaction is a question, not an approval (see
+  // the header of spec-sheet.tsx for the three structural reasons `conversation.approval.detail` cannot be
+  // it). The view returns null for every other gate, so `tdd-mode` / `qa-signoff` / `gate-block` calls keep
+  // the generic tool row they have today.
+  disposers.push(ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
+    name: 'tool.call.toolview',
+    key: RUN_START_TOOL_NAME,
+  }, RunStartSpecSheet)))
 
   // Settings section (root scope, always present; no gate — configuration is always available).
   // The seat receives the shell's `close` PLUS the root standard kit (useSessions/useWorkspaces,

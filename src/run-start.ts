@@ -42,6 +42,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getMdFieldValue } from './status.ts'
+import { classifyArtifact, describeEvidence, unfilledEvidence } from './run-spec.ts'
+import { toolError } from './errors.ts'
 
 /** The gate id `recursive_ask` answers for a run start. Deliberately NOT in ASK_GATE_IDS. */
 export const RUN_START_GATE_ID = 'run-start'
@@ -127,3 +129,60 @@ export function readRunStartApproval(root: string, runId: string): { approved: b
  * the same string instead of re-typing it (a re-typed reason is a caller that silently stops matching).
  */
 export const RUN_START_NOT_APPROVED = 'run not started: phase 0 approval has not been granted'
+
+/* ============================ THE ORDERING GUARD ============================ */
+
+/**
+ * PHASE 0 — THE GATE CANNOT BE RAISED BEFORE THERE IS A SPEC TO DECIDE ABOUT.
+ *
+ * THE DEFECT. `recursive_init` scaffolds Phase 0 as a TEMPLATE, and `recursive_ask gate=run-start` raised
+ * "start this run or hold?" over it immediately — while every requirement was still `<short title>`, every
+ * acceptance criterion was still `[observable condition 1]`, and nothing put the document in front of the
+ * person at all. The owner: *"the card ui for accepting the spec appeared, but i was never shown the spec
+ * before that so how could i approve if i havent seen it"*. Approving an unfilled template is not a decision
+ * about a spec; there is no spec yet, and a card that asks the question anyway teaches a person to answer
+ * without reading.
+ *
+ * ⚠ WHAT THIS DOES *NOT* TOUCH. It does not weaken the gate's own contract, it does not add a second way to
+ * start a run, and it does not make the plugin the decider: it only refuses to ASK. A person's own answer
+ * still wins (`recordRunStartAnswer` is unchanged), a spec still creates no goal, and cancellation / abort /
+ * timeout are still unrelayable. The check runs BEFORE the question is put to anybody, so no card is shown
+ * for a document that cannot be approved meaningfully.
+ *
+ * ⚠ AND IT IS A CHECK ON THE DOCUMENT, NOT ON THE CALLER. A `runId` that does not resolve is not this
+ * refusal's business — the ask path already reports that — so the guard says `ok: true` there and lets the
+ * existing route handle it.
+ */
+export function runStartSpecGuard(root: string, runId: string): { ok: true } | { ok: false; reason: string } {
+  const content = readRunStartArtifact(root, runId)
+  if (content === null) {
+    // ⚠ A MISSING ARTIFACT IS REFUSED TOO, AND IT IS THE SAME DEFECT. Approving a run that has no Phase 0
+    // document is approving something nobody can read — the gate's own question ("approve phase 0 and start
+    // this run?") has no referent. The refusal names the path a reader can go and look at.
+    return {
+      ok: false,
+      reason: toolError(
+        'RUN_START_SPEC_UNFILLED',
+        'there is no Phase 0 document to approve: ' + runStartArtifactPath(root, runId) + ' does not exist yet',
+      ),
+    }
+  }
+  const verdict = classifyArtifact(content)
+  if (verdict.verdict === 'filled') return { ok: true }
+  const evidence = unfilledEvidence(verdict)
+  const context = verdict.hits.filter((hit) => hit.id !== 'placeholder')
+  const contextNote = context.length === 0
+    ? ''
+    : ' (it also carries ' + String(context.length) + ' unfinished marker(s) of its own, starting at line '
+      + String(context[0]?.line ?? 0) + ')'
+  // The evidence — line numbers and the placeholder text VERBATIM — travels in the detail: a refusal that
+  // asserts "it is a template" without quoting it is a refusal the caller can only take on trust.
+  return {
+    ok: false,
+    reason: toolError(
+      'RUN_START_SPEC_UNFILLED',
+      RUN_START_ARTIFACT + ' for run ' + JSON.stringify(runId) + ' still carries the template scaffold'
+      + contextNote + ': ' + describeEvidence(evidence),
+    ),
+  }
+}

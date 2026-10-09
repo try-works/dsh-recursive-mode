@@ -25,6 +25,27 @@ export interface DocLine {
   text: string;
   /** table: data rows (header separator row dropped); first row is the header. */
   cells?: string[][];
+  /**
+   * li: the item WAS a `- [ ]` / `- [x]` task box, and whether it was ticked.
+   *
+   * ⚠ THIS IS A FIELD ON `li`, NOT A NEW KIND, ON PURPOSE. A task box is a list item — it keeps the bullet
+   * layout, the line index and the search behaviour every existing `li` has — and the ONE thing the reader
+   * must be able to see that a plain string cannot carry is the BOX ITSELF. The scaffolded Phase 0 template
+   * ships seven unticked boxes, so "is this still the template?" is partly a question about these marks.
+   *
+   * ⚠ AND THE BOX IS NOT LEFT IN `text`. `text` is the item's CONTENT, exactly the shape the base parser
+   * already produces for a plain bullet, so `search`/`copy` and every other consumer of a line's text see the
+   * words rather than the syntax. The tick survives as this field, and the renderer draws the mark back.
+   */
+  checked?: boolean;
+  /**
+   * plain: this line is a `Coverage:` / `Approval:` GATE reading, and how it reads.
+   *
+   * Same reasoning as `checked`: a gate line is a line of text, so it stays `plain` and gains the one fact
+   * the renderer cannot re-derive — whether it currently says PASS or FAIL, which is exactly what a person
+   * must be able to see before approving the document that contains it.
+   */
+  gate?: 'pass' | 'fail';
 }
 
 /** Inline segment parsed from line text (bold / code span / link). */
@@ -35,9 +56,32 @@ export interface InlineSegment {
 }
 
 /**
+ * A list item: the text AFTER its marker. The marker is consumed here exactly as the base parser consumed
+ * it — `text` is the item's CONTENT, and the renderer draws the `- ` / box back from `kind` + `checked`.
+ */
+const BULLET_RE = /^\s*[-*]\s+(.+)$/;
+
+/**
+ * A task box (`[ ]`, `[x]`, `[X]`) at the front of a list item, split into its tick and the rest of the item.
+ *
+ * The tick is the one fact a reader of the document cannot recover from the text alone once the box has been
+ * recognised, so it travels as `checked`; everything after it is the item's content, as for any other bullet.
+ */
+const TASK_BOX_RE = /^\[([ xX])\]\s*(.*)$/;
+
+/** A gate reading: `Coverage: FAIL` / `Approval: PASS`, as `run-spec.ts` reads the same lines. */
+const GATE_RE = /^\s*(?:Coverage|Approval)\s*:\s*(PASS|FAIL)\s*$/i;
+
+/**
  * Markdown -> line tokens. Base is parsePlan (blank/h1-h4/li/plain, MIT),
  * extended for fenced code blocks (one code line per block) and pipe tables
  * (one table line per block, header separator row dropped).
+ *
+ * AND EXTENDED FOR WHAT THE RUN ARTIFACTS ACTUALLY CONTAIN — the task boxes and gate readings the
+ * scaffolded `00-requirements.md` ships (`- [ ] …`, `Coverage: FAIL`, `Approval: FAIL`), because a preview
+ * that renders an unticked box and a FAIL gate as generic body text hides the two marks a person who is
+ * being asked to approve the document most needs to see. Both are additive FIELDS on the existing `li` and
+ * `plain` kinds, so no line is retyped, no character is dropped, and every existing caller keeps working.
  */
 export function parseDoc(plan: string): DocLine[] {
   const raw = String(plan == null ? '' : plan).split('\n');
@@ -83,9 +127,21 @@ export function parseDoc(plan: string): DocLine[] {
       i += 1;
       continue;
     }
-    // list item
-    const li = /^\s*[-*]\s+(.+)$/.exec(line);
-    if (li) { out.push({ kind: 'li', text: li[1] }); i += 1; continue; }
+    // list item — a task box is CLASSIFIED (its tick kept as `checked`) and its text is the item's CONTENT,
+    // which is the shape the base parser already produces for a bullet. The marker and the box are DRAWN by
+    // the renderer from `kind` + `checked`, so no line is retyped and the reader still sees `- [ ] item`.
+    const item = BULLET_RE.exec(line);
+    if (item) {
+      const box = TASK_BOX_RE.exec(item[1]);
+      out.push(box === null
+        ? { kind: 'li', text: item[1] }
+        : { kind: 'li', text: box[2], checked: box[1] !== ' ' });
+      i += 1;
+      continue;
+    }
+    // gate reading: `Coverage: FAIL` / `Approval: PASS`
+    const gate = GATE_RE.exec(line);
+    if (gate) { out.push({ kind: 'plain', text: line, gate: gate[1].toUpperCase() === 'FAIL' ? 'fail' : 'pass' }); i += 1; continue; }
     out.push({ kind: 'plain', text: line });
     i += 1;
   }
@@ -138,11 +194,40 @@ function inlineNodes(segments: InlineSegment[], baseKey: string): ReactNode[] {
 }
 
 /**
+ * The mark of a task box.
+ *
+ * ⚠ THE MARK REPLACES `[ ]` / `[x]` IN PLACE, GLYPH FOR GLYPH. The parser hands over the item's content
+ * without the box, so what the reader sees is `- [ ] item` where the document says `- [x] item`: same line,
+ * same position, same length of reading — and the box is still legible as a box rather than as an assertion
+ * about the item.
+ *
+ * ⚠ AND THE TICK IS CARRIED TWICE — once as that glyph for the eye and once as text, visually hidden, for the
+ * ear — because the two bracket forms are read inconsistently by screen readers, and the whole point of the
+ * mark is that "this box is not ticked" survives every way of reading it. This span carries NO separator of
+ * its own: the item's text follows it directly, separated by the leading space on that text (see
+ * `lineElement`), so that neither side of the boundary has a trailing space to lose.
+ */
+function todoMark(line: DocLine, key: string): ReactNode {
+  const done = line.checked === true;
+  const cls = 'rec-doc-todo-check' + (done ? ' rec-doc-todo-check-on' : ' rec-doc-todo-check-off');
+  return createElement('span', { key, className: cls, title: done ? 'done' : 'not done' },
+    createElement('span', { 'aria-hidden': 'true' }, done ? '[x]' : '[ ]'),
+    createElement('span', { className: 'rec-doc-sr' }, done ? 'done:' : 'not done:'),
+  );
+}
+
+/**
  * Render one parsed line as a React element. Headings/bullets get parsePlan
  * sizing; code/table get block layout; inline markup applies to plain-ish text.
+ *
+ * ⚠ ONE RENDERER, TWO READERS. `DocViewer` and the run-start spec sheet's preview both come through here,
+ * so a mark that means "unticked box" or "gate reads FAIL" cannot mean one thing in the phase-doc viewer and
+ * another in the document a person is approving. Exported for that reason alone.
  */
-function lineElement(line: DocLine, i: number, isCurrent: boolean): ReactNode {
+export function lineElement(line: DocLine, i: number, isCurrent = false): ReactNode {
   const cls = 'rec-doc-line rec-doc-' + line.kind + (isCurrent ? ' rec-doc-line-current' : '');
+  const gateCls = line.gate === undefined ? '' : ' rec-doc-gate rec-doc-gate-' + line.gate;
+  const todoCls = line.checked === undefined ? '' : ' rec-doc-todo' + (line.checked ? ' rec-doc-todo-done' : ' rec-doc-todo-open');
   if (line.kind === 'blank') return createElement('div', { key: i, 'data-line': String(i), className: cls }, null);
   if (line.kind === 'code') return createElement('pre', { key: i, 'data-line': String(i), className: cls + ' rec-doc-pre' }, createElement('code', { className: 'rec-doc-code' }, line.text));
   if (line.kind === 'table') {
@@ -157,8 +242,43 @@ function lineElement(line: DocLine, i: number, isCurrent: boolean): ReactNode {
     );
   }
   const nodes = inlineNodes(parseInline(line.text), String(i));
-  if (line.kind === 'li') return createElement('div', { key: i, 'data-line': String(i), className: cls }, createElement('span', { className: 'rec-doc-bullet' }, '•'), createElement('span', { className: 'rec-doc-li-text' }, nodes));
-  return createElement('div', { key: i, 'data-line': String(i), className: cls }, nodes);
+  // ⚠ THE PREVIEW LINE IS THE DOCUMENT'S OWN LINE. The parser keeps list content MARKER-FREE (the base
+  // parser's shape), so the renderer puts the marker back: `- ` for a bullet, and a drawn box IN PLACE OF
+  // the `[ ]` / `[x]` for a task box. That is what lets a reader check the preview against the source and
+  // see at a glance that an unticked box is unticked.
+  //
+  // ⚠ AND THE SEPARATOR IS A NON-BREAKING SPACE WRITTEN AS AN ESCAPE, ON THE ITEM'S SIDE OF THE MARK.
+  // Measured, twice: a text node that ENDS in a space loses it (so a `'- '` bullet glyph renders as `-`,
+  // and a minifier carries that through to the shipped bundle, turning every bullet into `-item`), and a
+  // plain leading space is normalised away by the JSX transform before React ever sees it. An ESCAPED
+  // non-breaking space is neither trailing nor transformable, so it is what these separators are.
+  const SPACER = '\u00A0';
+  if (line.kind === 'li' && line.checked !== undefined) {
+    return createElement('div', { key: i, 'data-line': String(i), className: cls + todoCls },
+      createElement('span', { className: 'rec-doc-bullet' }, '-'),
+      todoMark(line, 'todo-' + String(i)),
+      createElement('span', { className: 'rec-doc-li-text' }, SPACER, nodes));
+  }
+  if (line.kind === 'li') return createElement('div', { key: i, 'data-line': String(i), className: cls }, createElement('span', { className: 'rec-doc-bullet' }, '-'), createElement('span', { className: 'rec-doc-li-text' }, SPACER, nodes));
+  return createElement('div', { key: i, 'data-line': String(i), className: cls + gateCls }, nodes);
+}
+
+/**
+ * The parsed lines as elements — the preview built from `parseDoc` + `lineElement`, with no shell of its own.
+ *
+ * ⚠ THIS IS WHAT MAKES A SECOND RENDERER UNNECESSARY. Any surface that wants to show a run artifact as a
+ * PREVIEW (the phase-doc viewer's body, the run-start spec sheet's document body) renders these nodes inside
+ * whatever frame it owns, so the markdown is parsed and drawn exactly once in the plugin. `keyBase` namespaces
+ * the React keys when several of these are on screen at once; `current` is the vim cursor line, which the
+ * spec sheet never sets.
+ */
+export function PreviewLines({ lines, keyBase = 'doc', current = -1 }: { lines: DocLine[]; keyBase?: string; current?: number }): ReactNode {
+  return createElement('div', { className: 'rec-doc-lines', 'data-preview-lines': String(lines.length) },
+    ...lines.map((line, i) => createElement(
+      'div',
+      { key: keyBase + '-line-' + String(i), className: 'rec-doc-line-wrap' },
+      lineElement(line, i, i === current),
+    )));
 }
 
 /**
@@ -269,11 +389,10 @@ export function DocViewer({ runId, worktreeRoot, fileName, theme, onClose }: Doc
     }
   };
 
-  const matchSet = new Set(matches);
-  const activeLine = matches.length > 0 ? matches[activeMatch] : -1;
-
-  const lineEls = docLines.map((line, i) => lineElement(line, i, i === cursor));
-
+  // NOTE: `n`/`N` move the cursor to the matching line, which is marked `rec-doc-line-current` by
+  // `PreviewLines` below. The lines themselves are NOT individually match-highlighted — they were not
+  // before this file gained a shared preview renderer either, and inventing a highlight here would change
+  // how the phase-doc viewer draws a document as a side effect of the run-start spec sheet's work.
   const searchBar = searchOpen ? createElement('div', { className: 'rec-doc-search' },
     createElement('input', { className: 'rec-doc-search-input', value: query, placeholder: '/ search doc…', onChange: onSearchChange, onKeyDown: onSearchKey }),
     createElement('span', { className: 'rec-doc-search-count' }, matches.length > 0 ? (activeMatch + 1) + '/' + matches.length : (query ? '0' : '')),
@@ -296,7 +415,7 @@ export function DocViewer({ runId, worktreeRoot, fileName, theme, onClose }: Doc
     createElement('div', { className: 'rec-doc-body' },
       text === null && error === null ? createElement('p', { className: 'rec-doc-text' }, 'Loading doc…') : null,
       error !== null ? createElement('p', { className: 'rec-doc-text rec-doc-error' }, error) : null,
-      text !== null ? lineEls : null,
+      text !== null ? createElement(PreviewLines, { lines: docLines, keyBase: 'doc', current: cursor }) : null,
     ),
     createElement('footer', { className: 'rec-doc-footer' },
       createElement('div', { className: statusCls, role: 'status' }, statusText),

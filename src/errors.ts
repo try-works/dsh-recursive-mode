@@ -162,6 +162,19 @@ export const TOOL_ERRORS = {
     problem: 'the run has unresolved delegated work, so this phase cannot lock yet',
     next: 'call recursive_status to see the pending delegation, have the child write its reply.md, then lock again',
   },
+  /**
+   * THE ORDERING DEFECT, AS A CODE. `recursive_ask gate=run-start` used to raise "start this run or hold?"
+   * over a Phase 0 document that was still the scaffold `recursive_init` wrote — placeholder requirements,
+   * unchecked lists, `FAIL` gates — and nothing put that document in front of the person either. The owner:
+   * *"i was never shown the spec before that so how could i approve if i havent seen it"*. Approving an
+   * unfilled template is not a decision about a spec, so the gate refuses to be raised until there is one.
+   */
+  RUN_START_SPEC_UNFILLED: {
+    code: 'RM4404',
+    klass: 'state',
+    problem: 'the Phase 0 requirements document is still the unfilled template, so there is no run spec for a person to approve',
+    next: 'fill the requirements document in (define the requirement ids and their acceptance criteria, and complete the TODO list) and then call recursive_ask with gate: run-start again',
+  },
 
   /* 5xxx — the runtime refused an operation it understands. */
 

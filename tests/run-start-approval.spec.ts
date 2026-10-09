@@ -13,11 +13,20 @@
  * first one asserts the ABSENCE of a goal after scaffolding, which the old code could not produce. The
  * two halves are deliberately adjacent: the unapproved run must be inert, and the approved run must work
  * exactly as it did, because a gate that also broke the workflow would be a different defect.
+ *
+ * ⚠ THE ORDERING PRECONDITION (added with the spec sheet). The gate is now REFUSED while
+ * `00-requirements.md` is still the template `recursive_init` writes (RM4404 — see
+ * `tests/run-spec-gate.spec.ts` for that refusal itself). Every test below that asks or answers the
+ * run-start question therefore starts from `tempRepoFilled`, which writes REAL Phase 0 content first: the
+ * precondition is stated in the fixture rather than smuggled in, and the tests that must keep working on a
+ * bare scaffold — the one that owns the scaffold, the unoffered-answer refusal, and the three workflow gates
+ * — still use `tempRepo`. Nothing these tests assert was relaxed: each still asserts the same call's own
+ * result, on a spec that exists to be decided about.
  */
 import { describe, it, expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -72,6 +81,67 @@ function fakeGoals() {
 
 function tempRepo(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
+}
+
+/**
+ * A temp repo for a test that intends the run-start gate to be REACHED, holding a WRITTEN Phase 0 document.
+ *
+ * ⚠ A SCAFFOLDED RUN IS NOT ENOUGH ANY MORE, and that is the point of this fixture. The gate now REFUSES
+ * while `00-requirements.md` is still the unfilled template (RM4404), so a test that asks or answers the
+ * run-start question on a freshly scaffolded run would be testing the refusal, not the path it names. This
+ * writes REAL Phase 0 content — requirement ids, executable acceptance criteria, a completed checklist, both
+ * gates passing — so the gate below it is decidable.
+ *
+ * ⚠ AND IT CAN FILL AN EXISTING REPO. The first argument is either a temp-directory PREFIX (a fresh repo is
+ * created) or a root that already exists (that repo is filled), because both shapes are needed: a test that
+ * never runs `recursive_init` wants the whole repo made for it, while one that mounts the plugin first has a
+ * root already and needs the document written INTO it. The earlier form of this helper took only a prefix,
+ * and the call sites that passed it an existing root wrote the document into a SECOND, unrelated temp
+ * directory — a silent no-op that left the gate reading a template it was not supposed to see.
+ */
+function tempRepoFilled(prefixOrRoot: string, runId: string): string {
+  const root = prefixOrRoot.includes(sep) ? prefixOrRoot : tempRepo(prefixOrRoot)
+  const runDir = join(root, '.recursive', 'run', runId)
+  mkdirSync(runDir, { recursive: true })
+  writeFileSync(
+    join(runDir, RUN_START_ARTIFACT),
+    [
+      '# Phase 0 Requirements — ' + runId,
+      '',
+      'Status: `DRAFT`',
+      '',
+      '## Requirements',
+      '',
+      '### `R1` The gate is only readable when it is decidable',
+      '',
+      'Description: a person is shown the run spec before the run-start question is put to them.',
+      'Acceptance criteria:',
+      '- the spec sheet renders the document verbatim',
+      '- the run-start gate refuses while the document is a template',
+      '',
+      '## Out of Scope',
+      '',
+      '- `OOS1`: editing the document (the client is read-only)',
+      '',
+      '## Constraints',
+      '',
+      '- the client writes nothing',
+      '',
+      '## Coverage Gate',
+      '',
+      '- [x] every requirement carries acceptance criteria',
+      '',
+      'Coverage: PASS',
+      '',
+      '## Approval Gate',
+      '',
+      '- [x] the requirements are ready for the run-start decision',
+      '',
+      'Approval: PASS',
+    ].join('\n') + '\n',
+    'utf8',
+  )
+  return root
 }
 
 const agentFor = (root: string) => ({ session: { header: { cwd: root } } })
@@ -158,7 +228,7 @@ describe('PHASE 0 — a scaffolded run exists without a goal', () => {
 
 describe('PHASE 0 — explicit approval starts the run, and the goal works as before', () => {
   it('answering gate=run-start records the approval and CREATES + ARMS the goal', async () => {
-    const root = tempRepo('rm-runstart-')
+    const root = tempRepoFilled('rm-runstart-', '01-calculator')
     const ctx = new Context()
     const goals = fakeGoals()
     try {
@@ -223,7 +293,7 @@ describe('PHASE 0 — explicit approval starts the run, and the goal works as be
   })
 
   it('a `Hold` is recorded as the decision it is, and starts NOTHING', async () => {
-    const root = tempRepo('rm-runstart-')
+    const root = tempRepoFilled('rm-runstart-', '02-calculator')
     const ctx = new Context()
     const goals = fakeGoals()
     try {
@@ -263,7 +333,10 @@ describe('PHASE 0 — explicit approval starts the run, and the goal works as be
   })
 
   it('REFUSES an unoffered answer: an approval is a label the gate offered, not any string', async () => {
-    const root = tempRepo('rm-runstart-')
+    // ⚠ `tempRepoFilled`, NOT `tempRepo`: the scaffold guard (RM4404) runs BEFORE any label is validated, so
+    // on an unfilled template this call is refused for being a template and never reaches the rule under
+    // test. The unoffered-answer rule is about the LABEL, so the document has to be a real one to see it.
+    const root = tempRepoFilled('rm-runstart-', 'r1')
     const ctx = new Context()
     const goals = fakeGoals()
     try {
@@ -304,7 +377,7 @@ describe('PHASE 0 — explicit approval starts the run, and the goal works as be
  */
 describe('PHASE 0 — the blocking channel decides when it can answer', () => {
   it('records the CHANNEL’s selection, and its decline overrides the caller’s argument', async () => {
-    const root = tempRepo('rm-runstart-')
+    const root = tempRepoFilled('rm-runstart-', 'r1')
     const ctx = new Context()
     const goals = fakeGoals()
     try {
@@ -321,6 +394,8 @@ describe('PHASE 0 — the blocking channel decides when it can answer', () => {
         arguments: { runId: 'r1' },
         agent: agentFor(root),
       } as never)
+      // THE SPEC EXISTS BEFORE THE GATE IS RAISED — see `tempRepoFilled` and the module header.
+      tempRepoFilled(root, 'r1')
 
       // A channel that answers the way a person would.
       ctx.recursive.attachUserQuestions({
@@ -376,6 +451,8 @@ describe('PHASE 0 — the blocking channel decides when it can answer', () => {
         arguments: { runId: 'r1' },
         agent: agentFor(root),
       } as never)
+      // THE SPEC EXISTS BEFORE THE GATE IS RAISED — see `tempRepoFilled` and the module header.
+      tempRepoFilled(root, 'r1')
       // A channel that behaves like the real one for a caller it will not serve: it REJECTS. The channel
       // IS mounted, so a person could have been asked and was not — and the caller's own answer must not
       // become the decision.
@@ -416,6 +493,8 @@ describe('PHASE 0 — the blocking channel decides when it can answer', () => {
         arguments: { runId: 'r1' },
         agent: agentFor(root),
       } as never)
+      // THE SPEC EXISTS BEFORE THE GATE IS RAISED — see `tempRepoFilled` and the module header.
+      tempRepoFilled(root, 'r1')
       ctx.recursive.attachUserQuestions({ ask: () => Promise.reject(new Error('no user-questions answerer accepted the request')) })
 
       const refused = payload(await ctx.tools.execute({
@@ -437,7 +516,7 @@ describe('PHASE 0 — the blocking channel decides when it can answer', () => {
   })
 
   it('with no channel mounted, ASKING surfaces the question and records NOTHING', async () => {
-    const root = tempRepo('rm-runstart-')
+    const root = tempRepoFilled('rm-runstart-', 'r1')
     const ctx = new Context()
     const goals = fakeGoals()
     try {
@@ -482,7 +561,7 @@ describe('PHASE 0 — the blocking channel decides when it can answer', () => {
   })
 
   it('a mounted channel is ALWAYS consulted: an answer argument cannot bypass the person', async () => {
-    const root = tempRepo('rm-runstart-')
+    const root = tempRepoFilled('rm-runstart-', 'r1')
     const ctx = new Context()
     const goals = fakeGoals()
     try {
@@ -582,6 +661,8 @@ describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the ro
         arguments: { runId: 'r1' },
         agent: agentFor(root),
       } as never)
+      // THE SPEC EXISTS BEFORE THE GATE IS RAISED — see `tempRepoFilled` and the module header.
+      tempRepoFilled(root, 'r1')
 
       // The real service's shape for a composition with no answerer: it REJECTS, with a code.
       ctx.recursive.attachUserQuestions({
@@ -668,6 +749,8 @@ describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the ro
         arguments: { runId: 'r1' },
         agent: agentFor(root),
       } as never)
+      // THE SPEC EXISTS BEFORE THE GATE IS RAISED — see `tempRepoFilled` and the module header.
+      tempRepoFilled(root, 'r1')
 
       let asked = 0
       ctx.recursive.attachUserQuestions({
@@ -727,6 +810,8 @@ describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the ro
         arguments: { runId: 'r1' },
         agent: agentFor(root),
       } as never)
+      // THE SPEC EXISTS BEFORE THE GATE IS RAISED — see `tempRepoFilled` and the module header.
+      tempRepoFilled(root, 'r1')
 
       // The person dismissed the card (or the turn was cancelled while the card stood). Asking for the
       // relay immediately afterwards must NOT convert the person's own cancellation into an approval.
@@ -768,6 +853,8 @@ describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the ro
         arguments: { runId: 'r1' },
         agent: agentFor(root),
       } as never)
+      // THE SPEC EXISTS BEFORE THE GATE IS RAISED — see `tempRepoFilled` and the module header.
+      tempRepoFilled(root, 'r1')
 
       const call = (id: string) => ctx.tools.execute({
         signal: new AbortController().signal,
@@ -776,7 +863,6 @@ describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the ro
         arguments: { gate: RUN_START_GATE_ID, runId: 'r1', answer: RUN_START_APPROVE, relay: true },
         agent: agentFor(root),
       } as never)
-
       // A skip: the channel RESOLVED, so a person was asked and declined to choose.
       ctx.recursive.attachUserQuestions({
         ask: () => Promise.resolve({ answers: [{ id: RUN_START_GATE_ID, selected: [] }] }),

@@ -1881,7 +1881,7 @@ export class RecursiveRuntime extends Service {
     return coupleGateBlockToGoal(goalService as never, agent, ref, reason)
   }
 
-  /** Phase C R7: resolve the enforcement config (strict|advisory, default advisory). */
+  /** Phase C R7: resolve the enforcement config (strict|advisory, default strict). */
   get enforcementConfig(): EnforcementConfig {
     return this._enforcementConfig ?? DEFAULT_ENFORCEMENT
   }

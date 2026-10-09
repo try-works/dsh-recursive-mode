@@ -22,11 +22,17 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { GuardRule } from './enforcement.ts'
+import type { GateBlockAsk } from './recursive_ask.tool.ts'
 
 /**
  * One logged guard decision (the JSONL record shape the board/tests read).
  * `rule` is always set (the guard's own machine-readable reason for the
  * verdict); `transition` is present whenever the transition gate was consulted.
+ *
+ * FU-7: a REFUSAL that a person has to resolve also carries `ask` — the gate-block decision, in the
+ * same shape `recursive_lock` attaches to its own refusal. It is recorded because the log is where
+ * "why was this lock refused?" is answered, and the options are the other half of that answer; a
+ * caller (or a board) reading the trace can act on the refusal without parsing the sentence.
  */
 export interface GuardDecisionRecord {
   at: string
@@ -36,6 +42,7 @@ export interface GuardDecisionRecord {
   rule: GuardRule
   reason?: string
   transition?: { passed: boolean; failures: string[] }
+  ask?: GateBlockAsk
 }
 
 /** One logged observed-write tamper (a LOCKED artifact whose hash no longer matches). */

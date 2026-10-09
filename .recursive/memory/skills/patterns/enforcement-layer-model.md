@@ -33,5 +33,5 @@ Tags:
 ## Rules
 
 1. **Layers 1 and 2 call the lifecycle transition set; they never duplicate it.** The `agent/pre-step` phase-transition gate and the `tools/pre-execute` surgical guards delegate gate checks to `lifecycle.ts` (`validateTransition`) — a single definition of the predicates, multiple callers.
-2. **Enforcement strictness is configurable `strict|advisory` per gate (default advisory).** strict flips reject/deny; advisory emits `recursive/gate-blocked` (warn) and lets the step through; the config rides the plugin config, never the workflow files.
+2. **Enforcement strictness is configurable `strict|advisory` per gate (default STRICT since 0.5.0; it was advisory through 0.4.9).** strict flips reject/deny; advisory emits `recursive/gate-blocked` (warn) and lets the step through; the config rides the plugin config, never the workflow files.
 3. **State is derived, never cached.** `recursive/*` events are log-only; the fold re-derives the in-force phase on every transition (resume/fork-safe); a manifest-style second store is drift waiting to happen.

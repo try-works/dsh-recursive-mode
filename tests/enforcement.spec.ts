@@ -3,25 +3,77 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
-  resolveEnforcementConfig, DEFAULT_ENFORCEMENT, DEFAULT_BUDGETS,
+  resolveEnforcementConfig, DEFAULT_ENFORCEMENT, DEFAULT_ENFORCEMENT_MODE, DEFAULT_BUDGETS,
   evaluateToolGuard, detectTamper, tamperCandidatePath, coerceAskToDecision, type EnforcementConfig,
 } from '../src/enforcement.ts'
+import { buildGateBlockAsk, renderGateBlockAsk } from '../src/recursive_ask.tool.ts'
 import { getLockStatus, lockHashFromContent } from '../src/lock.ts'
 
 describe('enforcement.ts — gates + config (R3/R4/R7/R8)', () => {
-  it('resolveEnforcementConfig defaults advisory and rejects unknown keys', () => {
+  it('resolveEnforcementConfig defaults strict and rejects unknown keys', () => {
     expect(resolveEnforcementConfig(undefined)).toEqual(DEFAULT_ENFORCEMENT)
     // T28 added `budgets` to the shape, so the expected object carries it: the
     // assertion is about resolveEnforcementConfig filling in defaults, and the
     // defaults now include the caps. Pinned explicitly rather than relaxed to a
     // partial match, so a future shape change still fails here loudly.
+    //
+    // ⚠ AND THE MODE FILL IS PINNED THE SAME WAY, with LITERALS: a config that states one
+    // gate and leaves the others unstated must fill them with the default posture. A partial
+    // section comes from a settings patch (`update(ns, patch)` merges one field in), so the
+    // fill is a live path, not a formality.
     expect(resolveEnforcementConfig({ preStep: 'strict' })).toEqual({
       preStep: 'strict',
-      toolGuards: 'advisory',
-      tamper: 'advisory',
+      toolGuards: 'strict',
+      tamper: 'strict',
       budgets: DEFAULT_BUDGETS,
     })
+    // The same fill, read from the OTHER direction: the one gate that IS stated keeps its
+    // value while the unstated ones take the default — which is what rules out a "fill =
+    // whatever the first stated gate was" implementation passing the case above.
+    expect(resolveEnforcementConfig({ toolGuards: 'advisory' })).toEqual({
+      preStep: 'strict',
+      toolGuards: 'advisory',
+      tamper: 'strict',
+      budgets: DEFAULT_BUDGETS,
+    })
+    // An UNRECOGNIZED value resolves to the default posture too, so a typo fails CLOSED
+    // rather than silently granting the permissive branch.
+    expect(resolveEnforcementConfig({ tamper: 'advisery' }).tamper).toBe('strict')
     expect(() => resolveEnforcementConfig({ bogus: 'x' })).toThrow(/unknown key/)
+  })
+
+  /**
+   * ⚠ THE DEFAULT POSTURE IS STRICT, AND THIS CASE READS IT RATHER THAN CONSTRUCTING IT.
+   *
+   * Every value below is READ from the plugin's own default objects or from a call that omits
+   * the argument, and every expectation is a LITERAL. That combination is the whole point: an
+   * assertion that compared two things which move together (say, the resolver's output against
+   * `DEFAULT_ENFORCEMENT`) would keep passing after a revert to `advisory` and prove nothing.
+   * A revert of the owner's decision must turn this red.
+   */
+  it('defaults to STRICT on all three gates', () => {
+    expect(DEFAULT_ENFORCEMENT_MODE).toBe('strict')
+    expect(DEFAULT_ENFORCEMENT.preStep).toBe('strict')
+    expect(DEFAULT_ENFORCEMENT.toolGuards).toBe('strict')
+    expect(DEFAULT_ENFORCEMENT.tamper).toBe('strict')
+    // …and the resolver, which is the layer a PARTIAL config goes through, agrees.
+    const resolved = resolveEnforcementConfig(undefined)
+    expect(resolved.preStep).toBe('strict')
+    expect(resolved.toolGuards).toBe('strict')
+    expect(resolved.tamper).toBe('strict')
+  })
+
+  it('a BARE evaluateToolGuard call carries the default posture, not the permissive one', () => {
+    // The parameter defaults follow the config default. This case exists because they used to
+    // be their own `'advisory'` literals: a caller that forgot the argument got the mode the
+    // config no longer defaults to, and no config could turn that back off.
+    const root = mkdtempSync(join(tmpdir(), 'rm-enf-bare-'))
+    const runDir = join(root, '.recursive', 'run', 'r1')
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, '00-requirements.md'), 'Run: r1\nPhase: 0\nStatus: DRAFT\n', 'utf8')
+    const d = evaluateToolGuard({ name: 'recursive_lock', arguments: { artifact: '01-as-is.md' } }, root, 'r1')
+    expect(d.kind).toBe('deny')
+    expect((d as { reason: string }).reason).toContain('monotonic lock-order')
   })
 
   it('evaluateToolGuard denies an out-of-order recursive_lock (strict)', () => {
@@ -41,6 +93,62 @@ describe('enforcement.ts — gates + config (R3/R4/R7/R8)', () => {
     writeFileSync(join(runDir, '00-requirements.md'), 'Run: r1\nPhase: 0\nStatus: DRAFT\n', 'utf8')
     const d = evaluateToolGuard({ name: 'recursive_lock', arguments: { artifact: '01-as-is.md' } }, root, 'r1', 'advisory')
     expect(d.kind).toBe('ask')
+    // FU-7: and the advisory ask carries NO gate-block payload of its own. Nothing is refused at this
+    // layer in advisory — the live path co-erces this to an allow-with-warning and the TOOL then
+    // refuses with its own payload when `lockArtifact` throws — so a payload here would be a claim
+    // about a refusal that was never made. Asserted, not assumed: the two asks are not interchangeable.
+    expect((d as { ask?: unknown }).ask).toBeUndefined()
+  })
+
+  /**
+   * FU-7 — THE ORDERING REFUSAL CARRIES THE HUMAN'S RECOVERY OPTIONS.
+   *
+   * `fix | reopen | abandon` is how a person unblocks a lock, and it used to be attached by
+   * `recursive_lock`'s own catch — the branch that runs when the guard ABSTAINS. Under the strict
+   * default the guard refuses an out-of-order lock BEFORE dispatch, so that branch never ran and the
+   * caller got a bare sentence. These two cases pin the new truth at the layer that decides it: the
+   * refusal carries the payload, the payload is the SHARED builder's output, and the plain reason is
+   * still there beside it.
+   */
+  it('the strict lock-order refusal carries the gate-block ask, built from the blockers it read', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rm-enf-ask-'))
+    const runDir = join(root, '.recursive', 'run', 'r1')
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, '00-requirements.md'), 'Run: r1\nPhase: 0\nStatus: DRAFT\n', 'utf8')
+    const d = evaluateToolGuard({ name: 'recursive_lock', arguments: { artifact: '01-as-is.md' } }, root, 'r1', 'strict')
+    expect(d.kind).toBe('deny')
+    const reason = (d as { reason: string }).reason
+    // The plain refusal is INTACT — the ask is added beside it, never instead of it.
+    expect(reason).toContain('monotonic lock-order')
+    expect(reason).toContain('00-requirements.md (DRAFT)')
+    // The options, and the artifact the caller named.
+    const ask = (d as { ask?: ReturnType<typeof buildGateBlockAsk> }).ask
+    expect(ask, 'the strict refusal carried no ask').toBeDefined()
+    expect(ask!.gate).toBe('gate-block')
+    expect(ask!.artifact).toBe('01-as-is.md')
+    expect(ask!.options.map((option) => option.label)).toEqual(['fix', 'reopen', 'abandon'])
+    // ⚠ AND IT IS THE SAME OBJECT THE LOCK TOOL ATTACHES: compared against the shared builder with
+    // this refusal's own sentence as `blocked`. A hand-written second payload here would differ in
+    // some field and fail — which is the drift this comparison exists to catch.
+    expect(ask).toEqual(buildGateBlockAsk('01-as-is.md', reason))
+    expect(ask!.blocked).toBe(reason)
+    // The payload renders to the sentence a caller reads, so what is said and what is carried agree.
+    expect(renderGateBlockAsk(ask!)).toContain('fix (Return to the phase and satisfy the gate.)')
+    expect(renderGateBlockAsk(ask!)).toContain('recursive_ask gate=gate-block artifact=01-as-is.md')
+  })
+
+  it('a refusal that no person has to resolve carries NO ask (the locked-write denial)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rm-enf-noask-'))
+    const runDir = join(root, '.recursive', 'run', 'r1')
+    mkdirSync(runDir, { recursive: true })
+    const content = 'Run: r1\nPhase: 0\nStatus: LOCKED\nCoverage: PASS\nApproval: PASS\n## TODO\n- [x] d\n'
+    const hash = lockHashFromContent(content + 'LockedAt: 2026-01-01T00:00:00Z\nLockHash: ' + '0'.repeat(64) + '\n')
+    writeFileSync(join(runDir, '00-requirements.md'), content + 'LockedAt: 2026-01-01T00:00:00Z\nLockHash: ' + hash + '\n', 'utf8')
+    const d = evaluateToolGuard({ name: 'write', arguments: { file_path: join(runDir, '00-requirements.md') } }, root, 'r1', 'strict')
+    expect(d.kind).toBe('deny')
+    // A write to a LOCKED artifact is a caller state, not an ordering violation a person resolves by
+    // reopening or abandoning a run: offering those there is the noise FU-7 deliberately excludes.
+    expect((d as { ask?: unknown }).ask).toBeUndefined()
   })
 
   it('evaluateToolGuard denies a write to a LOCKED run doc (strict)', () => {
@@ -220,9 +328,16 @@ describe('enforcement.ts — coerceAskToDecision (T6 ask→policy bridge)', () =
     expect((d as { warn?: string }).warn).toContain('monotonic lock-order')
   })
 
-  it('defaults a bare ask to an advisory allow with a warn message', () => {
+  it('defaults a bare ask to the config default posture — strict, so a refusal', () => {
+    // ⚠ THIS ASSERTS THE PARAMETER DEFAULT, and the parameter default now FOLLOWS the config
+    // default by reference (`DEFAULT_ENFORCEMENT.toolGuards`). Deliberate: there is no neutral
+    // branch here — one posture allows the call and the other refuses it — so "the caller did
+    // not say" must resolve the way an omitted config resolves, and the codebase's rule for an
+    // undecidable path is to fail CLOSED. The advisory branch keeps its own case above, stated
+    // explicitly, so the permissive behaviour is still tested rather than assumed.
     const d = coerceAskToDecision({ kind: 'ask' })
-    expect(d.kind).toBe('allow')
-    expect((d as { warn?: string }).warn).toBeTruthy()
+    expect(d.kind).toBe('deny')
+    expect((d as { reason?: string }).reason).toBeTruthy()
+    expect(coerceAskToDecision({ kind: 'ask', reason: 'monotonic lock-order' }, DEFAULT_ENFORCEMENT_MODE).kind).toBe('deny')
   })
 })

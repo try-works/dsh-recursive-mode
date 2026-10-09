@@ -44,6 +44,10 @@ describe('T22 — the stable contract does not vary with the phase', () => {
     const strict = renderStableContract({ ...DEFAULT_ENFORCEMENT, toolGuards: 'strict' })
     expect(advisory).not.toBe(strict)
     expect(strict).toContain('tool guards strict')
+    // ⚠ AND THE DEFAULT RENDER SAYS STRICT: the model-facing policy text takes the modes from the
+    // config, so this is the prompt layer's half of the revert guard — a default that flipped back
+    // to advisory would tell the model "tool guards advisory" and fail here.
+    expect(renderStableContract()).toContain('pre-step strict, tool guards strict, tamper detection strict')
   })
 })
 
@@ -77,8 +81,12 @@ describe('T22 — the digest is a LOCAL identifier, not a cache directive', () =
   })
 
   it('CHANGES when the contract changes', () => {
-    expect(contractDigest({ ...DEFAULT_ENFORCEMENT, preStep: 'strict' })).not.toBe(contractDigest())
-    expect(contractDigest({ ...DEFAULT_ENFORCEMENT, tamper: 'strict' })).not.toBe(contractDigest())
+    // ⚠ THE OVERRIDE IS `advisory` BECAUSE THE DEFAULT IS NOW `strict`. The property under test
+    // is "a different contract gives a different digest", so the override has to name a mode that
+    // DIFFERS from the default — overriding a gate to the default value would compare the digest
+    // with itself and pass while proving nothing.
+    expect(contractDigest({ ...DEFAULT_ENFORCEMENT, preStep: 'advisory' })).not.toBe(contractDigest())
+    expect(contractDigest({ ...DEFAULT_ENFORCEMENT, tamper: 'advisory' })).not.toBe(contractDigest())
   })
 
   it('is short and stable in shape, so it can live in a prompt', () => {

@@ -66,9 +66,21 @@ describe('T26 — the preview shows the contract BEFORE it fires', () => {
       })
       expect(preview.probe).not.toBeNull()
       expect(typeof preview.probe?.rule).toBe('string')
-      // In advisory mode an out-of-order lock is an `ask` coerced to a warning, so the rule name is
-      // what matters here — the KIND depends on the mode, which is the point of previewing it.
+      // The rule is what matters here — and the KIND follows the mode the caller passed, which is
+      // the point of previewing a call at all. Asserted on both modes explicitly rather than
+      // described in a comment: the default is STRICT now, so the default config denies, and a
+      // preview that ignored the config and always said `ask` would be worthless.
       expect(preview.probe?.rule).not.toBe('none')
+      expect(preview.probe?.kind, 'the default config is strict, so the probe denies').toBe('deny')
+      const advisoryPreview = buildPreview({
+        root,
+        runId: 'r1',
+        config: { ...DEFAULT_ENFORCEMENT, toolGuards: 'advisory' },
+        probe: { name: 'recursive_lock', arguments: { artifact: '02-to-be-plan.md' } },
+      })
+      expect(advisoryPreview.probe?.kind, 'advisory asks rather than blocks').toBe('ask')
+      // …and the SAME rule either way: only the posture changes.
+      expect(advisoryPreview.probe?.rule).toBe(preview.probe?.rule)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

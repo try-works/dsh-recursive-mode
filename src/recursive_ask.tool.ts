@@ -171,6 +171,54 @@ export function buildAskQuestion(gateId: AskGateId): AskQuestion {
 }
 
 /**
+ * FU-7 — THE GATE-BLOCK REFUSAL PAYLOAD, BUILT IN ONE PLACE.
+ *
+ * A blocked lock is refused by TWO layers. The TOOL refuses when `lockArtifact` throws
+ * `Prerequisite blockers:`; the GUARD refuses pre-dispatch when the lock-order rule fires
+ * (`monotonic lock-order`), and under the strict default that is the layer the caller meets
+ * first. Both must hand the caller the SAME choice, so both build it HERE.
+ *
+ * ⚠ WHY NOT TWO LITERALS. `fix | reopen | abandon` is the human's way out of a blocked lock,
+ * and it existed in exactly one call site (`recursive_lock.tool.ts`). The guard's refusal moved
+ * to the default path, and a second hand-written copy of the options there would be a second
+ * answer to "what can a person do about this?": the day the options change, one of the two
+ * refusals keeps offering the old set and nothing fails. One builder, called from both.
+ *
+ * `blocked` is the refusal's OWN sentence — the guard's rule text or the tool's exception
+ * message — carried as data so the payload says what it is about without a reader having to
+ * match it against the text beside it.
+ */
+export interface GateBlockAsk extends AskQuestion {
+  gate: 'gate-block'
+  artifact: string
+  blocked: string
+}
+
+/** The payload, as the refusal carries it. Validated through `buildAskQuestion`. */
+export function buildGateBlockAsk(artifact: string, blocked: string): GateBlockAsk {
+  return { gate: 'gate-block', ...buildAskQuestion('gate-block'), artifact, blocked }
+}
+
+/**
+ * FU-7 — THE OPTIONS AS TEXT, DERIVED FROM THE PAYLOAD rather than restated.
+ *
+ * WHY A RENDERER IS NEEDED AT ALL: the harness renders a `tools/pre-execute` denial as
+ * `Error: <reason>` and drops every other field of the decision (measured in
+ * `packages/core/tools`: `content: [{ type: 'text', text: 'Error: ' + denialReason }]`), so an
+ * ask that rode along as a SIBLING field would reach the model as nothing at all — which is
+ * exactly how a strict-by-default guard made the recovery path unreachable. The refusal
+ * therefore renders the payload into the text it hands back, and it renders THIS object, so
+ * the visible sentence and the structured payload cannot disagree.
+ */
+export function renderGateBlockAsk(ask: GateBlockAsk): string {
+  const options = ask.options
+    .map((option) => option.label + (option.description === undefined ? '' : ' (' + option.description + ')'))
+    .join(' ')
+  const target = ask.artifact === '' ? 'recursive_ask gate=gate-block' : 'recursive_ask gate=gate-block artifact=' + ask.artifact
+  return ask.header + ': ' + ask.question + ' Options: ' + options + ' Answer with ' + target + '.'
+}
+
+/**
  * PHASE 0 — build the question for ANY accepted gate, including the run-start gate.
  *
  * A separate entry point rather than a widened `buildAskQuestion` so the three workflow gates keep the

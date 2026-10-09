@@ -452,7 +452,9 @@ describe('T38 — the built-in tool guard runs on the chain', () => {
       // STRICT mode is what makes the guard DENY. In advisory mode an out-of-order lock
       // is an `ask` that `coerceAskToDecision` turns into an allow-with-warning, so the
       // chain continues and nothing is short-circuited — my first version of this test
-      // asserted a denial under advisory and was simply wrong about the default.
+      // asserted a denial under advisory, which is not what advisory does. Strict is now
+      // ALSO the default; it stays stated here so this case tests denial rather than the
+      // default, and the advisory case below states its mode for the same reason.
       m.ctx.recursive.setEnforcementConfig({ toolGuards: 'strict' })
       let siblingRan = false
       m.ctx.recursive.hooks.register('pre_trigger', {
@@ -499,10 +501,13 @@ describe('T38 — the built-in tool guard runs on the chain', () => {
   })
 
   it('in ADVISORY mode the same call is allowed with the guard’s warning kept', async () => {
-    // The default mode, and the reason the test above needs strict: an `ask` under
-    // advisory is an allow that CARRIES the warning — never a silent pass.
+    // ⚠ ADVISORY IS REQUESTED EXPLICITLY HERE, because it is no longer the default: an `ask`
+    // under advisory is an allow that CARRIES the warning — never a silent pass. Relying on the
+    // default would have tested strict and called it advisory; the behaviour under test is the
+    // advisory one, so the test states the mode it needs rather than inheriting it.
     const m = await mountWithRun()
     try {
+      m.ctx.recursive.setEnforcementConfig({ toolGuards: 'advisory' })
       const result = await m.ctx.recursive.hooks.run('pre_trigger', {
         tool: 'recursive_lock',
         args: { artifact: '01-as-is.md' },

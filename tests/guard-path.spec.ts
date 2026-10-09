@@ -24,7 +24,7 @@
  * Only the guard's wording can appear if the guard short-circuits, so asserting
  * on it proves the guard — not the tool — produced the refusal.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -35,6 +35,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as plugin from '../src/index.ts'
 import { lockHashFromContent } from '../src/lock.ts'
+import { renderGateBlockAsk } from '../src/recursive_ask.tool.ts'
 import { readGuardDecisions, readObservedTampers, guardDecisionLogPath } from '../src/guard-log.ts'
 
 const signal = new AbortController().signal
@@ -190,6 +191,60 @@ describe('T15 — the guard resolves the ACTIVE RUN (was: empty runId)', () => {
     }
   })
 
+  /**
+   * FU-7 — THE ORDERING REFUSAL CARRIES THE HUMAN'S RECOVERY OPTIONS, THROUGH THE LIVE PATH.
+   *
+   * The default posture is strict, so THIS is the refusal a caller meets when it locks ahead of the
+   * run: the guard denies pre-dispatch and the harness renders the decision as `Error: <reason>`,
+   * dropping every other field of it. That is why the assertion has two halves — the TEXT the model
+   * actually reads, and the payload the decision carries — and why the text is checked against the
+   * RENDER of the payload (`renderGateBlockAsk`) rather than against a second hand-written sentence:
+   * a parallel sentence would pass a label grep and still be free to drift from the options the
+   * workflow offers.
+   */
+  it('FU-7: a guard refusal carries the gate-block ask to the caller AND into the trace', async () => {
+    const m = await mount({ '00-requirements.md': draft(RUN_ID), '01-as-is.md': draft(RUN_ID) })
+    try {
+      m.ctx.recursive.setEnforcementConfig({ toolGuards: 'strict' })
+      const out = await m.ctx.tools.execute({
+        signal,
+        callId: ToolCallId('g-ask'),
+        name: 'recursive_lock',
+        arguments: { runId: RUN_ID, artifact: '01-as-is.md' },
+        agent: { session: { header: { cwd: m.repo } } },
+      } as never)
+      // (1) THE GUARD refused, pre-dispatch: its wording, and none of the tool's.
+      expect(out.isError).toBe(true)
+      const text = ((out as { content?: Array<{ text?: string }> }).content ?? [])
+        .map((part) => part.text ?? '').join('\n')
+      expect(text).toContain('monotonic lock-order')
+      expect(text).not.toContain('Prerequisite blockers')
+      // (2) THE CALLER'S TEXT CARRIES THE OPTIONS. Without this the ask is invisible on the default
+      //     path, which is the defect: `fix | reopen | abandon` is how the run gets unblocked.
+      expect(text).toContain('fix (Return to the phase and satisfy the gate.)')
+      expect(text).toContain('reopen (Reopen an earlier locked artifact and repair it there.)')
+      expect(text).toContain('abandon (Stop the run; the block is not resolvable now.)')
+      // (3) AND THE STRUCTURED PAYLOAD RIDES THE REFUSAL, in the log a human reads ("why was this
+      //     lock refused?" — and now, what can be done about it).
+      const [record] = readGuardDecisions(m.repo, 5)
+      expect(record.kind).toBe('deny')
+      expect(record.rule).toBe('lock-order')
+      expect(record.ask, 'the refusal carried no gate-block ask').toBeDefined()
+      expect(record.ask!.gate).toBe('gate-block')
+      expect(record.ask!.artifact).toBe('01-as-is.md')
+      expect(record.ask!.options.map((option) => option.label)).toEqual(['fix', 'reopen', 'abandon'])
+      // `blocked` is the refusal's OWN sentence, so the payload is self-describing.
+      expect(record.ask!.blocked).toBe(record.reason)
+      expect(text).toContain(renderGateBlockAsk(record.ask!))
+      // (4) THE PLAIN REASON SURVIVES INTACT: a caller that ignores the ask still gets the rule and
+      //     the blocking artifact with its status.
+      expect(record.reason).toContain('monotonic lock-order')
+      expect(record.reason).toContain('00-requirements.md (DRAFT)')
+    } finally {
+      await m.dispose()
+    }
+  })
+
   it('still denies a write to a LOCKED artifact through the live path', async () => {
     const m = await mount({ '00-requirements.md': locked(RUN_ID) })
     try {
@@ -208,6 +263,69 @@ describe('T15 — the guard resolves the ACTIVE RUN (was: empty runId)', () => {
     } finally {
       await m.dispose()
     }
+  })
+
+  /**
+   * ITEM 2 — THE GUARD'S ALLOW-WITH-WARNING LINE NAMED A MODE THAT WAS NOT IN FORCE.
+   *
+   * The line read `[recursive] tool guard (advisory): <warn> — allowing` UNCONDITIONALLY, while the
+   * warning it carries comes from the transition gate's REPORT-ONLY consult — which attaches a warning
+   * to an ALLOW in BOTH modes. Under the strict default a reader was told enforcement was off while
+   * every gate was strict: text asserting a state that was not so, which is the defect class this
+   * project keeps fixing.
+   *
+   * THE SETUP IS THE WARN-ON-ALLOW ITSELF, and it is deliberate rather than convenient: `00` is
+   * LOCKED, so the lock-order rule ABSTAINS and the guard ALLOWS `01-as-is.md`; `01` is MISSING, so
+   * the transition gate reports `phase doc does not exist` — the report-only dissent this line
+   * describes. The call is not asserted on beyond that: what is under test is the LOG, and the tool's
+   * own refusal follows pre-existing behaviour.
+   */
+  describe('the allow-with-warning line names the mode it ran under', () => {
+    /** The `[recursive]` lines one lock call emits, with `console.warn` captured. */
+    async function warnLines(mode: 'strict' | 'advisory'): Promise<string[]> {
+      const m = await mount({ '00-requirements.md': locked(RUN_ID) })
+      const seen: string[] = []
+      const spy = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+        seen.push(args.map((arg) => String(arg)).join(' '))
+      })
+      try {
+        m.ctx.recursive.setEnforcementConfig({ toolGuards: mode })
+        await m.ctx.tools.execute({
+          signal,
+          callId: ToolCallId('g-log-' + mode),
+          name: 'recursive_lock',
+          arguments: { runId: RUN_ID, artifact: '01-as-is.md' },
+          agent: { session: { header: { cwd: m.repo } } },
+        } as never)
+        // Precondition, ASSERTED: the guard really did ALLOW this call, so the line below is the
+        // warn-on-allow path and not a refusal that would have been logged differently.
+        expect(readGuardDecisions(m.repo, 5)[0].kind, 'the guard did not allow the call').toBe('allow')
+      } finally {
+        spy.mockRestore()
+        await m.dispose()
+      }
+      return seen.filter((line) => line.includes('[recursive]'))
+    }
+
+    it('says strict under strict, and names the gate as report-only instead of as the mode', async () => {
+      const lines = await warnLines('strict')
+      expect(lines, 'no guard warning was logged: ' + JSON.stringify(lines)).toHaveLength(1)
+      expect(lines[0]).toContain('tool guard (strict) allowed this call')
+      // The old text, verbatim, is what this case exists to keep out.
+      expect(lines[0]).not.toContain('tool guard (advisory)')
+      // The warning is the transition gate's dissent, and it says so.
+      expect(lines[0]).toContain('transition gate (report-only) failed:')
+      expect(lines[0]).toContain('01-as-is.md')
+    })
+
+    it('says advisory under advisory — the prefix follows the config, it is not a constant', async () => {
+      const lines = await warnLines('advisory')
+      expect(lines, 'no guard warning was logged: ' + JSON.stringify(lines)).toHaveLength(1)
+      expect(lines[0]).toContain('tool guard (advisory) allowed this call')
+      // The SAME warn text in both modes: it describes the gate's posture, not the configured mode,
+      // which is exactly the distinction the old `(advisory)` prefix blurred.
+      expect(lines[0]).toContain('transition gate (report-only) failed:')
+    })
   })
 })
 

@@ -43,6 +43,8 @@ import * as plugin from '../src/index.ts'
 import { runPhase8Trigger, spawnExtractorRunner, TRAINING_EXTRACTOR_ENV } from '../src/training.ts'
 import { AUDITED_PHASE_FILES } from '../src/phase-rules.ts'
 import { getGateStatus } from '../src/ts-lint.ts'
+import { readGuardDecisions } from '../src/guard-log.ts'
+import { renderGateBlockAsk } from '../src/recursive_ask.tool.ts'
 import { authorCompliantPhase, prepareCompliantRun, COMPLIANT_PHASES } from './compliant-artifact.ts'
 
 /** The scratch root: `E:` by default, overridable, with a tmpdir fallback for a machine without it. */
@@ -712,8 +714,20 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
    * The gate-block gate belongs to the moment a run is BLOCKED, and that moment is a refused lock. This
    * attempts an out-of-order lock on a fresh run — `02-to-be-plan.md` while `00-requirements.md` is still
    * DRAFT — and asserts the refusal carries a structured choice rather than only a sentence.
+   *
+   * ⚠ THE REFUSING LAYER MOVED WITH THE STRICT DEFAULT, AND THE ASSERTION MOVED WITH IT. This mounts the
+   * plugin with NO `enforcement` section — the DEFAULT path — and the default posture is now strict, so
+   * the GUARD refuses this call PRE-DISPATCH: the harness never dispatches the tool and renders the
+   * decision as `Error: <reason>`, dropping every other field of it (measured in `packages/core/tools`).
+   * A payload that stayed a sibling field would therefore reach nobody, which is why the options have to
+   * be IN the sentence the caller reads. They are, and that sentence is the RENDER of the payload the
+   * decision carries — asserted against `renderGateBlockAsk` rather than against a second hand-written
+   * string, so a hardcoded copy cannot pass a label grep while drifting from the real options.
+   *
+   * The second case keeps the TOOL's own branch covered (under advisory the guard allows and
+   * `lockArtifact` refuses) and pins BOTH refusals to ONE payload shape.
    */
-  it('FU-7: a refused lock carries the gate-block ask with its options', async () => {
+  it('FU-7: a refused lock carries the gate-block ask with its options (GUARD, default posture)', async () => {
     const root = join(scratchRoot(), 'fu7b-' + new Date().toISOString().replace(/[:.]/g, '-'))
     mkdirSync(root, { recursive: true })
     execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' })
@@ -721,6 +735,7 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
+      // No `enforcement` section on purpose: this is the default path.
       await ctx.plugin(plugin as never, { repoRoot: root } as never)
       const call = async (tool: string, args: Record<string, unknown>) => ctx.tools.execute({
         signal: new AbortController().signal,
@@ -733,19 +748,94 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
       await call('recursive_init', { runId: 'fu7b-run' })
       const envelope = JSON.parse(JSON.stringify(await call('recursive_lock', {
         runId: 'fu7b-run', artifact: '02-to-be-plan.md',
-      }))) as { content: Array<{ text: string }> }
+      }))) as { content: Array<{ text: string }>; isError?: boolean }
+
+      // (1) REFUSED BY THE GUARD, BEFORE DISPATCH. The tool's own `Prerequisite blockers:` sentence can
+      // only appear if the tool ran, so its ABSENCE is what proves which layer refused.
+      expect(envelope.isError, 'the lock was not refused: ' + JSON.stringify(envelope).slice(0, 300)).toBe(true)
+      const text = envelope.content.map((part) => part.text).join('\n')
+      expect(text).toContain('monotonic lock-order')
+      expect(text).not.toContain('Prerequisite blockers')
+
+      // (2) THE REFUSAL CARRIES THE DECISION. The guard's decision log is the other half of the refusal,
+      // so the payload is read from the trace rather than inferred from the sentence.
+      const denied = readGuardDecisions(root, 10).filter((record) => record.kind === 'deny')
+      expect(denied, 'the guard recorded no refusal').toHaveLength(1)
+      expect(denied[0].rule).toBe('lock-order')
+      const ask = denied[0].ask
+      expect(ask, 'the refusal carried no ask: ' + JSON.stringify(denied[0])).toBeDefined()
+      expect(ask!.gate).toBe('gate-block')
+      expect(ask!.artifact).toBe('02-to-be-plan.md')
+      expect(ask!.options.map((option) => option.label)).toEqual(['fix', 'reopen', 'abandon'])
+      expect(ask!.blocked).toContain('monotonic lock-order')
+      // ONE SHAPE — the keys the payload has, pinned literally, so a field added to one copy of it shows
+      // up here as a diff instead of silently splitting the two refusals apart.
+      expect(Object.keys(ask!).sort()).toEqual(['artifact', 'blocked', 'gate', 'header', 'id', 'options', 'question'])
+
+      // (3) AND IT IS WHAT THE CALLER ACTUALLY READS: the refusal text is the render of that payload.
+      expect(text).toContain(renderGateBlockAsk(ask!))
+      expect(text).toContain('fix (Return to the phase and satisfy the gate.)')
+      expect(text).toContain('abandon (Stop the run; the block is not resolvable now.)')
+
+      // (4) THE PLAIN REASON SURVIVES: a caller that ignores the ask still gets the rule name and the
+      // blocking artifact with its status.
+      expect(text).toContain('monotonic lock-order')
+      expect(text).toContain('00-requirements.md (DRAFT)')
+    } finally {
+      if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
+      await ctx.fiber.dispose()
+    }
+  }, 120_000)
+
+  /**
+   * FU-7 (the same call point, the OTHER refuser) — the tool's branch, kept covered.
+   *
+   * Under `advisory` tool guards the guard does not refuse: it turns the ordering verdict into an `ask`
+   * that the live path coerces to an allow-with-warning, the tool dispatches, and `lockArtifact` throws
+   * `Prerequisite blockers:` — which is where the ask lived before this change, and where it still lives
+   * when the guard abstains (notably when the call names a run other than the active one). Asserting the
+   * SAME payload shape here is what keeps the two refusals from drifting: one builder, two refusers.
+   */
+  it('FU-7: under advisory the TOOL refuses and carries the SAME payload shape', async () => {
+    const root = join(scratchRoot(), 'fu7c-' + new Date().toISOString().replace(/[:.]/g, '-'))
+    mkdirSync(root, { recursive: true })
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' })
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      // The mode is stated rather than inherited: this case is about the TOOL's branch, which the guard
+      // only reaches when it does not refuse.
+      ctx.recursive.setEnforcementConfig({ toolGuards: 'advisory' })
+      const call = async (tool: string, args: Record<string, unknown>) => ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('fu7c-' + tool),
+        name: tool,
+        arguments: args,
+        agent: { session: { header: { cwd: root } } },
+      } as never)
+
+      await call('recursive_init', { runId: 'fu7c-run' })
+      const envelope = JSON.parse(JSON.stringify(await call('recursive_lock', {
+        runId: 'fu7c-run', artifact: '02-to-be-plan.md',
+      }))) as { content: Array<{ text: string }>; isError?: boolean }
       const payload = JSON.parse(envelope.content[0].text) as {
-        error?: { code?: string; problem?: string }
-        ask?: { gate: string; artifact: string; options: Array<{ label: string }> }
+        error?: unknown
+        ask?: { gate: string; artifact: string; blocked: string; options: Array<{ label: string }> }
       }
 
       // The refusal still carries the typed error — the ask is ADDED, not a replacement.
-      expect(payload.error, 'the lock was not refused: ' + JSON.stringify(payload).slice(0, 300)).toBeDefined()
-      // And it now carries the decision a person has to make.
-      expect(payload.ask, 'no gate-block ask on the refusal: ' + JSON.stringify(payload).slice(0, 400)).toBeDefined()
-      expect(payload.ask?.gate).toBe('gate-block')
-      expect(payload.ask?.artifact).toBe('02-to-be-plan.md')
-      expect(payload.ask?.options.map((option) => option.label)).toEqual(['fix', 'reopen', 'abandon'])
+      expect(payload.error, 'the lock was not refused: ' + envelope.content[0].text.slice(0, 300)).toBeDefined()
+      expect(payload.ask, 'no gate-block ask on the tool refusal').toBeDefined()
+      expect(payload.ask!.gate).toBe('gate-block')
+      expect(payload.ask!.artifact).toBe('02-to-be-plan.md')
+      expect(payload.ask!.options.map((option) => option.label)).toEqual(['fix', 'reopen', 'abandon'])
+      // This branch is the OUT-OF-ORDER one, and it says so in its own words: the tool's sentence, not
+      // the guard's, which is the other reason the two payloads are compared by shape and not by text.
+      expect(payload.ask!.blocked).toContain('Prerequisite blockers:')
+      // THE SAME KEYS as the guard's payload above (asserted there too): one shape, two refusers.
+      expect(Object.keys(payload.ask!).sort()).toEqual(['artifact', 'blocked', 'gate', 'header', 'id', 'options', 'question'])
     } finally {
       if (process.env.E2E_KEEP !== '1') rmSync(root, { recursive: true, force: true })
       await ctx.fiber.dispose()

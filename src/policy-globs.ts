@@ -41,7 +41,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
-import { getLockStatus, getPrerequisiteBlockers } from './lock.ts'
+import { getLockStatus, getPrerequisiteBlockers, type PrerequisiteBlocker } from './lock.ts'
 import { getMdFieldValue } from './status.ts'
 import { phaseNumberForArtifact, policyTargetPath, resolveFrom } from './phase-rules.ts'
 
@@ -58,6 +58,18 @@ export interface Decision {
   kind: Verdict
   reason?: string
   rule?: string
+  /**
+   * THE FACTS THE PREDICATE DECIDED FROM, when it read any. The lock-order rule resolves the
+   * artifact's prerequisites from disk, and the layer that turns this decision into a refusal
+   * needs those same facts to build the caller's recovery options. Carrying them is what makes
+   * "the guard already has them" true: a second `getPrerequisiteBlockers` call from the denial
+   * would re-read a run tree that is on disk and unlocked, and could answer differently.
+   *
+   * Absent for every rule that decides on its pattern alone, and absent when the predicate read
+   * nothing — so its presence means "this refusal was decided from these blockers", not "the
+   * policy mentions blockers".
+   */
+  blockers?: readonly PrerequisiteBlocker[]
 }
 
 /**
@@ -99,6 +111,12 @@ export interface ToolPolicyContext {
 export interface ToolPolicyPredicateMatch {
   verdict: Verdict
   detail?: string
+  /**
+   * The blockers the predicate READ, when it read any (see `Decision.blockers`). Optional and
+   * additive: a predicate that decided from something else returns none, and the engine's
+   * verdict is unchanged either way.
+   */
+  blockers?: readonly PrerequisiteBlocker[]
 }
 
 export type ToolPolicyPredicate = (
@@ -338,7 +356,7 @@ export function evaluateToolPolicy(
       // Abstention: this rule does not govern this call, so it does not
       // participate and the next rule in precedence order decides.
       if (match === null) continue
-      return decide(rule, match.verdict, match.detail ? rule.reason + ' ' + match.detail : rule.reason)
+      return decide(rule, match.verdict, match.detail ? rule.reason + ' ' + match.detail : rule.reason, match.blockers)
     }
     return decide(rule, rule.verdict, rule.reason)
   }
@@ -347,10 +365,17 @@ export function evaluateToolPolicy(
   return { kind: 'ask', reason: 'no policy rule matches ' + id + ' - ask is the no-match default' }
 }
 
-/** One place where a rule's verdict becomes a decision, so `label` cannot drift. */
-function decide(rule: ToolPolicyRule, kind: Verdict, reason: string): Decision {
+/**
+ * One place where a rule's verdict becomes a decision, so `label` cannot drift.
+ *
+ * `blockers` rides along untouched when the predicate supplied any (see `Decision.blockers`);
+ * an EMPTY list is dropped rather than carried, so `blockers` on a decision always means "there
+ * were blockers", never "the rule looked and found none".
+ */
+function decide(rule: ToolPolicyRule, kind: Verdict, reason: string, blockers?: readonly PrerequisiteBlocker[]): Decision {
   const decision: Decision = { kind, reason }
   if (rule.label) decision.rule = rule.label
+  if (blockers !== undefined && blockers.length > 0) decision.blockers = blockers
   return decision
 }
 
@@ -425,7 +450,14 @@ function lockOrderRule(artifact: unknown, runDir: string | undefined): ToolPolic
   if (!name || !runDir) return null
   const blockers = getPrerequisiteBlockers(runDir, name)
   if (blockers.length === 0) return null
-  return { verdict: 'deny', detail: blockers.map((b) => b.artifact + ' (' + b.status + ')').join(', ') }
+  return {
+    verdict: 'deny',
+    detail: blockers.map((b) => b.artifact + ' (' + b.status + ')').join(', '),
+    // THE SAME READ, carried up rather than thrown away: the denial's recovery options are built
+    // from these blockers, and re-deriving them one layer higher would be a second filesystem
+    // answer to a question this rule has already answered.
+    blockers,
+  }
 }
 
 /**

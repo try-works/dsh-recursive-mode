@@ -17,7 +17,7 @@
  * silently coerced a bad value would be a second, weaker contract beside the real one.
  */
 import z from '@deepseek-ai/schemastery'
-import { DEFAULT_BUDGETS } from './enforcement.ts'
+import { DEFAULT_BUDGETS, DEFAULT_ENFORCEMENT_MODE } from './enforcement.ts'
 
 /** One enforcement mode, as the settings form presents it. */
 const enforcementMode = z.union([z.const('strict'), z.const('advisory')])
@@ -58,14 +58,21 @@ export const Config = z.object({
   repoRoot: z.string().description(
     'Control-plane root. Defaults to the process working directory when unset.',
   ),
+  /**
+   * ⚠ THE THREE MODE DEFAULTS READ `DEFAULT_ENFORCEMENT_MODE` FROM `enforcement.ts`, and
+   * that is deliberate: the schema default and the runtime default are the SAME value, and
+   * two literals here would be two defaults. A caller that omits the section gets
+   * `DEFAULT_ENFORCEMENT` from the runtime; a caller that supplies a partial section gets
+   * the resolver's fill. Both must be the enforcing posture — see the const for why.
+   */
   enforcement: z.object({
-    preStep: enforcementMode.default('advisory').description(
+    preStep: enforcementMode.default(DEFAULT_ENFORCEMENT_MODE).description(
       'Phase pre-step enforcement: strict refuses an out-of-order transition, advisory warns and proceeds.',
     ),
-    toolGuards: enforcementMode.default('advisory').description(
+    toolGuards: enforcementMode.default(DEFAULT_ENFORCEMENT_MODE).description(
       'Tool guard mode: strict DENIES an out-of-order tool call, advisory allows it and carries the warning.',
     ),
-    tamper: enforcementMode.default('advisory').description(
+    tamper: enforcementMode.default(DEFAULT_ENFORCEMENT_MODE).description(
       'Tamper detection: strict refuses an artifact whose LockHash no longer matches its body.',
     ),
     budgets: z.object({

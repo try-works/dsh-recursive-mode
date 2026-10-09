@@ -95,3 +95,30 @@
 - **Consequences:** a run whose product only became correct after its phase loop cannot leave its phase docs describing the earlier snapshot; the closeout phases are the honest reconciliation point, and the git history + user acceptance (not the phase-loop timeline) are the source of truth for "what actually shipped".
 - **Rationale:** run 07's phase-03 UI FAILED acceptance and was repaired by creator steering (0.1.13 Paper redesign, 0.1.14 workspace precedence, 0.1.15 SSE await, 0.1.16 scope reset + workspacePath header sync, 0.1.17 strip removal, 0.1.18 setState(null) removal); recording the phase-03 snapshot as final would fabricate a clean history that contradicts the real commits and the user's 0.1.18 acceptance.
 
+
+
+## Decision: Enforcement defaults to STRICT, not advisory (2026-10-10)
+
+- **Status:** decided. **Owner:** dsh-recursive-mode maintainers, at the repository owner's instruction.
+- **Supersedes:** "Enforcement strictness is configurable strict|advisory per gate (run 05)" — that entry's `default advisory` is no longer
+  true. It is left verbatim above as a dated record; this entry is the current statement.
+- **Decision:** `preStep`, `toolGuards` and `tamper` all default to `strict`. One literal,
+  `DEFAULT_ENFORCEMENT_MODE` in `src/enforcement.ts`, is read by every site: the runtime `DEFAULT_ENFORCEMENT`, the
+  resolver's fill for an ABSENT OR UNRECOGNIZED value, both helper parameter defaults, and the three schema defaults in
+  `src/config.ts`.
+- **Rationale:** the owner's rule is that only one phase may be active at a time, that phases are sequential, and that the
+  active phase must be locked before the next begins. Under `advisory` that rule is only WARNED about, and a live run
+  demonstrated the cost: it ignored the lock chain for over an hour, wrote phase 8 before phase 1.5, and locked nothing —
+  twelve DRAFT artifacts and a single operations entry. Advisory is the unsafe default for a rule the operator expects to
+  hold.
+- **Why it is safe now, when it was not before:** strict previously denied the run's OWN artifacts, which made the workflow
+  unusable. That false positive was fixed, and a test now walks all twelve phases asserting the active artifact stays
+  writable while later ones are refused.
+- **Consequences:** an out-of-order tool call and an out-of-order transition are now REFUSED pre-dispatch rather than
+  warned; a tampered artifact whose LockHash no longer matches is refused. A PARTIAL config section — a settings patch
+  merging one field — now fills the unstated gates with the default posture rather than with a permissive one; the old fill
+  returned `advisory`, i.e. a config looser than the plugin's own default. An ordering refusal from the guard carries the
+  gate-block ask (`fix`/`reopen`/`abandon`), because that ask is the human's only way out of a blocked lock and must not
+  become unreachable on the DEFAULT path. `coerceAskToDecision`'s parameter default follows the config default by
+  reference: the domain has no neutral branch, and an `advisory` literal there would be a hidden second copy of the old
+  default that no config could close.

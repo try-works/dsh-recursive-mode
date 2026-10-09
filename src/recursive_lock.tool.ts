@@ -1,6 +1,6 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { codeRuntimeRefusal, toolError } from './errors.ts'
-import { buildAskQuestion } from './recursive_ask.tool.ts'
+import { buildGateBlockAsk } from './recursive_ask.tool.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RecursiveRuntime } from './runtime.ts'
 
@@ -37,10 +37,16 @@ export function createRecursiveLockTool(recursive: RecursiveRuntime) {
         // ⚠ IT IS ATTACHED TO THE ORDERING REFUSAL SPECIFICALLY (`Prerequisite blockers:`), because that
         // is the one a human resolves. A missing run id or an already-locked artifact is a caller mistake
         // with a mechanical fix, and offering "reopen / abandon the run" for those would be noise.
+        //
+        // ⚠ AND THE PAYLOAD COMES FROM `buildGateBlockAsk`, NOT FROM A LITERAL HERE. The GUARD refuses
+        // the same ordering violation pre-dispatch (it resolves the same blockers from the same run
+        // tree) and attaches this same payload; one builder is what keeps the two refusals offering the
+        // same options. This branch still fires whenever the guard ABSTAINS — most visibly when the call
+        // names a run other than the active one, because the guard resolves the run from the filesystem.
         if (message.startsWith('Prerequisite blockers:')) {
           return {
             error: refusal,
-            ask: { gate: 'gate-block', ...buildAskQuestion('gate-block'), artifact: args.artifact ?? '', blocked: message },
+            ask: buildGateBlockAsk(args.artifact ?? '', message),
           } as unknown as JsonValue
         }
         return { error: refusal } as const

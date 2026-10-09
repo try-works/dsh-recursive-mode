@@ -28,7 +28,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Config, type RecursiveModeConfig } from '../src/config.ts'
 import { loadRouterPolicy } from '../src/router.ts'
-import { DEFAULT_BUDGETS } from '../src/enforcement.ts'
+import { DEFAULT_BUDGETS, DEFAULT_ENFORCEMENT_MODE } from '../src/enforcement.ts'
 import * as plugin from '../src/index.ts'
 
 /** What the settings service would hand the plugin after a form edit. */
@@ -44,18 +44,28 @@ describe('T7 — the plugin declares a Config schema the settings service can di
     expect(typeof (plugin.Config as unknown as (value: unknown) => unknown)).toBe('function')
   })
 
-  it('fills the enforcement namespace with the documented defaults', () => {
+  it('fills the enforcement namespace with the documented defaults — STRICT, the owner’s decision', () => {
+    // ⚠ THE SCHEMA LAYER'S HALF OF THE REVERT GUARD. `editedConfig({})` is a caller that said
+    // nothing, so these three values ARE the default; they are written as LITERALS on purpose,
+    // because reading them from `DEFAULT_ENFORCEMENT` would make this case move with the code
+    // it is meant to hold still. The runtime layer's half is in tests/enforcement.spec.ts.
     const filled = editedConfig({})
-    expect(filled.enforcement?.preStep).toBe('advisory')
-    expect(filled.enforcement?.toolGuards).toBe('advisory')
-    expect(filled.enforcement?.tamper).toBe('advisory')
+    expect(filled.enforcement?.preStep).toBe('strict')
+    expect(filled.enforcement?.toolGuards).toBe('strict')
+    expect(filled.enforcement?.tamper).toBe('strict')
     expect(filled.enforcement?.budgets).toEqual(DEFAULT_BUDGETS)
+    // The two layers cannot drift: the schema default IS the runtime default, one const.
+    expect(filled.enforcement).toEqual(expect.objectContaining({
+      preStep: DEFAULT_ENFORCEMENT_MODE,
+      toolGuards: DEFAULT_ENFORCEMENT_MODE,
+      tamper: DEFAULT_ENFORCEMENT_MODE,
+    }))
   })
 
   it('applies one edited field and leaves the rest at their defaults', () => {
-    const filled = editedConfig({ enforcement: { toolGuards: 'strict' } })
-    expect(filled.enforcement?.toolGuards).toBe('strict')
-    expect(filled.enforcement?.preStep).toBe('advisory')
+    const filled = editedConfig({ enforcement: { toolGuards: 'advisory' } })
+    expect(filled.enforcement?.toolGuards).toBe('advisory')
+    expect(filled.enforcement?.preStep).toBe('strict')
   })
 
   it('REJECTS an unknown mode loudly instead of coercing it', () => {
@@ -134,10 +144,15 @@ describe('T7 — a settings edit changes enforcement LIVE (the acceptance)', () 
 
   it('leaves the runtime default ALONE when the caller said nothing about enforcement', async () => {
     // Presence, not truthiness: an absent section is "no opinion", and the runtime's own
-    // default must survive it.
+    // default must survive it — which is now STRICT on all three gates, the owner's decision.
+    // This is the live-path half of the revert guard: `apply` skips `setEnforcementConfig`
+    // entirely when `enforcement` is absent, so what is asserted here is the value the runtime
+    // falls back to on its own, not a value this test handed it.
     const m = await mountWith({ repoRoot: undefined } as RecursiveModeConfig)
     try {
-      expect(m.ctx.recursive.enforcementConfig).toEqual(expect.objectContaining({ toolGuards: 'advisory' }))
+      expect(m.ctx.recursive.enforcementConfig).toEqual(expect.objectContaining({
+        preStep: 'strict', toolGuards: 'strict', tamper: 'strict',
+      }))
     } finally {
       await m.dispose()
     }

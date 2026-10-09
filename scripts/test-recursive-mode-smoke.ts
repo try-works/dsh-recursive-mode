@@ -166,7 +166,17 @@ async function main() {
     const coercedAdvisory = coerceAskToDecision(askDecision, 'advisory')
     check('T6 ask->deny under strict', coercedStrict.kind === 'deny')
     check('T6 ask->allow+warn under advisory (never silent)', coercedAdvisory.kind === 'allow' && typeof (coercedAdvisory as { warn?: string }).warn === 'string')
-    check('R7 config default advisory', JSON.stringify(resolveEnforcementConfig(undefined)) === JSON.stringify(DEFAULT_ENFORCEMENT))
+    // ⚠ THE CHECK THAT USED TO BE HERE WAS VACUOUS: it compared the resolver's output with
+    // `DEFAULT_ENFORCEMENT`, and both sides move together, so a change of default could never
+    // fail it. Read the default and assert the VALUE, so a revert to advisory is caught.
+    const defaultConfig = resolveEnforcementConfig(undefined)
+    check('R7 config default strict (all three gates)',
+      defaultConfig.preStep === 'strict' && defaultConfig.toolGuards === 'strict' && defaultConfig.tamper === 'strict'
+      && JSON.stringify(defaultConfig) === JSON.stringify(DEFAULT_ENFORCEMENT))
+    // A PARTIAL section must fill the unstated gates with the same posture, not with advisory:
+    // the settings service merges ONE edited field into an entry's config.
+    const partial = resolveEnforcementConfig({ toolGuards: 'advisory' })
+    check('R7 partial config fills strict', partial.preStep === 'strict' && partial.tamper === 'strict' && partial.toolGuards === 'advisory')
     let configError = ''
     try { resolveEnforcementConfig({ bogus: 1 }) } catch (err) { configError = (err as Error).message }
     check('R7 unknown config key fails', configError.includes('unknown key'))

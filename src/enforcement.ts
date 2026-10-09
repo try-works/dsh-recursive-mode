@@ -3,7 +3,7 @@
  * (Phase C R3/R4/R7/R8, PROPOSAL 8.4/8.6/13.5).
  *
  * Layer 2 (tool guards) and Layer 8 (tamper) are the remaining enforcement
- * layers. Configurable strict|advisory per gate (default advisory).
+ * layers. Configurable strict|advisory per gate (default strict).
  */
 import { existsSync, readdirSync } from 'node:fs'
 import { join, isAbsolute, resolve, sep } from 'node:path'
@@ -15,6 +15,7 @@ import {
   type ToolPolicy, type ToolPolicyContext, type Decision as PolicyDecision,
 } from './policy-globs.ts'
 import { withPhaseBaseline, phaseNumberForArtifact, resolveFrom } from './phase-rules.ts'
+import { buildGateBlockAsk, type GateBlockAsk } from './recursive_ask.tool.ts'
 
 /**
  * The BUILT-IN default rule list (T16) is defined in `src/policy-globs.ts`,
@@ -76,6 +77,29 @@ const BUDGET_KEYS: ReadonlyArray<keyof BudgetConfig> = [
 ]
 
 /**
+ * THE DEFAULT POSTURE: STRICT, on all three gates — and this const is the ONE literal.
+ *
+ * The owner's rule is *only one phase may be active at a time, and the phases should be
+ * sequential and the active phase must be locked before proceeding to next phase*. In
+ * `advisory` that rule is only WARNED about, and a live run showed what that costs: the
+ * run ignored the lock chain for over an hour, wrote phase 8 before phase 1.5 and locked
+ * nothing (twelve DRAFT artifacts, one operations entry). Strict was previously unsafe as
+ * a default because it also refused the run's OWN artifacts — a false positive. That was
+ * fixed, and `tests/strict-run-tree.spec.ts` now walks all twelve phases asserting the
+ * active artifact stays writable while a later one is refused. Strict therefore refuses
+ * exactly the ordering violations it is meant to refuse, so the default is the enforcing
+ * posture rather than a warning nobody has to act on.
+ *
+ * ⚠ WHY IT IS A NAMED CONST AND NOT THREE LITERALS. A default restated per site is this
+ * project's recurring failure: the same value exists in the Config schema, in
+ * `DEFAULT_ENFORCEMENT`, in an omitted config section, and in the parameter defaults of
+ * the helpers below, and moving only some of them leaves a caller that "still gets
+ * advisory". Every one of those sites now reads THIS const, so a revert is a one-line
+ * change and nothing can drift from it.
+ */
+export const DEFAULT_ENFORCEMENT_MODE: EnforcementMode = 'strict'
+
+/**
  * Validate the enforcement config shape (unknown keys fail at plugin load).
  *
  * A budget must be a POSITIVE INTEGER. Zero and negatives are rejected rather than
@@ -89,7 +113,17 @@ export function resolveEnforcementConfig(config: unknown): EnforcementConfig {
   if (unknown.length > 0) {
     throw new Error('EnforcementConfig has unknown key(s) ' + unknown.join(', ') + ' - config is { preStep, toolGuards, tamper, budgets }')
   }
-  const mode = (value: unknown): EnforcementMode => (value === 'strict' ? 'strict' : 'advisory')
+  // ⚠ AN ABSENT MODE RESOLVES TO THE DEFAULT MODE, not to the permissive branch. This is
+  // the twin-default trap in its most consequential form: a caller that supplies a PARTIAL
+  // section — `enforcement: { toolGuards: 'advisory' }` from a settings patch, or just the
+  // budgets — leaves the other gates unstated, and filling those with `advisory` would
+  // hand back a config that is looser than the plugin's own default with nothing saying so.
+  // An UNRECOGNIZED value resolves the same way and thus fails CLOSED. The Config schema in
+  // src/config.ts still rejects a typo loudly at the settings boundary; this resolver is
+  // the lenient one, and a lenient resolver must bend towards the safe posture: a typo that
+  // blocks is a visible stop, a typo that permits is the hour-long out-of-order run again.
+  const mode = (value: unknown): EnforcementMode =>
+    value === 'strict' ? 'strict' : value === 'advisory' ? 'advisory' : DEFAULT_ENFORCEMENT_MODE
 
   const rawBudgets = (raw.budgets ?? {}) as Record<string, unknown>
   if (typeof raw.budgets !== 'undefined' && (raw.budgets === null || typeof raw.budgets !== 'object')) {
@@ -117,10 +151,16 @@ export function resolveEnforcementConfig(config: unknown): EnforcementConfig {
   }
 }
 
+/**
+ * The runtime default: what a caller gets when it supplies no `enforcement` section at all
+ * (a profile mounting this plugin with no config, e.g. `preset/recursive.patch.yml`). It is
+ * `DEFAULT_ENFORCEMENT_MODE` per gate, so this object and the resolver cannot disagree —
+ * see that const for WHY the default is strict.
+ */
 export const DEFAULT_ENFORCEMENT: EnforcementConfig = {
-  preStep: 'advisory',
-  toolGuards: 'advisory',
-  tamper: 'advisory',
+  preStep: DEFAULT_ENFORCEMENT_MODE,
+  toolGuards: DEFAULT_ENFORCEMENT_MODE,
+  tamper: DEFAULT_ENFORCEMENT_MODE,
   budgets: DEFAULT_BUDGETS,
 }
 
@@ -153,10 +193,16 @@ export interface GuardTransition {
  * optional — `coerceAskToDecision` is asserted with `toEqual({ kind: ... })`
  * (an EXACT match) in tests/enforcement.spec.ts, so the coercion path may never
  * grow extra keys. `evaluateToolGuard` itself always sets `rule`.
+ *
+ * ⚠ FU-7: `ask` IS OPTIONAL AND ADDITIVE TOO, for the same reason and one more. A refusal that a
+ * PERSON has to resolve carries the gate-block decision alongside its sentence (see `verdictFor`),
+ * and the payload is built by `buildGateBlockAsk` — the SAME builder the lock tool uses, so the two
+ * refusals cannot offer different options. It is absent on every decision that is not a lock-order
+ * refusal decided from real blockers, which is why every reader must treat it as optional.
  */
 export type ToolGuardDecision =
   | { kind: 'allow'; warn?: string; rule?: GuardRule; transition?: GuardTransition }
-  | { kind: 'deny'; reason: string; rule?: GuardRule; transition?: GuardTransition }
+  | { kind: 'deny'; reason: string; rule?: GuardRule; transition?: GuardTransition; ask?: GateBlockAsk }
   | { kind: 'ask'; reason?: string; rule?: GuardRule; transition?: GuardTransition }
 
 export interface ToolExecLike {
@@ -249,11 +295,23 @@ export function currentPhaseArtifact(worktreeRoot: string, runId: string): strin
   return inForce !== '' ? inForce : best
 }
 
+/**
+ * `mode` is the gate's configured posture. Its parameter default FOLLOWS the config
+ * default by REFERENCE (`DEFAULT_ENFORCEMENT.toolGuards`) rather than repeating the
+ * literal: a bare call is "the caller had no mode to hand", and the answer to that must
+ * be the same posture the config would have produced. Two literals are two defaults, and
+ * a helper left on the old `advisory` literal while the config moved to `strict` is
+ * exactly the twin-default hole this change closes — a caller that forgot the argument
+ * would silently get the permissive branch, which no config could then undo. Every
+ * production call site passes the mode explicitly (`index.ts` `runToolGuard`,
+ * `runtime.ts` `guardTool`, the preview tool); this default serves bare callers, and a
+ * bare caller must not be the one place enforcement quietly turns itself off.
+ */
 export function evaluateToolGuard(
   exec: ToolExecLike,
   worktreeRoot: string,
   activeRunId: string,
-  mode: EnforcementMode = 'advisory',
+  mode: EnforcementMode = DEFAULT_ENFORCEMENT.toolGuards,
 ): ToolGuardDecision {
   const name = exec.name
   const args = (exec.arguments ?? {}) as Record<string, unknown>
@@ -276,7 +334,7 @@ export function evaluateToolGuard(
   const policy = resolveToolPolicyForGuard(worktreeRoot, runId, activePhaseArtifact)
   const context: ToolPolicyContext = { args, runDir, runId, worktreeRoot, activePhaseArtifact }
   const decision = evaluateToolPolicy(policy, name, args, context)
-  return advisory(verdictFor(mode, decision), transition)
+  return advisory(verdictFor(mode, decision, String(args.artifact ?? '')), transition)
 }
 
 /**
@@ -284,12 +342,35 @@ export function evaluateToolGuard(
  * `advisory` asks (the pre-T16 wording, unchanged), `allow` stays an allow. The
  * decision's `rule` is the label of the rule that decided it, so a policy
  * verdict is traceable to an auditable line in the policy file.
+ *
+ * ⚠ FU-7 — THE ORDERING REFUSAL CARRIES THE HUMAN'S CHOICE. `fix | reopen | abandon` is how a
+ * person unblocks a lock, and before this the ask was attached ONLY by `recursive_lock`'s own
+ * catch — the branch that runs when the guard ABSTAINS. Under the strict default the guard
+ * refuses a lock ahead of its prerequisites BEFORE dispatch, so that branch never ran on the
+ * default path and the caller got a bare sentence: the recovery options existed in the code and
+ * were unreachable in the product, which is worse than the advisory posture they replaced (an
+ * advisory `ask` at least surfaced the reason).
+ *
+ * THE TRIGGER IS THE BLOCKERS, NOT THE LABEL. `PolicyDecision.blockers` is present exactly when a
+ * predicate read prerequisite blockers from disk and they were non-empty, so gating on it means
+ * "this refusal was decided from an ordering violation" — including a policy FILE whose
+ * `recursive_lock*` deny carries no label (the file-authored rule is given the same condition by
+ * `attachPolicyPredicate`, and its `rule` would otherwise read `none`). Nothing is recomputed
+ * here: the blockers arrive from the rule that already resolved them.
+ *
+ * IT IS ATTACHED TO THE REFUSAL ONLY. Under `advisory` the same verdict becomes an `ask` that the
+ * live path coerces to an allow-with-warning, and the tool then refuses with its OWN payload when
+ * `lockArtifact` throws — so an ask attached here would be a claim about a refusal that this layer
+ * did not make. One refusal, one ask.
  */
-function verdictFor(mode: EnforcementMode, decision: PolicyDecision): ToolGuardDecision {
+function verdictFor(mode: EnforcementMode, decision: PolicyDecision, artifact: string): ToolGuardDecision {
   const rule = (decision.rule ?? 'none') as GuardRule
   if (decision.kind === 'allow') return { kind: 'allow', rule }
   const reason = decision.reason ?? 'tool policy denied this call'
-  return mode === 'strict' ? { kind: 'deny', reason, rule } : { kind: 'ask', reason, rule }
+  if (mode !== 'strict') return { kind: 'ask', reason, rule }
+  const blocked = decision.blockers
+  if (blocked === undefined || blocked.length === 0) return { kind: 'deny', reason, rule }
+  return { kind: 'deny', reason, rule, ask: buildGateBlockAsk(artifact, reason) }
 }
 
 /**
@@ -337,10 +418,17 @@ function advisory(decision: ToolGuardDecision, transition: GateCheckResult | und
   if (transition.passed) return { ...decision, transition }
   // The verdict stays `allow`; the gate only names itself as the dissenting
   // voice, so an advisory pass is never silent.
+  //
+  // ⚠ FU-7 (the log fix) — "REPORT-ONLY", NOT "advisory". This sentence travels into the guard's
+  // log line and into the decision a caller reads, and `advisory` there named the GATE's posture
+  // — not the configured mode — while the line around it said `tool guard (advisory)`. Under the
+  // strict default a reader was told enforcement was off while every gate was strict. What is
+  // actually true of this gate in BOTH modes is that it reports and never changes the verdict, so
+  // that is what it now says. The warn-on-allow semantics are untouched.
   return {
     ...decision,
     rule: 'transition',
-    warn: 'transition gate (advisory) failed: ' + transition.failures.join('; '),
+    warn: 'transition gate (report-only) failed: ' + transition.failures.join('; '),
     transition,
   }
 }
@@ -350,8 +438,23 @@ function advisory(decision: ToolGuardDecision, transition: GateCheckResult | und
  * allow. Under `strict` it coerces to `deny`; under `advisory` it stays `allow`
  * but flags a `warn` so the caller never lets it through unlogged. Non-ask
  * decisions pass through unchanged.
+ *
+ * ⚠ THE `mode` DEFAULT IS DELIBERATE, and it is NOT a neutral fallback — there is no
+ * neutral branch here. The domain is two postures, one of which ALLOWS the call, so
+ * "unspecified" has to be resolved rather than left open, and this codebase's rule for an
+ * undecidable path is to fail CLOSED (`index.ts`: *"we could not decide" is not
+ * permission*). It therefore FOLLOWS the config default by REFERENCE
+ * (`DEFAULT_ENFORCEMENT.toolGuards`), for the same reason as `evaluateToolGuard`'s: an
+ * `advisory` literal here would be a second, hidden copy of the old default inside the
+ * very module this change moves, and a future caller that omitted the argument would
+ * re-open the permissive path with no config able to close it. The production call site
+ * (`index.ts` `runToolGuard`) always passes the configured mode, so this changes no live
+ * behaviour — it removes the last place where "we were not told" meant "allow".
  */
-export function coerceAskToDecision(decision: ToolGuardDecision, mode: EnforcementMode = 'advisory'): ToolGuardDecision {
+export function coerceAskToDecision(
+  decision: ToolGuardDecision,
+  mode: EnforcementMode = DEFAULT_ENFORCEMENT.toolGuards,
+): ToolGuardDecision {
   if (decision.kind !== 'ask') return decision
   if (mode === 'strict') {
     return { kind: 'deny', reason: decision.reason ?? 'ask under strict enforcement denies' }

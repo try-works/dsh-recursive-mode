@@ -22,6 +22,7 @@ import { createRecursiveAuditTeamTool } from './recursive_audit_team.tool.ts'
 import { createRecursiveReviewTool } from './recursive_review.tool.ts'
 import { createRecursiveDelegateTool } from './recursive_delegate.tool.ts'
 import { createRecursiveAskTool } from './recursive_ask.tool.ts'
+import { renderGateBlockAsk } from './recursive_ask.tool.ts'
 import { createRecursivePreviewTool } from './recursive_preview.tool.ts'
 import type { SubagentsRuntimeLike } from './delegation.ts'
 import { registerRecursiveCommand } from './commands.ts'
@@ -187,6 +188,9 @@ function runToolGuard(
       record.reason = final.reason
     }
     if (final.transition) record.transition = final.transition
+    // FU-7: a refusal a person has to resolve carries its options into the trace too, so the
+    // question "why was this lock refused?" and the answer to it are read from one record.
+    if (final.kind === 'deny' && final.ask) record.ask = final.ask
     appendGuardDecision(root, record)
   }
   return final
@@ -512,10 +516,29 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
           return { kind: 'deny', reason: 'the tool guard produced no decision' }
         }
         // The guard's own object, returned VERBATIM — the pinned contract.
-        if (final.kind === 'deny') return final
+        //
+        // ⚠ EXCEPT THAT A DENIAL'S `ask` MUST BE CARRIED IN THE TEXT, and this is the one place the
+        // plugin can do it. Measured in the harness (`packages/core/tools`): a `tools/pre-execute`
+        // deny becomes `content: [{ type: 'text', text: 'Error: ' + reason }]` and EVERY other field
+        // of the decision is dropped, so the gate-block payload added for FU-7 would have reached the
+        // model as nothing at all — which is precisely the defect: a strict-by-default guard refusing
+        // a lock with a bare sentence, while `fix | reopen | abandon` was how the run got unblocked.
+        // The sentence is rendered FROM the payload (`renderGateBlockAsk`), so what the caller reads
+        // and what the decision carries cannot drift; the plain reason stays first and intact, so a
+        // caller that ignores the ask still gets the rule name and the blocking artifact.
+        if (final.kind === 'deny') {
+          return final.ask === undefined
+            ? final
+            : { ...final, reason: final.reason + ' ' + renderGateBlockAsk(final.ask) }
+        }
         if (final.kind === 'allow' && final.warn) {
-          // Package-tagged host logging; never a silent pass under approval=never.
-          console.warn('[recursive] tool guard (advisory): ' + final.warn + ' — allowing')
+          // ⚠ IT NAMES THE MODE IT ACTUALLY RAN UNDER. This line used to begin `tool guard (advisory)`
+          // unconditionally, while the warning it carries comes from the transition gate's REPORT-ONLY
+          // consult — which attaches a warning to an ALLOW in BOTH modes. Under the strict default the
+          // line therefore told a reader that enforcement was off while every gate was strict: text
+          // asserting a state that was not so. The mode is read from the same config the guard ran
+          // under, so the prefix moves with the setting; the warn semantics are unchanged.
+          console.warn('[recursive] tool guard (' + recursive.enforcementConfig.toolGuards + ') allowed this call: ' + final.warn)
         }
         return typeof next === 'function' ? next() : { kind: 'allow' }
       }))

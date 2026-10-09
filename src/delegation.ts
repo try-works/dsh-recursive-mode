@@ -559,9 +559,18 @@ export async function delegateContinuable(input: {
         // turn-shaped caller resumes on a later turn instead of treating the round
         // as lost, and so `accepted` stays false — an unobserved round is never an
         // approval.
+        //
+        // ⚠ THE SENTENCE NAMES THE CHILD, and that is not decoration. The advice this
+        // reason carries ("resume with the SAME child") is UNACTIONABLE without the id,
+        // so a caller that reads it and does not also read `childId` can only report the
+        // park, not act on it — and the record built from this reason is exactly where a
+        // live run read "no settlement" as "the child is dead" and went around its own
+        // reviewer. `resumeChild` is the field that consumes this id.
         return {
           ok: false,
-          reason: 'no settlement has landed for round ' + (round + 1) + ' yet (the child is still working)',
+          reason: 'no settlement has landed for round ' + (round + 1) + ' yet, so the round is PARKED, not failed: '
+            + 'the child may still be working. Resume it on a later turn with childId ' + String(childId)
+            + ' (the `resumeChild` argument) — do not start a second child.',
           childId,
           messageIds,
           rounds,
@@ -774,8 +783,43 @@ export interface ActionRecordInput {
    * nothing else: a delegation that FAILED and a delegation that NEVER HAPPENED read identically, which is what
    * let me conclude for three rounds that the host was not scheduling children. The caller ALREADY passed
    * `stopReason`, and the live record said `n/a` — because there was no result to take a stop reason from.
+   *
+   * ⚠ AND IT IS EMITTED ONLY FOR A GENUINE FAILURE. A PARKED round is neither accepted nor failed, so it
+   * carries {@link ActionRecordInput.parked} instead: calling a live child a failure is the defect this
+   * field's own history is made of.
    */
   failure?: string
+  /**
+   * ⚠ THE THIRD STATE, AND WHY `success` COULD NOT CARRY IT.
+   *
+   * A continuable round that has not settled is NOT a failure — `ContinuableDelegationLike.parked` says so in
+   * its own doc comment, and the tool result already surfaces it. The RECORD did not: a live run's child was
+   * parked, the record said `Status: failed` with "the child never reported, or never ran", the main agent
+   * read that as a dead child and obtained the review elsewhere — while the child was still working and
+   * replied eighteen minutes later. `success: false` cannot express "still in flight", because a genuinely
+   * dead child also produces `success: false`, so a second field is required rather than a cleverer boolean.
+   *
+   * When true, the record says `parked` and carries a `Parked:` line (never a `Failure:` line) whose text
+   * states only what is KNOWN, names the `childId`, and names the resume step. It takes precedence over
+   * `success`: an unobserved round is never an acceptance, whatever a caller passes alongside it.
+   */
+  parked?: boolean
+}
+
+/**
+ * The status a record states, in ONE place, because the three states are the fix and a second writer would
+ * drift from this one.
+ *
+ * The wording is chosen for two readers at once. The MODEL reads it to decide whether to resume or to give up
+ * and obtain the result another way — the exact decision the live defect got wrong — so the token must not
+ * read as a failure and must not need the rest of the document to be understood. A HUMAN reading the run tree
+ * months later needs to tell "died" from "still working" at a glance. Hence `parked (still running; no
+ * settlement yet)`: a third token rather than a renamed second, qualified with the two facts that separate it
+ * from `failed`, and short enough to sit in a status line.
+ */
+export function actionRecordStatus(input: Pick<ActionRecordInput, 'success' | 'parked'>): string {
+  if (input.parked === true) return 'parked (still running; no settlement yet)'
+  return input.success ? 'accepted' : 'failed'
 }
 
 function slugify(value: string): string {
@@ -794,7 +838,10 @@ function slugify(value: string): string {
  *     `Code Refs` strictly inside ## Inputs Provided. The linter resolves each of
  *     those through the heading body, so a field under another heading is not
  *     found at all.
- * A success:false attempt is written with a failed status and is NOT accepted.
+ * A success:false attempt is written with a failed status and is NOT accepted. A round that PARKED is written
+ * with a status of its own (`parked (still running; no settlement yet)`, see {@link actionRecordStatus}) and a
+ * `Parked:` line instead of a `Failure:` one, because no settlement is not a death: it is the caller's signal to
+ * resume the same child. Only a genuine failure carries `Failure:`.
  */
 export function writeActionRecord(input: ActionRecordInput): string {
   const { root, runId } = input
@@ -844,11 +891,18 @@ export function writeActionRecord(input: ActionRecordInput): string {
     '- Phase: ' + input.phase,
     '- Purpose: ' + input.purpose,
     '- Execution Mode: ' + input.executionMode,
-    '- Status: ' + (input.success ? 'accepted' : 'failed'),
+    '- Status: ' + actionRecordStatus(input),
     // ⚠ EMITTED ONLY WHEN A REASON IS GIVEN, so a caller that says nothing produces the record it always did.
     // Not politeness: this record's shape is asserted by specs, and a first attempt that always emitted the line
     // failed 13 tests across 5 files. A change to a shared surface should be additive where it can be.
-    ...(input.success === false && input.failure !== undefined ? ['- Failure: ' + input.failure] : []),
+    //
+    // ⚠ AND `parked` IS THE ONE STATE THAT MUST NOT WEAR THE `Failure:` LABEL. This line used to be
+    // `input.success === false && input.failure !== undefined`, which is true of a PARKED round as well — so a
+    // live child that was still working was recorded, on the same line, as a failure. A parked round is not a
+    // failure, so it gets its own field and states only what is established.
+    ...(input.success === false && input.failure !== undefined
+      ? [input.parked === true ? '- Parked: ' + input.failure : '- Failure: ' + input.failure]
+      : []),
     '- Stop Reason: ' + (input.stopReason ?? 'n/a'),
     // Timestamp LAST in Metadata. This USED to be load-bearing: `getHeadingBody` ended
     // its capture with a `\Z` that JavaScript reads as a literal `Z`, so a body was

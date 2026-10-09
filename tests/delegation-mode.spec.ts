@@ -21,7 +21,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RecursiveRuntime } from '../src/runtime.ts'
@@ -107,6 +107,51 @@ async function review(options: { continuable: boolean; mode?: 'one-shot' | 'cont
   return { result, calls: fake.calls }
 }
 
+/** The root of one review, KEPT on disk so the ACTION RECORD can be read as a reader of the run tree reads it. */
+async function reviewOnDisk(options: {
+  continuable?: boolean
+  awaitRoundResult: () => Promise<SubagentResultLike | null>
+}): Promise<{ root: string; result: Record<string, unknown> }> {
+  const root = makeRoot()
+  const ctx = new Context()
+  await ctx.plugin(RecursiveRuntime, { repoRoot: root })
+  const fake = fakeSubagents({ continuable: options.continuable ?? true })
+  const result = await ctx.recursive.delegateReview({
+    root,
+    runId: 'run-1',
+    phase: '3',
+    role: 'code-reviewer',
+    delegationId: 'd1',
+    childId: 'c1',
+    artifactPath: join(root, '.recursive', 'run', 'run-1', '03-implementation-summary.md'),
+    upstreamArtifacts: [] as string[],
+    auditQuestions: ['does it work?'],
+    requiredOutput: 'verdict',
+    providers: { spawn: { name: 'spawn', capabilities: { outputSchema: true } } },
+    subagents: fake.runtime,
+    parent: {} as SubagentParentHandle,
+    awaitRoundResult: options.awaitRoundResult,
+  } as never)
+  await ctx.fiber.dispose()
+  return { root, result: result as unknown as Record<string, unknown> }
+}
+
+/** Every action record filed under the run's subagents/ directory, newest name last. */
+function actionRecords(root: string): Array<{ name: string; path: string; text: string }> {
+  const dir = join(root, '.recursive', 'run', 'run-1', 'subagents')
+  return readdirSync(dir)
+    .filter((name) => name.endsWith('-action.md'))
+    .sort()
+    .map((name) => ({ name, path: join(dir, name), text: readFileSync(join(dir, name), 'utf8') }))
+}
+
+/** The one action record a single-round review writes. */
+function oneRecord(root: string): { name: string; path: string; text: string } {
+  const records = actionRecords(root)
+  expect(records, 'the delegation writes exactly one action record per attempt').toHaveLength(1)
+  return records[0]!
+}
+
 describe('T35 — delegation is continuable by default', () => {
   it('an omitted mode uses the continuable lifecycle and NEVER start()', async () => {
     const { result, calls } = await review({ continuable: true })
@@ -140,6 +185,105 @@ describe('T35 — delegation is continuable by default', () => {
     const { result } = await review({ continuable: true })
     const record = JSON.stringify(result)
     expect(record).toContain('continuable')
+  })
+})
+
+/**
+ * ⚠ THE THREE STATES — a PARKED round is not a FAILED one, IN THE RECORD.
+ *
+ * THE DEFECT THIS PINS, from a live run's own records. A review's continuable child had not settled within the
+ * wait, so the loop PARKED the round — which its own interface says is NOT a failure, and which
+ * `recursive_review` already surfaces to the model as `parked: true`. The RECORD written into the run tree did
+ * not: it said `Status: failed` / "the child never reported, or never ran", and `operations.jsonl` said
+ * `unaccepted`. The main agent read that, concluded its child was dead, and obtained the review by other means
+ * — while the child was still working and replied eighteen minutes later. The tool result was honest and the
+ * durable record was not, and the durable record is what the run is judged by afterwards.
+ *
+ * WHY THE ASSERTIONS ARE ON THE FILES. Asserting the shape of an in-memory result would not have caught it: the
+ * lie was in the artifacts (`subagents/*-action.md` and `operations/operations.jsonl`), so the tests read those
+ * artifacts back the way a later reader does. The failed case is asserted BESIDE the parked one on purpose — a
+ * fix that made everything read as "not failed" would satisfy the parked test alone, and it would be worse than
+ * the defect.
+ */
+describe('the action record distinguishes PARKED from FAILED (three states, not two)', () => {
+  it('a round with no settlement is recorded as PARKED — not failed, naming the childId and the resume step', async () => {
+    const { root, result } = await reviewOnDisk({ awaitRoundResult: async () => null })
+    try {
+      // The round really did park, so the record is asserted on a park rather than on a mocked status line.
+      expect(result.parked).toBe(true)
+      expect(result.delegationMode).toBe('continuable')
+
+      const record = oneRecord(root)
+      // A parked child is still working. `failed` is the word that cost a live run its own review.
+      expect(record.text).toContain('Status: parked')
+      expect(record.text, 'a parked round must NOT be recorded as a failure').not.toContain('Status: failed')
+      // The advice is only actionable with the id, so the record has to carry it.
+      expect(record.text).toContain('childId c1')
+      expect(record.text, 'the record names the round as not-failed').toContain('PARKED, not failed')
+      // Not asserted as "never ran": the plugin does not know that, and asserting it would be the same overreach.
+      expect(record.text).not.toContain('never ran')
+      // The failure field is not borrowed for the park: a park gets its own label.
+      expect(record.text).not.toContain('Failure:')
+      expect(record.text).toContain('Parked:')
+      // ⚠ AND THE RECORD IS STILL A VALID ACTION RECORD FOR `recursive_lint`. The parked and failed states are
+      // linted against the canonical sections in `tests/docs-contract.spec.ts`, which has a fully-populated
+      // record to lint (this fixture delegates with no upstream artifacts or diff basis, so it would fail the
+      // linter for reasons that have nothing to do with the status — a test that asserted those failures away
+      // would be weakening the contract rather than checking it).
+
+      // The operation log said `unaccepted`, which claims the delegation was judged and refused. It was neither.
+      const operation = readOperations(join(root, '.recursive', 'run', 'run-1'))
+        .find((entry) => entry.act === 'delegate-review')
+      expect(operation?.outcome, 'a park is not an evaluation outcome').toBe('parked')
+
+      // NOTHING WAS ACCEPTED: the parked round is still exactly as retryable as any unfinished attempt.
+      const id = findOperation(join(root, '.recursive', 'run', 'run-1'), operation!.id)
+      expect(id?.outcome).not.toBe('accepted')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('a delegation that genuinely FAILED still says failed, with its cause', async () => {
+    // The control for the test above, and the reason the fix is a third state rather than a renamed second: a
+    // reviewer whose run ended in error must still be distinguishable from one that is still working.
+    const { root, result } = await reviewOnDisk({
+      awaitRoundResult: async () => ({ success: false, stopReason: 'error', output: 'the reviewer crashed' }),
+    })
+    try {
+      expect(result.parked, 'an observed but failed round is not parked').toBeFalsy()
+      const record = oneRecord(root)
+      expect(record.text).toContain('Status: failed')
+      expect(record.text).not.toContain('Status: parked')
+      expect(record.text, 'the cause survives').toContain('Failure:')
+      expect(record.text).toContain('stop reason error')
+      // ⚠ THE ASSERTION THAT NAMES THIS BUG. The child DID report, so the record must not blame a wait: the
+      // runtime used to drop the settled-but-refused result and produce exactly this sentence, which reads as
+      // "your child never ran" for a delegation that ran and was refused.
+      expect(record.text, 'a child that reported is not a child that never reported')
+        .not.toContain('NO SETTLEMENT arrived')
+
+      const operation = readOperations(join(root, '.recursive', 'run', 'run-1'))
+        .find((entry) => entry.act === 'delegate-review')
+      expect(operation?.outcome).toBe('unaccepted')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('an ACCEPTED round is unchanged: accepted, and indexed as accepted', async () => {
+    const { root, result } = await reviewOnDisk({ awaitRoundResult: async () => APPROVED })
+    try {
+      expect(result.parked).toBeFalsy()
+      const record = oneRecord(root)
+      expect(record.text).toContain('Status: accepted')
+      expect(record.text).not.toContain('Parked:')
+      const operation = readOperations(join(root, '.recursive', 'run', 'run-1'))
+        .find((entry) => entry.act === 'delegate-review')
+      expect(operation?.outcome).toBe('accepted')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })
 

@@ -1099,7 +1099,16 @@ export class RecursiveRuntime extends Service {
           result = continuable.rounds[continuable.rounds.length - 1].result ?? null
           if (!result) error = 'continuable child produced no final result'
         } else {
-          error = continuable.reason ?? 'continuable delegation failed'
+          // ⚠ A ROUND THAT SETTLED IS A RESULT, EVEN WHEN IT WAS NOT ACCEPTED — and this branch used to
+          // discard it. The condition above requires `continuable.ok`, so a child that REPORTED and was
+          // refused (`success: false`, or a non-completed stop reason) fell through to here: `result` stayed
+          // null, the action record said "NO SETTLEMENT arrived within the wait", and the child's own stop
+          // reason — the one fact that explains the refusal — was dropped on the floor. It is the same defect
+          // as the parked one, one branch over: an absence asserted where the code had evidence. Keeping the
+          // result is what lets the record say "the delegation returned without acceptance; stop reason error"
+          // instead of blaming a wait that ended perfectly well.
+          result = continuable.rounds[continuable.rounds.length - 1]?.result ?? null
+          if (result === null) error = continuable.reason ?? 'continuable delegation failed'
         }
       } else {
         try {
@@ -1147,7 +1156,14 @@ export class RecursiveRuntime extends Service {
         id: operation,
         act: 'delegate-review',
         at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-        outcome: evaluation.accepted ? 'accepted' : 'unaccepted',
+        // ⚠ A PARK IS NOT A REFUSAL, and `unaccepted` said it was. This line used to be
+        // `accepted ? 'accepted' : 'unaccepted'`, so a round that had merely not settled yet was indexed
+        // exactly like a delegation that was evaluated and refused — while the round it really was (still in
+        // flight, resume the same child) was nowhere in the run's own operation log. The defect the action
+        // record had, the log had too. The new value is honest on both readings that matter: it is not
+        // `accepted`, so every retry gate still treats the operation as unfinished and retryable — which is
+        // what a parked round is — and it no longer claims the delegation was judged and rejected.
+        outcome: parked ? 'parked' : (evaluation.accepted ? 'accepted' : 'unaccepted'),
         phase: input.phase,
       })
     }
@@ -1158,8 +1174,8 @@ export class RecursiveRuntime extends Service {
       runId: input.runId,
       subagentId: input.childId,
       phase: input.phase,
-      // ⚠ FU-17 — the kind is stated in the record. `Status` says accepted or failed; nothing said whether the
-      // child PRODUCED the phase's work or JUDGED it, and a reader of a run could not tell the two apart.
+      // ⚠ FU-17 — the kind is stated in the record. `Status` says accepted, failed or parked; nothing said whether
+      // the child PRODUCED the phase's work or JUDGED it, and a reader of a run could not tell the two apart.
       purpose: input.role + (input.kind === 'work' ? ' (work)' : '') + ' for run ' + input.runId,
       executionMode: decision.tier + (input.mode !== 'one-shot' ? ' (continuable)' : ''),
       artifactPath: input.artifactPath,
@@ -1171,32 +1187,70 @@ export class RecursiveRuntime extends Service {
       findings: evaluation.accepted && result?.structured ? [(result.structured as { verdict?: string })?.verdict ?? 'accepted'] : undefined,
       success: evaluation.accepted,
       stopReason: result?.stopReason,
+      // ⚠ A PARKED ROUND IS RECORDED AS PARKED — the whole defect in one field. `success: evaluation.accepted`
+      // is false for a park (correct: nothing was accepted), and `writeActionRecord` reads this flag to state
+      // the third state instead of collapsing it into `failed`.
+      ...(parked ? { parked: true } : {}),
       // ⚠ FU-9 — AND SAY WHICH KIND OF FAILURE, because the record previously could not. `result == null` means
       // the provider never produced anything at all (never started, or returned nothing) — which is what the
       // live record's `Stop Reason: n/a` was quietly telling me — while a present result that failed to be
       // accepted means a child DID run and its work was refused. Different problems, identical artifacts.
+      //
+      // ⚠ AND `parked` IS BRANCHED FIRST. A parked round produced NO result at all — that IS what parking
+      // means — so without this branch first it fell into the `result == null` text below: "the continuable
+      // start was made and NO SETTLEMENT arrived within the wait (the child never reported, or never ran)".
+      // That is the exact false conclusion this fix exists for, and it was reached whatever the record's
+      // Status said. Order is therefore load-bearing here.
       failure: evaluation.accepted
         ? undefined
-        : result == null
-          // ⚠ THE TWO STATES ARE NOT THE SAME AND THE MESSAGE USED TO CONFLATE THEM. The one-shot path cannot
-          // resolve to nothing — the host's `start` returns a run or throws (assertCapabilities, expectProvider)
-          // — so a null result on the CONTINUABLE path means the opposite of what I first wrote: the start WAS
-          // made and NO SETTLEMENT ARRIVED within the wait. That distinction cost me two rounds of looking at
-          // provider names, so the record now states which path a run took and what it was waiting for.
-          ? (input.mode !== 'one-shot'
-            ? 'the continuable start was made and NO SETTLEMENT arrived within the wait (the child never reported,'
-              + ' or never ran); tier ' + decision.tier + ', provider ' + (decision.provider ?? 'none chosen')
-              + ', names on offer [' + (this.lastProviderNames.join(', ') || 'none') + ']'
-              // ⚠ FU-9 — THE PARENT IDENTITY, because the host refuses a prompt when it cannot resolve the
-              // parent session as a live Agent (`subagent/parent-unavailable`, index.ts L429-436), and the tool
-              // builds this handle with a CAST (`exec.agent as unknown as SubagentParentHandle`). A cast is not
-              // a contract: if the id here is not the one the host looks up, the refusal is real and the
-              // classifier's crash has been hiding it. Printing it here costs nothing and settles the question.
-              + '; parent id ' + ((input.parent as { id?: string } | undefined)?.id ?? 'none')
-              + ', parent session keys [' + (input.parent === undefined ? 'no parent' : Object.keys(input.parent as object).join(', ')) + ']'
-            : 'no delegate result was produced by the one-shot path; tier ' + decision.tier
-              + ', provider ' + (decision.provider ?? 'none chosen'))
-          : 'the delegation returned without acceptance; stop reason ' + (result.stopReason ?? 'none reported'),
+        : parked
+          // ⚠ WHAT IS KNOWN, AND ONLY WHAT IS KNOWN, WITH THE ID THE READER NEEDS TO ACT.
+          //
+          // The text this replaces said "the child never reported, or never ran" — a CONCLUSION drawn from an
+          // ABSENCE, and it was false: a live child went on to complete three review rounds and reply eighteen
+          // minutes later, while the main agent read `Status: failed`, concluded the child was dead, and
+          // obtained its review by other means. So the parked message asserts nothing about the child's state
+          // beyond "no settlement had landed when the wait ended", keeps "may still be working" as the
+          // possibility it is, and NAMES the childId plus the exact next step, because advice to resume is
+          // unactionable without the id. The identity diagnostics stay, because they are what makes a
+          // misconfigured provider readable — but they are diagnostics, not the reason.
+          ? 'no settlement had landed when the wait ended, so this round is PARKED, not failed: nothing was'
+            + ' accepted and nothing was refused, and the child may still be working. The next step is to RESUME'
+            + ' this round, not to re-dispatch it or replace the child: call `recursive_review` again on a later'
+            + ' turn with childId ' + String(continuable?.childId ?? input.childId) + ' (the child the round was'
+            + ' started for, which stays resumable). Diagnostics: tier ' + decision.tier
+            + ', provider ' + (decision.provider ?? 'none chosen')
+            + ', names on offer [' + (this.lastProviderNames.join(', ') || 'none') + ']'
+            // ⚠ FU-9 — THE PARENT IDENTITY, because the host refuses a prompt when it cannot resolve the
+            // parent session as a live Agent (`subagent/parent-unavailable`, index.ts L429-436), and the tool
+            // builds this handle with a CAST (`exec.agent as unknown as SubagentParentHandle`). A cast is not
+            // a contract: if the id here is not the one the host looks up, the refusal is real and the
+            // classifier's crash has been hiding it. Printing it here costs nothing and settles the question.
+            + '; parent id ' + ((input.parent as { id?: string } | undefined)?.id ?? 'none')
+            + ', parent session keys [' + (input.parent === undefined ? 'no parent' : Object.keys(input.parent as object).join(', ')) + ']'
+          : result == null
+            // ⚠ THE TWO STATES ARE NOT THE SAME AND THE MESSAGE USED TO CONFLATE THEM. The one-shot path cannot
+            // resolve to nothing — the host's `start` returns a run or throws (assertCapabilities, expectProvider)
+            // — so a null result on the CONTINUABLE path means the opposite of what I first wrote: the start WAS
+            // made and NO SETTLEMENT ARRIVED within the wait. That distinction cost me two rounds of looking at
+            // provider names, so the record now states which path a run took and what it was waiting for.
+            // (A park is handled above and never reaches this branch; this one is a continuable round that
+            // produced neither a result nor the park signal, which IS a failure to report.)
+            ? (input.mode !== 'one-shot'
+              ? 'the continuable start was made and NO SETTLEMENT arrived within the wait (the child never reported,'
+                + ' or never ran); tier ' + decision.tier + ', provider ' + (decision.provider ?? 'none chosen')
+                + ', names on offer [' + (this.lastProviderNames.join(', ') || 'none') + ']'
+                // ⚠ FU-9 — THE PARENT IDENTITY, because the host refuses a prompt when it cannot resolve the
+                // parent session as a live Agent (`subagent/parent-unavailable`, index.ts L429-436), and the tool
+                // builds this handle with a CAST (`exec.agent as unknown as SubagentParentHandle`). A cast is not
+                // a contract: if the id here is not the one the host looks up, the refusal is real and the
+                // classifier's crash has been hiding it. Printing it here costs nothing and settles the question.
+                + '; parent id ' + ((input.parent as { id?: string } | undefined)?.id ?? 'none')
+                + ', parent session keys [' + (input.parent === undefined ? 'no parent' : Object.keys(input.parent as object).join(', ')) + ']'
+              : 'no delegate result was produced by the one-shot path; tier ' + decision.tier
+                + ', provider ' + (decision.provider ?? 'none chosen'))
+            : 'the delegation returned without acceptance; stop reason ' + (result.stopReason ?? 'none reported')
+              + (result.success === false ? ' (the child itself reported success:false)' : ''),
     })
 
     // T35: report the mode that ACTUALLY ran, not the one that was asked for. A

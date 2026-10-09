@@ -288,7 +288,14 @@ describe('delegation.ts — T36 turn-shaped continuation', () => {
     expect(result.parked).toBe(true)
     expect(result.accepted).toBe(false)
     expect(result.childId).toBe('child-1')
-    expect(result.reason).toContain('still working')
+    // ⚠ AND THE REASON IS ACTIONABLE, not merely true. A caller that reads this sentence and nothing else must
+    // be able to resume the round: the advice "resume with the SAME child" is unactionable without the id, and
+    // the word that killed a live run's child on paper — a failure — must not be assertable here.
+    expect(result.reason, 'the reason says the child may still be working, not that it is gone')
+      .toContain('may still be working')
+    expect(result.reason).toContain('childId child-1')
+    expect(result.reason).toContain('PARKED, not failed')
+    expect(result.reason).not.toContain('never ran')
   })
 
   it('RESUMING observes the existing child and NEVER starts another', async () => {

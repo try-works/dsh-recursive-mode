@@ -500,6 +500,62 @@ describe('T25 (c) — the action-record writer emits what the linter requires', 
     const fixture = makeRecordFixture({ reviewedOnly: true })
     expect(lintSubagentActionRecordFile(fixture.recordPath, fixture.root, fixture.runDir, null)).toEqual([])
   })
+
+  /**
+   * ⚠ THE THIRD STATE MUST BE LINTABLE, because a record that fails the linter is a record a main agent
+   * cannot cite in `Subagent Contribution Verification` — and the parked round is precisely the one the agent
+   * has to come back to. This lints the REAL writer output with only the status lines swapped, so the state
+   * itself is what is under test: if `Status: parked (still running; no settlement yet)` or the `Parked:` line
+   * broke a canonical section, this would report the violation.
+   *
+   * The non-vacuity guard is the `after === before` assertion rather than `after === []`: the fixture's own
+   * baseline is asserted to be zero in the test above, and a rewrite that accidentally FIXED an unrelated
+   * violation would otherwise still pass.
+   */
+  it('the linter accepts a PARKED record and a FAILED record — the three states are all lintable', () => {
+    const fixture = makeRecordFixture()
+    const before = lintSubagentActionRecordFile(fixture.recordPath, fixture.root, fixture.runDir, null)
+    expect(before).toEqual([])
+
+    // ⚠ EVERY VARIANT IS DERIVED FROM THE WRITER'S ORIGINAL OUTPUT, never from the previous variant: the
+    // first version of this helper rewrote the file in place, so the failed case was built on top of the
+    // parked one, could no longer find `- Status: accepted`, and silently asserted against an unchanged
+    // record. A status test that does not change the status is the exact vacuity it is meant to catch.
+    //
+    // The detail line is inserted BEFORE `- Timestamp:`, which is the writer's last Metadata field, so the
+    // variant is anchored on a line the writer always emits rather than on one only some records carry.
+    const withStatus = (status: string, detail: string): string => {
+      const text = fixture.record
+      expect(text, 'the writer emits the accepted status this variant replaces').toContain('- Status: accepted')
+      expect(text, 'the writer always ends Metadata with Timestamp').toContain('\n- Timestamp: ')
+      const rewritten = text
+        .replace('- Status: accepted', '- Status: ' + status)
+        .replace('\n- Timestamp: ', '\n- ' + detail + '\n- Timestamp: ')
+      writeFileSync(fixture.recordPath, rewritten, 'utf8')
+      return rewritten
+    }
+
+    try {
+      const parked = withStatus(
+        'parked (still running; no settlement yet)',
+        'Parked: no settlement had landed when the wait ended, so this round is PARKED, not failed: the next step'
+        + ' is to RESUME this round with childId child-a.',
+      )
+      expect(parked).toContain('- Status: parked')
+      expect(parked).not.toContain('- Status: failed')
+      expect(parked).not.toContain('- Failure:')
+      expect(lintSubagentActionRecordFile(fixture.recordPath, fixture.root, fixture.runDir, null)).toEqual(before)
+
+      const failed = withStatus('failed', 'Failure:the delegation returned without acceptance; stop reason error')
+      expect(failed).toContain('- Status: failed')
+      expect(failed).toContain('- Failure:')
+      expect(failed, 'a failed record must not wear the parked label').not.toContain('Parked:')
+      expect(lintSubagentActionRecordFile(fixture.recordPath, fixture.root, fixture.runDir, null)).toEqual(before)
+    } finally {
+      // Restore the writer's own output so a later test in this file cannot inherit an edited record.
+      writeFileSync(fixture.recordPath, fixture.record, 'utf8')
+    }
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

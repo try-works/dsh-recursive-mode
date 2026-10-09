@@ -386,10 +386,17 @@ from `session/event`, with a cheap shape test first, because that event fires fo
 observer **waits** — bounded, polling, with a timeout — and reports "no settlement yet" only after actually
 waiting. The park remains as the fallback, so an unobserved round is never an approval.
 
-**Action records are written for every delegation**, and they carry `Execution Mode` and `Status`. After a
-failed delegation, they now also carry **`Failure:`** — because `Status: failed` on its own cannot distinguish a
-child that ran and failed from a child that never started. That distinction cost three rounds of investigation
-before the field existed.
+**Action records are written for every delegation**, and they carry `Execution Mode` and a `Status` with
+**three** values, not two: `accepted`, `failed`, and `parked (still running; no settlement yet)`. The third
+state exists because a round whose child had not settled is **not** a failure — the delegation interface says
+so, and `recursive_review` already reports it as `parked` — and a binary status forced it to read as one: a live
+run's record said `Status: failed` with *"the child never reported, or never ran"*, the main agent concluded its
+reviewer was dead and obtained the review another way, and the child replied eighteen minutes later. A `failed`
+record carries **`Failure:`** with its cause; a parked record carries **`Parked:`** instead — stating only what
+is known ("no settlement had landed when the wait ended … the child may still be working"), naming the
+`childId`, and saying that resuming with that id is the next step. `operations/operations.jsonl` records the
+same distinction (`parked` rather than `unaccepted`), because the operation log had the identical conflation.
+That distinction cost three rounds of investigation before the third state existed.
 
 ---
 

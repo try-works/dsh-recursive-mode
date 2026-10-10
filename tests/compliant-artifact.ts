@@ -41,6 +41,17 @@
  *      (`ensureGitBaseline` + the worktree artifact below). A run left holding the
  *      scaffolded worktree artifact cannot lock anything at all.
  *
+ *   3. THE PHASE-8 MEMORY WRITE. `lockArtifact` refuses `08-memory-impact.md` until
+ *      the run has WRITTEN a doc under `.recursive/memory/`, declared by path under
+ *      `## Affected Memory Docs` and carrying `Source-Runs` naming THIS run
+ *      (`phase8MemoryLockRefusal` in `src/training.ts`). An artifact is not enough:
+ *      the doc has to EXIST and carry this run's provenance, so the phase-8 body
+ *      below declares the shard `phase8MemoryShardPath` names — the same path the
+ *      plugin's own `writeRunMemory` writes — and the harness writes it as part of
+ *      the phase-8 work, before the artifact that reports it. A fixture that only
+ *      cited the router (`/.recursive/memory/MEMORY.md`) locked nothing: the lock
+ *      chain stopped at phase 8, which is exactly what this fixture now avoids.
+ *
  * =====================================================================================
  * THE FIXTURE RUN — what `prepareCompliantRun` + `authorCompliantPhase` build, and why
  * =====================================================================================
@@ -78,6 +89,7 @@ import {
   getGitChangedFiles,
   getRunDiffBasis,
 } from '../src/ts-lint.ts'
+import { memoryDocRelativePath, type MemoryDocSpec } from '../src/training.ts'
 
 /** The workflow profile these artifacts are authored for — the plugin's own. */
 export const COMPLIANT_WORKFLOW_PROFILE = 'recursive-mode-audit-v2'
@@ -261,6 +273,59 @@ export function runChangedFiles(root: string, runId: string, fallbackBaseline?: 
   const basis = usable ? recorded : fallbackBaseline === undefined ? recorded : explicitBasis(fallbackBaseline)
   const [raw] = getGitChangedFiles(root, basis)
   return raw === null ? [] : filterRuntimeChangedFiles(raw, runId)
+}
+
+/* -------------------------------------------------------------------------- */
+/* The phase-8 memory write the lock gate requires                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The shard THIS RUN writes at phase 8, as the repo-relative path the writer uses.
+ *
+ * ⚠ DERIVED FROM THE WRITER'S OWN PATH FUNCTION, not spelled out here. The phase-8
+ * gate matches a DECLARED path against a doc ON DISK, so a declaration that drifted
+ * from where `writeRunMemory` lands (`memoryDocRelativePath('episode', runId)`) would
+ * be a fixture that fails for a reason about string spelling rather than about the
+ * rule — and the rule is what this fixture exists to exercise.
+ *
+ * It is the always-available doc the refusal itself names:
+ * `PHASE8_MEMORY_WRITE_RULE.alwaysAvailable` = `.recursive/memory/episodes/<run-id>.md`.
+ */
+export function phase8MemoryShardPath(runId: string): string {
+  const path = memoryDocRelativePath('episode', runId)
+  if (path === null) {
+    throw new Error('run id ' + JSON.stringify(runId) + ' cannot name a memory shard slug, so the phase-8 memory doc has nowhere to be written')
+  }
+  return path
+}
+
+/**
+ * The spec the harness hands to `writeRunMemory` as the run's phase-8 work.
+ *
+ * ⚠ `runId` IS STAMPED BY THE CALL, NOT BY THIS SPEC. `writeRunMemory(root, runId, …)`
+ * overrides each spec's `runId`, which is the module's own design ("a spec that named a
+ * different run would write provenance the phase-8 gate then refuses"), so the value
+ * here exists only because `MemoryDocSpec` requires the field.
+ *
+ * ⚠ AND `Last-Validated` IS LEFT TO THE WRITER ON PURPOSE: it defaults to the moment of
+ * the write, which is measured. A fixed timestamp here would be an invented fact in the
+ * one field a later reader uses to decide whether the lesson still holds.
+ */
+export function phase8MemoryDocSpec(runId: string): MemoryDocSpec {
+  return {
+    kind: 'episode',
+    runId,
+    slug: runId,
+    title: 'The phase-8 lock needs a shard this run wrote',
+    scope: 'The memory write the phase-8 lock is gated on: what counts as a write, and what does not.',
+    body: 'Phase 8 could not lock on prose alone: `08-memory-impact.md` is refused until this run has WRITTEN a doc '
+      + 'under `.recursive/memory/`, declared by path under `## Affected Memory Docs`, whose own text carries a '
+      + '`Source-Runs` naming the run. Citing a shard that already existed — the router included — is not a write. '
+      + 'This shard is that write, produced through the plugin\'s own `writeRunMemory` as part of the phase-8 work and '
+      + 'before the artifact that reports it, so the diff the phase-8 Worktree Diff Audit reconciles against already '
+      + 'contained both the shard and the refreshed router.',
+    tags: ['phase8', 'memory-write', 'e2e-harness'],
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1368,6 +1433,19 @@ function body(phase: CompliantPhase, runId: string, options: CompliantOptions): 
   // 08-memory-impact.md
   const inputs = upstreams(runId, ['00-requirements.md', '00-worktree.md', '01-as-is.md', '01.5-root-cause.md', '02-to-be-plan.md', '03-implementation-summary.md', '03.5-code-review.md', '04-test-summary.md', '05-manual-qa.md', '06-decisions-update.md', '07-state-update.md'])
   const commit = requireBaseline()
+  // ⚠ THE DECLARED SHARD IS THE ONE THE RUN WRITES — see `phase8MemoryShardPath`. It is part of the
+  // run diff by the time this artifact is authored (the harness writes it first), so it is described
+  // per path below rather than folded into the "reviewed for memory impact" line the product files get.
+  const memoryShard = phase8MemoryShardPath(runId)
+  const reviewLine = (path: string): string => {
+    if (path === memoryShard) {
+      return '- `' + path + '`: WRITTEN by this run — the durable episode shard this phase owes, carrying `Source-Runs: ' + runId + '`.'
+    }
+    if (path === '.recursive/memory/MEMORY.md') {
+      return '- `' + path + '`: the router, refreshed by the same write — it now carries this shard\'s registry line.'
+    }
+    return '- `' + path + '`: reviewed for memory impact; the guard it changes is already described by `' + rel(runId, '03-implementation-summary.md') + '`.'
+  }
   return [
     ...header(runId, phase, '08 Memory Impact', inputs,
       'Memory-plane impact of the run: which paths changed, which memory docs are affected, and what was promoted.'),
@@ -1388,11 +1466,12 @@ function body(phase: CompliantPhase, runId: string, options: CompliantOptions): 
     '',
     '## Changed Paths Review',
     '',
-    ...(changed.length > 0 ? changed.map((path) => '- `' + path + '`: reviewed for memory impact; the guard it changes is already described by `' + rel(runId, '03-implementation-summary.md') + '`.') : ['- No path outside the run directory changed, so there is no memory impact to review.']),
+    ...(changed.length > 0 ? changed.map(reviewLine) : ['- No path outside the run directory changed, so there is no memory impact to review.']),
     '',
     '## Affected Memory Docs',
     '',
-    '- `.recursive/memory/MEMORY.md` — the router: reviewed, and no shard needed a change for this run.',
+    '- `' + memoryShard + '` — WRITTEN by this run: the run-local episode shard, whose own text carries `Source-Runs: ' + runId + '`.',
+    '- `.recursive/memory/MEMORY.md` — the router: refreshed by the same write, so it registers the shard above.',
     '',
     '## Run-Local Skill Usage Capture',
     '',
@@ -1419,11 +1498,11 @@ function body(phase: CompliantPhase, runId: string, options: CompliantOptions): 
     '',
     '## Router and Parent Refresh',
     '',
-    '- `.recursive/memory/MEMORY.md` was re-read and needs no entry for this run.',
+    '- `.recursive/memory/MEMORY.md` was refreshed by this run\'s write and now registers `' + memoryShard + '`.',
     '',
     '## Final Status Summary',
     '',
-    '- The run changed `' + (changed.join('`, `') || FIXTURE_PRODUCT_FILE) + '`; no memory shard became stale, and no durable skill lesson was earned.',
+    '- The run changed `' + (changed.join('`, `') || FIXTURE_PRODUCT_FILE) + '`; `' + memoryShard + '` is this run\'s own durable write and no other shard became stale, and no durable skill lesson was earned.',
     '',
     ...traceability(runId, [
       '- `R1` is reflected in the memory review: the guard is the behaviour the memory plane would describe.',

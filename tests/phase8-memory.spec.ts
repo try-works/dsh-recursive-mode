@@ -13,10 +13,11 @@
  * three failure branches, its phase scoping, its refusal wording, its PRECEDENCE against the lint
  * gate, and the writer that satisfies it — so the insertion is the only unproven step left.
  *
- * ⚠ AND THE ASSERTIONS ARE BUILT TO FAIL. The "declared but not written" case uses the ACTUAL body of
- * `tests/compliant-artifact.ts`'s phase-8 `## Affected Memory Docs` section, i.e. the artifact the
- * existing lock specs lock cleanly today. If the gate were satisfied by prose, or by a cited path, or
- * by the router file everyone already names, that assertion would pass vacuously. It must not.
+ * ⚠ AND THE ASSERTIONS ARE BUILT TO FAIL. The "declared but not written" case uses the CITATION SHAPE
+ * a run that never wrote its memory produces — the router line and nothing else, which is what
+ * `tests/compliant-artifact.ts`'s phase-8 `## Affected Memory Docs` section carried until the harness
+ * began WRITING the shard it declares. If the gate were satisfied by prose, or by a cited path, or by
+ * the router file everyone already names, that assertion would pass vacuously. It must not.
  */
 import { describe, expect, it, afterEach } from 'vitest'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
@@ -468,13 +469,15 @@ describe('T40 — the phase-8 gate refuses a run that has not written its memory
     expect(evidence.reason).toContain('none of them exists')
   })
 
-  it('branch 3: the doc EXISTS but this run did not write it — the compliant artifact today', () => {
+  it('branch 3: the doc EXISTS but this run did not write it — a run that only CITED the plane', () => {
     const root = tempRoot('branch3')
     mkdirSync(join(root, '.recursive', 'memory'), { recursive: true })
     writeFileSync(join(root, '.recursive', 'memory', 'MEMORY.md'), '# MEMORY.md\n', 'utf8')
-    // ⚠ THE ACTUAL LINE FROM `tests/compliant-artifact.ts`'s phase-8 body — the artifact the existing
-    // lock specs lock cleanly. It cites the PLANE, it names an EXISTING file, and it is still not a
-    // write: a gate that accepted this would be satisfied by every run that ever mentions MEMORY.md.
+    // ⚠ THE LINE `tests/compliant-artifact.ts`'S PHASE-8 BODY USED TO CARRY, kept here as the negative
+    // case: the fixture now declares — and WRITES — the episode shard its run owns, and this line is what
+    // a run that only reviewed the router produces. It cites the PLANE, it names an EXISTING file, and it
+    // is still not a write: a gate that accepted this would be satisfied by every run that ever mentions
+    // MEMORY.md.
     const compliantLine = '## Affected Memory Docs\n\n- `/.recursive/memory/MEMORY.md` — the router: reviewed, and no shard needed a change for this run.\n'
     const evidence = phase8MemoryEvidence(root, RUN_ID, compliantLine)
     expect(evidence.existing).toEqual(['.recursive/memory/MEMORY.md'])

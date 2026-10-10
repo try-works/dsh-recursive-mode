@@ -21,6 +21,15 @@
  * (the rules) → AUTHOR the artifact to those rules → `recursive_lock`, then the closeout, status and
  * preview tools. Nothing is called that a host could not call.
  *
+ * ⚠ AND PHASE 8 DOES THE MEMORY WORK ITS PHASE IS FOR, before the artifact that reports it. `lockArtifact`
+ * refuses `08-memory-impact.md` until the run has WRITTEN a doc under `.recursive/memory/`, declared by
+ * path under its `## Affected Memory Docs` and carrying `Source-Runs` naming THIS run
+ * (`phase8MemoryLockRefusal`, `src/training.ts`) — a gate that three live runs failed by ticking the step
+ * for themselves. So the harness performs the same write a real run performs, through the plugin's OWN
+ * writer (`writeRunMemory`: atomic, validated against the memory plane's field lists, provenance stamped
+ * from the call), and it does it BEFORE authoring the artifact: the phase-8 `Worktree Diff Audit`
+ * reconciles against the run's ACTUAL diff, which then contains the shard and the refreshed router.
+ *
  * ⚠ AND IT AUTHORES RATHER THAN PATCHES, which is a repair rather than a preference. This harness used
  * to write the SCAFFOLD and edit its gate lines (`Coverage: FAIL` → `PASS`), and that was only ever
  * enough while `recursive_lock` checked nothing but existence, order and quiescence. README §4.1
@@ -40,12 +49,18 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import * as plugin from '../src/index.ts'
-import { runPhase8Trigger, spawnExtractorRunner, TRAINING_EXTRACTOR_ENV } from '../src/training.ts'
+import { runPhase8Trigger, spawnExtractorRunner, TRAINING_EXTRACTOR_ENV, writeRunMemory } from '../src/training.ts'
 import { AUDITED_PHASE_FILES } from '../src/phase-rules.ts'
 import { getGateStatus } from '../src/ts-lint.ts'
 import { readGuardDecisions } from '../src/guard-log.ts'
 import { renderGateBlockAsk } from '../src/recursive_ask.tool.ts'
-import { authorCompliantPhase, prepareCompliantRun, COMPLIANT_PHASES } from './compliant-artifact.ts'
+import {
+  authorCompliantPhase,
+  phase8MemoryDocSpec,
+  phase8MemoryShardPath,
+  prepareCompliantRun,
+  COMPLIANT_PHASES,
+} from './compliant-artifact.ts'
 
 /** The scratch root: `E:` by default, overridable, with a tmpdir fallback for a machine without it. */
 function scratchRoot(): string {
@@ -188,6 +203,22 @@ const CLOSEOUT_KEY: Record<string, string> = {
     if (closeoutKey !== undefined) await call('recursive_closeout', { runId, phase: closeoutKey })
     // 1. What does the policy say this phase needs?
     await call('recursive_phase', { runId })
+    // 1.5 ⚠ PHASE 8's OWN WORK, DONE BEFORE THE ARTIFACT THAT REPORTS IT — the step that satisfies the
+    //     phase-8 memory gate, and the reason the lock chain reaches the end of the run at all. The write
+    //     goes through the plugin's own API rather than a hand-created file (atomic, lint-validated,
+    //     provenance stamped from the call), and it is placed BEFORE `authorCompliantPhase` because the
+    //     phase-8 `Worktree Diff Audit` must reconcile against the run's ACTUAL diff — which now includes
+    //     the shard and the router refresh. This is the same order a real run follows: do the phase's
+    //     work, author the record of it, then lock.
+    if (phase === '08-memory-impact.md') {
+      const memory = writeRunMemory(root, runId, [phase8MemoryDocSpec(runId)])
+      calls.push({
+        tool: '(memory-write)',
+        args: { runId, shard: phase8MemoryShardPath(runId) },
+        ok: memory.writes.length > 0,
+        detail: memory.reason,
+      })
+    }
     // 2. AUTHOR the artifact to that standard — the scaffold is a skeleton, and `recursive_lock`
     //    now refuses anything that does not meet it. This is the step that used to be a gate-line
     //    text patch; see `gateSummary` for why patching is no longer the same thing as satisfying.

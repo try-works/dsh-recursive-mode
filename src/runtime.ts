@@ -1668,6 +1668,20 @@ export class RecursiveRuntime extends Service {
     if (inFlight.length > 0) {
       throw new Error(toolError('PENDING_WORK', inFlight.map((p) => p.detail).join('; ')))
     }
+    // T40 - THE PHASE-8 MEMORY GATE. Phase 8 exists to promote this run's durable memory, and until
+    // this gate the step was a TODO line the agent ticked for itself: a live workspace held three
+    // completed runs and a .recursive/memory/ tree still holding only bootstrap placeholders, with
+    // run 03's artifact declaring the step done against ANOTHER plugin's store. The requirement is
+    // now a fact about files: a path under the plane, declared by the artifact, whose own text
+    // carries THIS run's Source-Runs. Placed AFTER quiescence and BEFORE the lint gate: lint stays
+    // last (its documented invariant), lock order stays first, and a below-standard artifact is
+    // reported with the one thing it must still do. Mode-independent, like every other refusal in
+    // this chain - lockArtifact has no mode input and the lock chain has never been advisory-gated.
+    const memoryRefusal = phase8MemoryLockRefusal(root, runId, artifact)
+    if (memoryRefusal !== null) {
+      try { this.blockRunToGoal(agent, runId, { code: 'phase8-memory-missing', message: memoryRefusal }) } catch { /* best-effort, like the prerequisite gate */ }
+      throw new Error(memoryRefusal)
+    }
     // README §4.1 — THE STANDARD GATE. `recursive_lock` promises that it "refuses
     // if the artifact does not meet the standard", and until this gate existed it
     // checked existence, re-lock, lock ORDER and quiescence and never consulted the

@@ -21,6 +21,13 @@
  *   node scripts/gen-workflow-map.mjs --out <p>  # write somewhere else
  *
  * READ-ONLY with respect to src/ and tests/. Writes exactly one file.
+ *
+ * ⚠ BEFORE YOU CHANGE ANYTHING HERE: read workflow-map/README.md. It is the maintainer's
+ * guide to this generator, the layout engine's reserve() rule, the two checkers, the
+ * citation anchors, the invariants and why each exists, and the vacuity trap that made
+ * nineteen assertions here green over a visibly broken chart. A change to this file that
+ * is not accompanied by `--verify`, both checkers, and a LOOK at the rendered page is not
+ * a finished change.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'

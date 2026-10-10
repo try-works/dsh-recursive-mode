@@ -10,7 +10,9 @@
  * Everything asserted here is a fact about the tree, checked by RUNNING the code
  * that owns the contract — never by re-reading it.
  *
- * SIX ASSERTIONS — the plan's four, plus the two README edges the measured drift added:
+ * SIX ASSERTIONS — the plan's four, plus the two README edges the measured drift added,
+ * plus (g): the maintainer's guide to the generated workflow map. (g) is the only one
+ * whose subject is not shipped prose; its header block below says why it lives here.
  *   (a) every repo-relative path a shipped document names as an existing file of
  *       THIS repo exists;
  *   (b) package.json's description agrees with the tool surface actually
@@ -34,6 +36,20 @@
  * drifted. §4.1's table listed TWELVE tools and omitted `recursive_delegate`
  * ENTIRELY while every gate below stayed green. The table has since been corrected
  * to thirteen rows in the description's order; (e) makes the same drift fail.
+ *
+ * (g) IS THE ONE ASSERTION HERE ABOUT A DOCUMENT THAT IS NOT SHIPPED, and it is here
+ * because the document it guards is the only way into a 352 KiB GENERATED artifact.
+ * `workflow-map/recursive-mode-workflow.html` is written by `scripts/gen-workflow-map.mjs`
+ * and checked by two more scripts, and NOTHING in the suite or in package.json invokes
+ * any of the three: a maintainer who never finds the guide has no way to learn that the
+ * HTML must not be hand-edited, or that the checkers exist at all. The guide is
+ * `workflow-map/README.md`, and (g) asserts the two facts about it that a maintainer
+ * depends on: it exists, and it names all three commands. It is deliberately NOT added
+ * to GUARDED_DOCS — that is the SHIPPED-prose class (PROPOSAL.md, STRENGTHENING-PLAN.md,
+ * skills/**), and workflow-map/ is deliberately absent from package.json's `files`
+ * (commit 29ba011), so class-1 path enforcement on a guide to an unshipped directory
+ * would be a different concern wearing (a)'s clothes. This assertion reads no prose
+ * beyond the three command strings, so it cannot rot into a second, worse contract.
  *
  * (a) IS DELIBERATELY NOT "every referenced path exists". The plan's sentence, taken
  * literally, is unworkable, and a naive implementation would be wrong in three ways.
@@ -1445,5 +1461,138 @@ describe('T25 (f) — every `recursive_<name>` mention in README.md names a regi
     expect(scanPrefixOccurrences(miscased).problems.join('\n')).toContain('RECURSIVE_REVIEW')
     const placeholder = withAppendedLines(README_TEXT, ['| `recursive_<name>` | a shape, not a name |'])
     expect(scanPrefixOccurrences(placeholder).problems.join('\n')).toContain('recursive_<name>')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// (g) the generated workflow map's maintainer guide names its own toolchain
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * See the file header for WHY this assertion exists and why it is deliberately this
+ * small. In short: the page at `workflow-map/recursive-mode-workflow.html` is generated,
+ * nothing in this suite or in package.json runs the generator or either checker, and the
+ * guide beside it is the only entry point. A guide can be deleted silently today.
+ *
+ * THE THREE COMMANDS ARE THE CONTRACT. They are the whole toolchain a maintainer has to
+ * run — the source-reading `--verify`, and the two checkers that read the WRITTEN file.
+ * The guide may say anything else it likes; these three strings must be in it, because a
+ * maintainer who does not run all three has an unverified page (that asymmetry is the
+ * trap the guide's own §2.6 documents: `--verify` never opens the file on disk, and the
+ * checkers never read `src/`).
+ */
+const WORKFLOW_MAP_GUIDE = 'workflow-map/README.md'
+const WORKFLOW_MAP_PAGE = 'workflow-map/recursive-mode-workflow.html'
+
+/**
+ * The toolchain, as the guide must spell it. Each entry is the command AND the script it
+ * runs, so the same list answers both questions: is the command documented, and does the
+ * script it names exist? `--verify` is listed with its flag because the flag is what makes
+ * it write nothing — a guide that documents the bare generator would be teaching a
+ * maintainer to overwrite the page on every fact-check.
+ */
+const WORKFLOW_MAP_COMMANDS: { command: string; script: string }[] = [
+  { command: 'node scripts/gen-workflow-map.mjs --verify', script: 'scripts/gen-workflow-map.mjs' },
+  { command: 'node scripts/check-workflow-map.mjs', script: 'scripts/check-workflow-map.mjs' },
+  { command: 'node scripts/check-workflow-map-escapes.mjs', script: 'scripts/check-workflow-map-escapes.mjs' },
+]
+
+/**
+ * PURE, and taking the text as a parameter so the falsification case below runs it over
+ * MODIFIED COPIES without ever writing the guide — the artefact under guard cannot be
+ * edited by the test that guards it.
+ */
+function missingWorkflowMapCommands(text: string): string[] {
+  return WORKFLOW_MAP_COMMANDS.filter((entry) => !text.includes(entry.command)).map((entry) => entry.command)
+}
+
+/**
+ * PURE: which of `entries` name a script this repo does not have. Takes the list as a
+ * parameter for the same reason `missingWorkflowMapCommands` takes the text — so the
+ * membership check is falsifiable on a mutated list instead of on the real one.
+ */
+function absentWorkflowMapScripts(entries: { command: string; script: string }[]): string[] {
+  return entries.filter((entry) => !existsSync(join(ROOT, entry.script))).map((entry) => entry.script)
+}
+
+/** Failure text: what is missing, and where the fix goes. */
+function workflowMapGuideReport(text: string): string {
+  const lines = [
+    `${WORKFLOW_MAP_GUIDE} is the maintainer's guide to the GENERATED page ${WORKFLOW_MAP_PAGE}.`,
+    'It must name every command of the toolchain, in the order a maintainer runs them:',
+  ]
+  for (const entry of WORKFLOW_MAP_COMMANDS) {
+    lines.push(`  ${text.includes(entry.command) ? 'ok      ' : 'MISSING '}${entry.command}`)
+  }
+  lines.push('Restore the command (and the section that explains what a failure means), or update this assertion — never delete the guide.')
+  return lines.join('\n')
+}
+
+describe('T25 (g) — the generated workflow map ships a maintainer guide that names its toolchain', () => {
+  it('the guide exists beside the page it documents', () => {
+    expect(existsSync(join(ROOT, WORKFLOW_MAP_GUIDE)), `${WORKFLOW_MAP_GUIDE} must exist`).toBe(true)
+    expect(existsSync(join(ROOT, WORKFLOW_MAP_PAGE)), `${WORKFLOW_MAP_PAGE} must exist`).toBe(true)
+  })
+
+  it('the guide names all three toolchain commands', () => {
+    const text = readRepo(WORKFLOW_MAP_GUIDE)
+    expect(missingWorkflowMapCommands(text), workflowMapGuideReport(text)).toEqual([])
+    // Non-vacuity: the guide is a real document, not three lines holding the commands.
+    expect(text.length).toBeGreaterThan(2000)
+    expect(text, 'the guide must say the HTML is generated').toContain('GENERATED')
+  })
+
+  it('every script the guide names is a real file of this repo', () => {
+    // A guide that sends a maintainer to a renamed tool is the same dead end as the
+    // `.recursive/scripts/` pointer `training-docs.spec.ts` exists for — one rewrite later.
+    expect(absentWorkflowMapScripts(WORKFLOW_MAP_COMMANDS), workflowMapGuideReport(readRepo(WORKFLOW_MAP_GUIDE))).toEqual([])
+    // ... and the guide names the page and the toolchain as repo-relative paths, so each is
+    // checked against the tree rather than asserted in prose.
+    const text = readRepo(WORKFLOW_MAP_GUIDE)
+    const named = [...new Set([WORKFLOW_MAP_PAGE, ...WORKFLOW_MAP_COMMANDS.map((entry) => entry.script)])]
+    for (const path of named) expect(text, `the guide must name ${path}`).toContain(path)
+  })
+
+  /**
+   * FALSIFICATION — the guard is shown to FAIL on the drift it exists for, on MODIFIED
+   * COPIES of the real guide built here in memory. The guide is never written.
+   *
+   * THE TWO FAILURES THAT MATTER, and both would be silent without this assertion: the guide
+   * DELETED (before (g) existed, NOTHING in the tree read it — measured then: no spec and no
+   * package.json script mentioned `workflow-map` at all, which is why a 352 KiB generated
+   * artefact had no discoverable entry point), and a command RENAMED (the guide keeps teaching
+   * a command that no longer exists). Each is applied to the real text, so the evidence
+   * travels with the document.
+   */
+  it('the guard has teeth: a guide missing any one command, or naming a script that is not there, is reported', () => {
+    const guide = readRepo(WORKFLOW_MAP_GUIDE)
+    expect(missingWorkflowMapCommands(guide)).toEqual([])
+
+    // (1) EACH COMMAND REMOVED ON ITS OWN — one at a time, so the case proves the scan reads
+    //     all three and not merely the first one it finds.
+    for (const entry of WORKFLOW_MAP_COMMANDS) {
+      const without = guide.split(entry.command).join('')
+      expect(without).not.toBe(guide)
+      expect(missingWorkflowMapCommands(without)).toEqual([entry.command])
+      expect(workflowMapGuideReport(without)).toContain(entry.command)
+    }
+
+    // (2) ALL THREE REMOVED — the guide that has been emptied of its toolchain. This is the
+    //     state a well-meaning rewrite ("shorter, friendlier") produces, and it is reported
+    //     in full rather than one command at a time.
+    let stripped = guide
+    for (const entry of WORKFLOW_MAP_COMMANDS) stripped = stripped.split(entry.command).join('')
+    expect(missingWorkflowMapCommands(stripped)).toEqual(WORKFLOW_MAP_COMMANDS.map((entry) => entry.command))
+
+    // (3) A RENAMED SCRIPT — the command is still spelled in the guide, so the command scan
+    //     alone cannot see it; the membership check against the tree is what catches it. The
+    //     rename is simulated by handing the SAME predicate an entry naming a script that is
+    //     not there, so no file moves and the case proves the predicate can fail.
+    expect(absentWorkflowMapScripts(WORKFLOW_MAP_COMMANDS)).toEqual([])
+    expect(
+      absentWorkflowMapScripts([
+        { command: 'node scripts/check-workflow-map-renamed.mjs', script: 'scripts/check-workflow-map-renamed.mjs' },
+      ]),
+    ).toEqual(['scripts/check-workflow-map-renamed.mjs'])
   })
 })

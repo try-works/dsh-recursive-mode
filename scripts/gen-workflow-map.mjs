@@ -2909,6 +2909,20 @@ const REFUSAL_MARKS = [
   { rule: 'phase 6/7/8 baseline', short: 'frozen + memory', nodes: ['08-memory-impact.md'] },
 ]
 
+/**
+ * The words ONE refusal band prints, derived from the table above rather than written twice: the
+ * NARROWEST rules that bite there. The three built-in rules that fire on a tool pattern alone bite
+ * under every phase, so naming them in every band would say nothing — what varies per phase is the
+ * named baseline, and a phase where no baseline bites says `any lock or write` instead. `verify()`
+ * re-derives this per phase and refuses a band whose words disagree with the table, which is what
+ * makes the band a checked fact rather than a caption.
+ */
+function refusalBandText(file) {
+  const names = REFUSAL_MARKS.filter((r) => r.nodes.includes(file) && r.nodes.length < PHASES.length)
+    .map((r) => r.short).join(' · ')
+  return names === '' ? 'any lock or write' : names
+}
+
 /* ==========================================================================
    THE CHARTS — LAYOUT BY ARITHMETIC, NOT BY EYE
    ==========================================================================
@@ -3026,6 +3040,9 @@ function makeEngine() {
     // the manifest it prints: two boxes could pass as "touching" while both reporting
     // the same edge. The geometry that is CHECKED is the geometry that is EMITTED.
     const b = { x: round(box.x), y: round(box.y), w: round(box.w), h: round(box.h), kind, label }
+    // `inside` is one index or a list of them: every stroke this one is allowed to overlap, each
+    // of which becomes its own declared pair. See the array note at the declaration below.
+    const declared = inside === undefined ? [] : (Array.isArray(inside) ? inside : [inside])
     if (!(b.w > 0) || !(b.h > 0)) {
       throw new Error('diagram: ' + kind + ' "' + label + '" has an empty box: ' + JSON.stringify(b))
     }
@@ -3061,7 +3078,7 @@ function makeEngine() {
         contains.push(holds(o, b) ? [boxes.length, i] : [i, boxes.length])
         continue
       }
-      if (inside !== undefined && i === inside && (kind === 'rule' || kind === 'ink')) {
+      if (inside !== undefined && declared.includes(i) && (kind === 'rule' || kind === 'ink')) {
         // A rule or an arrowhead sharing an index with the rule it joins: the arc's
         // corner. Declared with the neighbour as the container, so the exemption is a
         // fact in the manifest and not a hole in the check.
@@ -3073,7 +3090,15 @@ function makeEngine() {
         // triangle only MEETS it at one point. `check-workflow-map.mjs` already accepts
         // exactly this relation (`meets`, within one stroke width of 5 units) and refuses
         // any other declared containment, so the exemption cannot hide a real defect — it
-        // is the same two rules the checker re-derives from the manifest. */
+        // is the same two rules the checker re-derives from the manifest.
+        //
+        // ⚠ AND ONE STROKE MAY HAVE TO DECLARE MORE THAN ONE RELATION, which is why `inside`
+        // takes an array. The run that leaves the bundle trunk and crosses another lane overlaps
+        // BOTH — the trunk it starts from and the arrival stub it passes through. A single index
+        // could state one of those facts and the engine would refuse the other as an undeclared
+        // intersection, i.e. it would refuse the picture instead of the defect. Every index in
+        // the array becomes its own pair in the manifest, and the checker re-derives each pair
+        // on its own, so the array widens what can be DECLARED without widening what is allowed.
         contains.push([boxes.length, i])
         continue
       }
@@ -3332,8 +3357,16 @@ function drawOverview(api) {
    * THE RIGHT-HAND CHANNEL IS NOT DECORATION. The reopen arc leaves the last node of row 2
    * through its right edge and climbs back to row 1 in this margin, which is the one vertical
    * line on the canvas that crosses nothing at all: everything else is inside the grid.
+   *
+   * ⚠ 19 UNITS OUT, NOT 9, AND THE NINE WAS A READABILITY DEFECT RATHER THAN A COLLISION. At
+   * `GRID_R + 9` the riser's own stroke ran 6.5 units from the right edge of BOTH nodes in
+   * column 5 — one of which it attaches to and one of which it does not. Nothing overlapped, so
+   * five rounds of intersection checks stayed green, and a reader looking at the picture read the
+   * violet arc as belonging to 03-implementation-summary, the node it only passes. The
+   * `PROXIMITY_MIN` invariant below is the number that refuses that: a run may come no closer
+   * than 14 units to a node box it does not attach to, and 19 out clears it by 5.5.
    */
-  const RISER_X = round(GRID_R + 9)
+  const RISER_X = round(GRID_R + 19)
   const W = Math.ceil(GRID_R + 24)
 
   /** The node's name, split at a hyphen when it cannot fit on one line. */
@@ -3492,6 +3525,22 @@ function drawOverview(api) {
     }
     return null
   }
+  /**
+   * The same search, running LEFTWARD from an anchor: a label for a stroke that stands on the
+   * label's right (the bundle trunk) has to be right-aligned against it, or the nearest stroke to
+   * the label is whichever neighbour happens to be closer than the one it names.
+   */
+  const putLabelRight = (text, yTop, rightX, must) => {
+    const w = tw(text, FS[CLS.s])
+    for (let x = round(rightX - w); x >= GUTTER; x = round(x - 2)) {
+      if (fitsHere({ x, y: yTop, w, h: LABEL_H })) { textEl(x, yTop, CLS.s, text); return x }
+    }
+    if (must) {
+      throw new Error('overview chart: no free slot for the label "' + text + '" ending at ' + round(rightX)
+        + ' at y=' + yTop + ' — the trunk has no clear space to its left')
+    }
+    return null
+  }
 
   /* ======================= 5. THE NODES ================================== */
   /**
@@ -3501,11 +3550,7 @@ function drawOverview(api) {
    * node, and a node whose label leaves too little room is a build failure rather than a stroke
    * drawn through a hatched band.
    */
-  const bandText = (file) => {
-    const marks = REFUSAL_MARKS.filter((r) => r.nodes.includes(file))
-    const names = marks.filter((r) => r.nodes.length < PHASES.length).map((r) => r.short).join(' · ')
-    return names === '' ? 'any lock or write' : names
-  }
+  const bandText = refusalBandText
   const annotW = (file) => Math.ceil(tw(bandText(file), FS[CLS.s]) + 2 * PAD)
   const freeFrom = (i) => round(nodeX(i) + annotW(PHASES[i].file))
   const columnAt = (i, back, what) => {
@@ -3605,40 +3650,67 @@ function drawOverview(api) {
   }
   /* SOURCE side: the farther lane attaches LEFTMOST, so its long stub rises clear of every nearer
      run. TARGET side: the farther lane attaches RIGHTMOST, so the nearer edge's run ends before
-     that stub comes down. Both directions are needed; the engine refuses either mistake. */
-  const attach = (file, side, list, step) => {
-    const base = side === 'out' ? round(nodeRight(idxOf[file]) - 6) : round(nodeX(idxOf[file]) + 6)
+     that stub comes down. Both directions are needed; the engine refuses either mistake.
+     ⚠ THE STEP IS A READABILITY NUMBER, NOT A GAP-FILLER. Two stubs 12 units apart draw two
+     5-unit strokes 7 units apart, which a reader sees as one doubled line; `CHANNEL_MIN` below
+     refuses anything under 12, so the source side steps 25 and the target side 30. */
+  const SOURCE_STEP = 25
+  const ARRIVE_STEP = 30
+  /* ⚠ AND AN ARRIVAL DOES NOT LAND ON THE CORNER OF THE NODE IT POINTS AT. Every one of the
+     three arrival stubs used to land 6 units inside its target's left edge, which is where the
+     gap between two nodes is: the arrowhead read as pointing at the boundary rather than at the
+     phase. `LAND_MARGIN` below is the number that refuses that, and 20 is what this band has
+     room for (the longest arrival run is 641 units against a 155-unit label). */
+  const ARRIVE_MARGIN = 20
+  const attach = (file, side, list, step, margin) => {
+    const base = side === 'out' ? round(nodeRight(idxOf[file]) - 6) : round(nodeX(idxOf[file]) + margin)
     const sorted = [...list].sort((a, b) => (side === 'out' ? b.dist - a.dist : a.dist - b.dist))
     sorted.forEach((e, j) => { e[side] = round(side === 'out' ? base - (sorted.length - 1 - j) * step : base + j * step) })
   }
   topBand.forEach((e, k) => { e.dist = k })
-  attach(PHASES[0].file, 'out', topBand.filter((e) => e.edge.from === PHASES[0].file), 12)
-  attach(PHASES[2].file, 'out', topBand.filter((e) => e.edge.from === PHASES[2].file), 12)
-  attach(PHASES[2].file, 'in', topBand.filter((e) => e.edge.to === PHASES[2].file), 12)
-  attach(PHASES[4].file, 'in', topBand.filter((e) => e.edge.to === PHASES[4].file), 12)
+  attach(PHASES[0].file, 'out', topBand.filter((e) => e.edge.from === PHASES[0].file), SOURCE_STEP, 0)
+  attach(PHASES[2].file, 'out', topBand.filter((e) => e.edge.from === PHASES[2].file), SOURCE_STEP, 0)
+  attach(PHASES[2].file, 'in', topBand.filter((e) => e.edge.to === PHASES[2].file), ARRIVE_STEP, ARRIVE_MARGIN)
+  attach(PHASES[4].file, 'in', topBand.filter((e) => e.edge.to === PHASES[4].file), ARRIVE_STEP, ARRIVE_MARGIN)
 
   let laneLabelsDrawn = 0
-  const topHeads = topBand.map((e) => ({ x: e.in, lo: round(e.in - SEQ_HALF) }))
   for (const e of topBand) {
     const yy = topY(e.dist)
     const xs = e.out, xt = e.in
     const dash = e.edge.kind === 'conditional'
     const line = dash ? 'dg-line-cond' : 'dg-line'
     const headCls = dash ? 'dg-head-cond' : 'dg-head'
-    /* WHERE A RUN ENDS. It stops one arrowhead-length short of its target stub — the arrowhead
-       covers the join — and short of every FOREIGN arrowhead it would otherwise reach, because two
-       edges that leave the same node put their stubs at the same x and the shorter one's head would
-       otherwise sit inside the longer one's run. */
-    const foreign = topHeads.filter((h) => h.x !== xt && h.lo > xs).map((h) => h.lo)
-    const runEnd = round(Math.max(round(xs + LINE_PAD + 1),
-      Math.min(round(xt - HEAD_L), ...(foreign.length ? foreign : [Infinity])) - 1))
-    const run = ruleH(xs, yy, round(runEnd - xs), line, 'lane ' + e.edge.from + ' -> ' + e.edge.to)
+    /**
+     * ⚠ WHERE A RUN ENDS: ON ITS OWN TARGET STUB, NOT SHORT OF IT.
+     *
+     * This is the defect the owner saw as "the lines connecting phases are somewhat broken", and
+     * it was both a break and a silence. The run used to stop `HEAD_L` short of its target stub
+     * — on the theory that the arrowhead covers the join, which is false: the arrowhead is at the
+     * NODE's top edge, one stub-length away — and it was additionally trimmed short of every
+     * FOREIGN arrowhead whose x lay to its right. For the outermost of the three lanes the
+     * foreign head it hit first was 01-as-is's, 375 units short of its own arrival: the run ended
+     * in mid-air above x=403, and the arrival stub at x=820 hung off nothing. Two strokes, one
+     * edge, and every count-based check green, because a box labelled `lane 00-requirements.md ->
+     * 02-to-be-plan.md` existed and had the right words in it.
+     *
+     * The run now ends ON the stub's own reserved box, so the corner is a real join: the run's
+     * box and the stub's box overlap by exactly the 2.5 units of `LINE_PAD` and the overlap is
+     * DECLARED (`inside = run`), which is the same allowance the engine already makes for every
+     * other corner in this chart. `TRACE` below re-derives the whole polyline from the emitted
+     * manifest and refuses any edge whose strokes do not reach its target.
+     */
+    const run = ruleH(xs, yy, round(xt - xs), line, 'lane ' + e.edge.from + ' -> ' + e.edge.to)
     ruleV(xs, yy, round(rowATop - yy), line, 'stub out ' + e.edge.from, run)
     const stubT = ruleV(xt, yy, round(rowATop - HEAD_L - yy), line, 'stub in ' + e.edge.to, run)
     head([[xt, rowATop], [round(xt - SEQ_HALF), round(rowATop - HEAD_L)], [round(xt + SEQ_HALF), round(rowATop - HEAD_L)]],
       headCls, 'lane arrow ' + e.edge.to, stubT)
-    const label = short(e.edge.from) + (dash ? ' · when present' : '')
-    if (putLabel(label, round(yy + LINE_PAD + 1), round(xs + 2), round(runEnd - 2)) !== null) laneLabelsDrawn++
+    /* ⚠ ONE LABEL PER RUN, NAMING BOTH OF ITS ENDPOINTS. The label used to name the SOURCE only,
+       so the two lanes out of 00-requirements printed the same word twice and a reader had to
+       trace pixels to tell them apart — the same defect as the three `02-to-be-plan` labels in
+       the band between the rows. `from → to` is unique for every lane in the chart by
+       construction (each edge is one pair), which is what `LABEL_*` below asserts. */
+    const label = short(e.edge.from) + ' → ' + short(e.edge.to) + (dash ? ' · when present' : '')
+    if (putLabel(label, round(yy + LINE_PAD + 1), round(xs + 2), round(xt - 2)) !== null) laneLabelsDrawn++
   }
 
   /* ======================= 8. THE ROW BOUNDARY =========================== */
@@ -3649,9 +3721,16 @@ function drawOverview(api) {
    * are in one column there is no run at all: this is the one edge in the chart whose whole drawing
    * is a single stroke, and it is the reason the rows are drawn in opposite directions.
    */
-  const WRAP_X = needColumn(idxOf[wrap.from], 0, 'the row-boundary spine out of ' + wrap.from)
-  const wrapArrival = needColumn(idxOf[wrap.to], 0, 'the row-boundary spine into ' + wrap.to)
+  const WRAP_X = needColumn(idxOf[wrap.from], 1, 'the row-boundary spine out of ' + wrap.from)
+  const wrapArrival = needColumn(idxOf[wrap.to], 1, 'the row-boundary spine into ' + wrap.to)
   if (WRAP_X !== wrapArrival) throw new Error('overview chart: the row boundary is not a single column')
+  /* ⚠ THE WRAP LANDS 23 UNITS INSIDE ITS TARGET, NOT 11, and the nine was the same defect the
+     reopen arc had: an arrowhead 11 units from a node's right edge, with the neighbouring column
+     22 units away on the other side of that edge, reads as ambiguous. `needColumn(…, 1)` puts it
+     at 1081 of a node that ends at 1104 — 23 in, against LAND_MARGIN's 16. */
+  if (!(nodeRight(idxOf[wrap.to]) - WRAP_X >= LAND_MARGIN)) {
+    throw new Error('overview chart: the row-boundary spine lands in the corner of ' + wrap.to)
+  }
   const wrapDash = wrap.kind === 'conditional'
   const wrapRun = ruleV(WRAP_X, rowABottom, round(rowBTop - HEAD_L - rowABottom),
     wrapDash ? 'dg-line-cond' : 'dg-line', 'spine ' + wrap.from + ' -> ' + wrap.to)
@@ -3684,85 +3763,129 @@ function drawOverview(api) {
    * is a real containment or a touch within ONE stroke width. Every other pair, including all the
    * pairs the naive interval rule calls "nested", is clean.
    */
-  const X46 = columnAt(idxOf[L46.from], 17, 'the lane out of ' + L46.from)
-  const X47 = columnAt(idxOf[L47.from], 37, 'the straight-down lane out of ' + L47.from)
-  const X48 = columnAt(idxOf[L48.from], 51, 'the lane out of ' + L48.from)
-  const X57 = needColumn(idxOf[L57.from], 2, 'the lane out of ' + L57.from)
-  const T46 = round(nodeX(idxOf[L46.to]) + 6)
-  const T48 = round(nodeX(idxOf[L48.to]) + 6)
-  const T57 = round(nodeRight(idxOf[L57.to]) - 5)
+  /**
+   * ⚠ THE THREE EDGES OUT OF 02-TO-BE-PLAN LEAVE THE NODE AS ONE LABELLED BUNDLE, AND THIS IS
+   * THE ONE STRUCTURAL CHANGE IN THE CHART. The arithmetic forces it:
+   *
+   *   · 02-to-be-plan reads three upstream artifacts AND is read by three downstream ones, so
+   *     THREE of its four outgoing edges cross the row boundary;
+   *   · its refusal band ("no memory plane") is 102 units wide, which leaves a free strip 51.5
+   *     units wide under the node — the only place a stub may leave its bottom edge;
+   *   · three stubs in 51.5 units is a pitch of at most 26, which draws three 5-unit strokes
+   *     9-15 units apart. All three carried the same label. That is the tangle: not a collision,
+   *     which the engine refuses, but three parallel lines a reader could not tell apart.
+   *
+   * So the notation the WILDCARD RAIL already uses is applied in the other direction. The rail
+   * bundles eleven SOURCES into one node; this bundles one node into three TARGETS. One trunk
+   * leaves 02-to-be-plan's bottom edge in the middle of its free strip; each edge leaves the
+   * trunk at its own level, with its own label naming where it goes and its own arrowhead on its
+   * own target. Every junction is labelled, so nothing is chosen by guesswork — the reader reads
+   * where the line goes instead of tracing which of three parallel lines it might be.
+   *
+   * The trunk's own label is `bundle …` and names all three edges, so the sharing is DECLARED
+   * rather than implied: `TRACE` below re-derives each of the three from the emitted manifest, and
+   * a shared stroke is not an exemption from that check but a fact it reads.
+   *
+   * AND THE CROSSINGS. Exactly one pair in this band cannot be separated, and it is one pair
+   * whatever the routing: 02-to-be-plan -> 03.5-code-review runs LEFT to RIGHT (column 4 -> the
+   * row-2 column 5) while 03-implementation-summary -> 04-test-summary runs RIGHT to LEFT
+   * (column 5 -> the row-2 column 4) — they swap columns, so one of them must cross the other
+   * somewhere. The old chart had that crossing too, but it sat among three near-parallel
+   * unlabelled stubs and a label 36 units from the stroke it named. Here it is the only crossing
+   * in the band, it is a clean orthogonal X, and both strokes carry their own words. The levels
+   * below are still SOLVED rather than chosen: for e above f, the lower edge's source stub must
+   * not fall inside the upper edge's run, and the upper edge's target stub must not fall inside
+   * the lower edge's run. Level 0 (03-implementation-summary's lane) is checked against every
+   * level below it; the trunk is checked against every run; the row-boundary spine is checked
+   * against all of them. Both `--verify` and `check-workflow-map.mjs` re-derive them.
+   */
+  const TRUNK_X = columnAt(idxOf[L47.from], 48, 'the bundle trunk out of ' + L47.from)
+  const X57 = columnAt(idxOf[L57.from], 43, 'the lane out of ' + L57.from)
+  /* Every arrival lands at least LAND_MARGIN inside the node it points at, measured from both of
+     that node's vertical edges: an arrowhead in the corner reads as pointing at the boundary
+     between two phases, which is exactly how the reopen arc was misread. */
+  const T48 = round(nodeX(idxOf[L48.to]) + 27)
+  const T46 = round(nodeX(idxOf[L46.to]) + 75)
+  const T57 = round(nodeRight(idxOf[L57.to]) - 30)
   for (const [x, i, what] of [[T46, idxOf[L46.to], L46.to], [T48, idxOf[L48.to], L48.to], [T57, idxOf[L57.to], L57.to]]) {
     if (!(x >= nodeX(i) && x <= nodeRight(i))) throw new Error('overview chart: the arrival of ' + what + ' is not on its own node')
+    if (!(x - nodeX(i) >= LAND_MARGIN && nodeRight(i) - x >= LAND_MARGIN)) {
+      throw new Error('overview chart: the arrival of ' + what + ' at ' + x + ' lands in the corner of ' + PHASES[i].file
+        + ' (' + round(x - nodeX(i)) + ' / ' + round(nodeRight(i) - x) + ' units from its edges, need ' + LAND_MARGIN + ')')
+    }
   }
-  /* ⚠ FOUR COORDINATE FACTS THE LEVEL ORDER RESTS ON, ASSERTED. Each would otherwise be a stroke
+  /* ⚠ THE COORDINATE FACTS THE LEVEL ORDER RESTS ON, ASSERTED. Each would otherwise be a stroke
      drawn through another stroke that only a reader would notice.
-       1. THE STRAIGHT-DOWN LANE SITS BETWEEN THE TWO LANE SOURCES OUT OF ITS OWN NODE. Its stroke
-          crosses the whole band, so it is outside the level-2 run (which goes right, to the column
-          above) only if X47 < X46, and outside the level-1 run (which goes left from X48) only if
-          X47 > X48. Both at once is what the free strip's three columns are assigned for.
-       2. THE LEVEL-0 RUN CLEARS IT, with room for its own arrowhead.
-       3. THE ROW-BOUNDARY SPINE IS OUTSIDE THE LEVEL-0 RUN, or the wrap would be crossed too.
-       4. THE BRIDGE IS REAL: the level-2 run's target stub lands fully inside the level-0 run's
-          x-span, which is what makes the declared pair a five-by-five touch and not a partial
-          overlap the checker would refuse. */
-  if (!(X48 < X47 && X47 < X46)) {
-    throw new Error('overview chart: the straight-down lane must sit between the two lane sources, got ' + X48 + ' / ' + X47 + ' / ' + X46)
+       1. THE TRUNK IS OUTSIDE THE LEVEL-0 RUN. The trunk crosses the whole band, so it is outside
+          03-implementation-summary's run only if TRUNK_X < T57 — and that is also what keeps the
+          straight-down lane out of that run's x-span, which is why the two cross nowhere.
+       2. THE TRUNK IS RIGHT OF THE REFUSAL BAND under its own node (which `columnAt` enforces).
+       3. THE LEVEL-2 RUN SPANS THE LEVEL-0 ARRIVAL, so the one crossing is the declared one and
+          not a stroke through a stroke the engine would have refused.
+       4. THE ARRIVALS ARE IN CHANNEL ORDER AND APART: the trunk, then the level-0 arrival, then
+          the level-2 arrival, each at least CHANNEL_MIN units from the next. */
+  if (!(TRUNK_X < T57)) throw new Error('overview chart: the bundle trunk would fall inside the level-0 run')
+  if (!(T57 < T46)) throw new Error('overview chart: the two cross-row arrivals are not in channel order')
+  for (const [a, b, why] of [[TRUNK_X, T57, 'the trunk and the level-0 arrival'], [T57, T46, 'the level-0 and level-2 arrivals']]) {
+    if (!(b - a >= CHANNEL_MIN)) throw new Error('overview chart: ' + why + ' are only ' + round(b - a) + ' units apart, need ' + CHANNEL_MIN)
   }
-  if (!(T57 > X47 + 2 * SEQ_HALF + LINE_PAD + 2)) {
-    throw new Error('overview chart: the level-0 run would cross the straight-down lane out of ' + L47.from)
-  }
-  if (!(WRAP_X > X57)) throw new Error('overview chart: the row-boundary spine would be crossed by the level-0 run')
-  if (!(X46 < T57 - SEQ_HALF)) throw new Error('overview chart: the level-2 source stub would cross the level-0 run')
-  if (!(T46 - SEQ_HALF >= T57 && T46 + SEQ_HALF <= X57)) {
-    throw new Error('overview chart: the level-2 arrival at ' + T46 + ' is not inside the level-0 run ' + T57 + '..' + X57
-      + ', so the declared bridge would not be the five-by-five touch the checker accepts')
-  }
+  if (!(T46 < X57)) throw new Error('overview chart: the level-2 arrival is not left of the lane it must be crossed by')
 
-  /* LEVEL 0, drawn first: the level-2 run declares its bridge against THIS lane's target stub, and
-     a declaration can only name a box that already exists. */
-  const pending = []
-  const l57Dash = L57.kind === 'conditional'
-  const l57Line = l57Dash ? 'dg-line-cond' : 'dg-line'
-  const l57Run = ruleH(T57, midY(0), round(X57 - T57), l57Line, 'lane ' + L57.from + ' -> ' + L57.to)
-  ruleV(X57, rowABottom, round(midY(0) - rowABottom), l57Line, 'stub cross out ' + L57.from, l57Run)
-  const l57StubT = ruleV(T57, midY(0), round(rowBTop - HEAD_L - midY(0)), l57Line, 'stub cross in ' + L57.to, l57Run)
-  head([[T57, rowBTop], [round(T57 - SEQ_HALF), round(rowBTop - HEAD_L)], [round(T57 + SEQ_HALF), round(rowBTop - HEAD_L)]],
-    l57Dash ? 'dg-head-cond' : 'dg-head', 'lane arrow ' + L57.to, l57StubT)
-  pending.push([short(L57.from) + (l57Dash ? ' · when present' : ''), round(midY(0) + LINE_PAD + 1), round(T57 + 10)])
+  /* THE TRUNK, drawn first: it carries 02-to-be-plan -> 04-test-summary to its own arrowhead and
+     the other two edges leave it at their own levels, so it has to exist before either can join.
+     ⚠ THE DASH IS READ OFF THE EDGE, never written in: which of these four runs is conditional is a
+     fact about the linter's input map, and a hardcoded `dg-line` would draw a required stroke over
+     a conditional edge without any check noticing. */
+  const dashLine = (e) => (e.kind === 'conditional' ? 'dg-line-cond' : 'dg-line')
+  const dashHead = (e) => (e.kind === 'conditional' ? 'dg-head-cond' : 'dg-head')
+  const bundleId = 'bundle ' + L47.from + ' -> ' + [L46.to, L47.to, L48.to].join(' + ')
+  const trunk = ruleV(TRUNK_X, rowABottom, round(rowBTop - HEAD_L - rowABottom), dashLine(L47), bundleId)
+  head([[TRUNK_X, rowBTop], [round(TRUNK_X - SEQ_HALF), round(rowBTop - HEAD_L)], [round(TRUNK_X + SEQ_HALF), round(rowBTop - HEAD_L)]],
+    dashHead(L47), 'lane arrow ' + L47.to, trunk)
 
-  /* LEVEL 1, and the straight-down lane. 02-to-be-plan -> 04-test-summary has both ends in column
-     4, so it is one stroke with an arrowhead on it and no run at all. */
-  const l48Run = ruleH(T48, midY(1), round(X48 - T48), 'dg-line', 'lane ' + L48.from + ' -> ' + L48.to)
-  ruleV(X48, rowABottom, round(midY(1) - rowABottom), 'dg-line', 'stub cross out ' + L48.from, l48Run)
-  const l48StubT = ruleV(T48, midY(1), round(rowBTop - HEAD_L - midY(1)), 'dg-line', 'stub cross in ' + L48.to, l48Run)
+  /* LEVEL 1: 02-to-be-plan -> 05-manual-qa, leaving the trunk to the left. */
+  const l48Run = ruleH(T48, midY(1), round(TRUNK_X - T48), dashLine(L48), 'lane ' + L48.from + ' -> ' + L48.to, trunk)
+  const l48StubT = ruleV(T48, midY(1), round(rowBTop - HEAD_L - midY(1)), dashLine(L48), 'stub cross in ' + L48.to, l48Run)
   head([[T48, rowBTop], [round(T48 - SEQ_HALF), round(rowBTop - HEAD_L)], [round(T48 + SEQ_HALF), round(rowBTop - HEAD_L)]],
-    'dg-head', 'lane arrow ' + L48.to, l48StubT)
-  pending.push([short(L48.from), round(midY(1) + LINE_PAD + 1), round(T48 + 10)])
+    dashHead(L48), 'lane arrow ' + L48.to, l48StubT)
 
-  const l47Run = ruleV(X47, rowABottom, round(rowBTop - HEAD_L - rowABottom), 'dg-line', 'lane ' + L47.from + ' -> ' + L47.to)
-  head([[X47, rowBTop], [round(X47 - SEQ_HALF), round(rowBTop - HEAD_L)], [round(X47 + SEQ_HALF), round(rowBTop - HEAD_L)]],
-    'dg-head', 'lane arrow ' + L47.to, l47Run)
-  /* ⚠ THE STRAIGHT-DOWN LANE'S LABEL GOES ON THE LEVEL-1 ROW, not on level 0 with the other two.
-     Three of these four edges leave 02-to-be-plan, so three of the four labels carry the same
-     name; the level-0 row has room for one of them beside the level-2 lane's arrival stub and the
-     level-1 row has room for the other. That is arithmetic on this canvas, not a preference. */
-  pending.push([short(L47.from), round(midY(1) + LINE_PAD + 1), round(X47 + 10)])
+  /* LEVEL 0: 03-implementation-summary -> 04-test-summary, arriving between the trunk and the
+     level-2 run. Drawn before level 2 because level 2's run declares the crossing against THIS
+     arrival's stub, and a declaration can only name a box that already exists. */
+  const l57Run = ruleH(T57, midY(0), round(X57 - T57), dashLine(L57), 'lane ' + L57.from + ' -> ' + L57.to)
+  ruleV(X57, rowABottom, round(midY(0) - rowABottom), dashLine(L57), 'stub cross out ' + L57.from, l57Run)
+  const l57StubT = ruleV(T57, midY(0), round(rowBTop - HEAD_L - midY(0)), dashLine(L57), 'stub cross in ' + L57.to, l57Run)
+  head([[T57, rowBTop], [round(T57 - SEQ_HALF), round(rowBTop - HEAD_L)], [round(T57 + SEQ_HALF), round(rowBTop - HEAD_L)]],
+    dashHead(L57), 'lane arrow ' + L57.to, l57StubT)
 
-  /* LEVEL 2, AND THE BRIDGE. The run itself declares the pair: it is reserved after the level-0
-     target stub it meets, and it stops exactly on that stub's left edge, so the two reserved boxes
-     touch and the drawn strokes join without a corner exemption being spent on either of them. */
-  const l46Run = ruleH(X46, midY(2), round(T46 - LINE_PAD - X46), 'dg-line', 'lane ' + L46.from + ' -> ' + L46.to, l57StubT)
-  ruleV(X46, rowABottom, round(midY(2) - rowABottom), 'dg-line', 'stub cross out ' + L46.from, l46Run)
-  const l46StubT = ruleV(T46, midY(2), round(rowBTop - HEAD_L - midY(2)), 'dg-line', 'stub cross in ' + L46.to)
+  /* LEVEL 2, AND THE ONE CROSSING: 02-to-be-plan -> 03.5-code-review leaves the trunk to the
+     right, and its run meets the level-0 arrival's stub 5 units into the level-2 band. Both
+     relations are declared — the trunk it leaves, and the stub it crosses — because the engine
+     permits a stroke to overlap only what the drawing says it overlaps. */
+  const l46Run = ruleH(TRUNK_X, midY(2), round(T46 - TRUNK_X), dashLine(L46), 'lane ' + L46.from + ' -> ' + L46.to, [trunk, l57StubT])
+  const l46StubT = ruleV(T46, midY(2), round(rowBTop - HEAD_L - midY(2)), dashLine(L46), 'stub cross in ' + L46.to, l46Run)
   head([[T46, rowBTop], [round(T46 - SEQ_HALF), round(rowBTop - HEAD_L)], [round(T46 + SEQ_HALF), round(rowBTop - HEAD_L)]],
-    'dg-head', 'lane arrow ' + L46.to, l46StubT)
-  pending.push([short(L46.from), round(midY(2) + LINE_PAD + 1), round(T46 + 10)])
+    dashHead(L46), 'lane arrow ' + L46.to, l46StubT)
 
-  /* The four labels, placed after all five strokes are reserved rather than as each one is drawn:
-     a label is the one mark a stroke cannot cover, so its slot has to be solved against every
-     stroke that will exist. They are required, not optional — each of the four names the shortest,
-     least obvious edge in the picture and is the only text that identifies its own run. */
-  const placed = pending.filter(([text, labelY, from]) => putLabel(text, labelY, from, round(GRID_R - 8), true) !== null)
+  /**
+   * ⚠ FOUR LABELS, FOUR LINES, AND NO TWO OF THEM THE SAME WORDS. The old band printed
+   * `02-to-be-plan` three times — twice on the same row — so a reader standing at the crossing
+   * could not tell which line either label named. Each label now names the endpoint the reader
+   * cannot see from where the label sits, and each is placed beside its own stroke: the trunk and
+   * the level-1 run name both of their ends, the two short runs name the one end their own run is
+   * too short to spell out. `LABEL` below asserts that each run's nearest label names its own
+   * destination and lies inside the run it names, and that no two of the texts are the same words.
+   */
+  const trunkLabel = '→ ' + short(L47.to)
+  const l48Label = short(L48.from) + ' → ' + short(L48.to)
+  const l46Label = '→ ' + short(L46.to)
+  const l57Label = '← ' + short(L57.from)
+  const placed = [
+    putLabelRight(trunkLabel, round(rowBTop - HEAD_L - LABEL_H - 2), round(TRUNK_X - 2), true) !== null,
+    putLabel(l48Label, round(midY(1) + LINE_PAD + 1), round(T48 + 2), round(TRUNK_X - 2), true) !== null,
+    putLabel(l46Label, round(midY(2) + LINE_PAD + 1), round(TRUNK_X + 2), round(T46 - 2), true) !== null,
+    putLabel(l57Label, round(midY(0) + LINE_PAD + 1), round(T57 + 2), round(X57 - 2), true) !== null,
+  ].filter(Boolean)
   if (placed.length !== 4) throw new Error('overview chart: only ' + placed.length + ' of the four cross-row lane labels were placed')
 
   /* ======================= 10. THE IN-ROW MARKS ========================== */
@@ -3841,7 +3964,17 @@ function drawOverview(api) {
   const reopenTo = idxOf['02-to-be-plan.md']
   const reopenFrom = idxOf['03.5-code-review.md']
   const RO_TOP = topY(3)
-  const RO_DOWN = round(nodeX(reopenTo) + 148)
+  /**
+   * ⚠ THE DROP LANDS IN THE MIDDLE OF THE NODE IT MEANS, AND THAT IS THE WHOLE POINT OF THE ARC.
+   * It used to come down at `nodeX + 148`, i.e. 11 units inside 02-to-be-plan's right edge, with
+   * the shelf and riser wrapping around 03-implementation-summary's column on the way in. Nothing
+   * overlapped — the engine was satisfied, and both checkers counted the three strokes and the
+   * arrowhead and called the arc drawn — but a reader looking at the picture read the violet line
+   * as pointing at 03-implementation-summary, the phase it passes and does not touch. The centre
+   * of the target is the one landing on that edge that cannot be misread: 79.5 units from either
+   * vertical edge, against LAND_MARGIN's 16.
+   */
+  const RO_DOWN = round(nodeX(reopenTo) + NODE_W / 2)
   const roMid = round(rowBTop + NODE_H / 2)
   const roOut = ruleH(nodeRight(reopenFrom), roMid, round(RISER_X - nodeRight(reopenFrom)), 'dg-line-loop', 'reopen out 02-to-be-plan.md')
   const roRiser = ruleV(RISER_X, RO_TOP, round(roMid - RO_TOP), 'dg-line-loop', 'reopen riser 02-to-be-plan.md', roOut)
@@ -3889,7 +4022,14 @@ function drawOverview(api) {
   }
   const retRiser = round(GUTTER - 22)
   const retY = round(crossTop + PAD + lh(FS[CLS.s]) / 2)
-  const retFootY = round(crossTop + crossBoxH + 26)
+  /**
+   * ⚠ THE FOOT COMES BACK TO THE CARD'S OWN BOTTOM CORNER, NOT TO A POINT 26 UNITS BELOW IT. It
+   * used to stop at the card's x with a y 26 units past the card's bottom edge, which left the
+   * outer end of the arc hanging in space — the one segment on this canvas that touched nothing at
+   * either end. The arc now brackets the card's left edge exactly: out of its bottom-left corner,
+   * down the gutter, and back into its left edge with the arrowhead. `TRACE` walks it end to end.
+   */
+  const retFootY = round(crossTop + crossBoxH)
   const retDrop = ruleV(retRiser, retY, round(retFootY - retY), 'dg-line-loop', 'cross-run return drop')
   ruleH(round(retRiser + LINE_PAD + 1), retFootY, round(GUTTER - retRiser - LINE_PAD - 1), 'dg-line-loop', 'cross-run return foot', retDrop)
   const retRun = ruleH(retRiser, round(retY - 2 * LINE_PAD), round(GUTTER - retRiser), 'dg-line-loop', 'cross-run return run', retDrop)
@@ -3987,6 +4127,40 @@ function drawOverview(api) {
  *     hole under its title and a 70-unit one above its node row.
  */
 const OVERVIEW_LIMITS = { MIN_VIEWPORT_W: 1280, WIDTH_BUDGET: 1130, HEIGHT_BUDGET: 780, MAX_EMPTY_BAND: 48 }
+
+/**
+ * ⚠ THE READABILITY BUDGETS — THE NUMBERS THE MISSING INVARIANT NEEDS, AND THEY ARE NOT COLLISION
+ * NUMBERS.
+ *
+ * Every geometric rule this file had was about COLLISION: `reserve()` throws when two reserved
+ * boxes intersect, and the structural checker re-derives the same rule from the manifest. A chart
+ * can satisfy all of it and still be unfollowable, and this one did. The owner looked at the
+ * rendered picture and said "the lines connecting phases or showing phase interactions are
+ * somewhat broken" — and measured off the shipped manifest that was literally true: THREE of the
+ * sixteen drawn edges were not connected from their source node to their target node at all, by
+ * 6.5 units on two of them and by 375 on the third. Nothing noticed, because the checks counted
+ * LABELS: a box reading `lane 00-requirements.md -> 02-to-be-plan.md` existed, so the edge counted
+ * as drawn, whether or not its strokes reached each other.
+ *
+ * These three numbers are about READING rather than about colliding, and both `--verify` and
+ * `check-workflow-map.mjs` assert every drawn stroke against them:
+ *
+ *   · LAND_MARGIN — 16 units. An arrowhead that lands on a node's TOP edge must land at least this
+ *     far inside that node from both of its vertical edges. A head in the corner is ambiguous with
+ *     the neighbouring column, and the reopen arc was the proof: it came down 11 units inside
+ *     02-to-be-plan, having wrapped around 03-implementation-summary on the way in, and was read as
+ *     pointing at the wrong phase. 16 is what this canvas affords — the arrival ports sit 20, 23,
+ *     26, 27 and 30 units in, and no head is nearer than 20 to a corner.
+ *   · CHANNEL_MIN — 12 units between two PARALLEL strokes that belong to DIFFERENT edges. Two
+ *     5-unit strokes 7 units apart are one doubled line to the eye. The strip under 02-to-be-plan
+ *     held four strokes at gaps of 7, 7, 7 and 9 units, and that is the tangle in numbers.
+ *   · PROXIMITY_MIN — 14 units from any edge stroke to a node box it does not attach to. "Passing
+ *     through the gap is what looks broken": the reopen riser ran 6.5 units from the right edge of
+ *     03-implementation-summary and 6.5 from 03.5-code-review's, attached to neither, and the arc
+ *     read as belonging to the node it merely passed.
+ */
+const READABILITY = { LAND_MARGIN: 16, CHANNEL_MIN: 12, PROXIMITY_MIN: 14 }
+const { LAND_MARGIN, CHANNEL_MIN, PROXIMITY_MIN } = READABILITY
 
 /**
  * The tallest run of the frame's own height that holds no reserved ink, computed from the boxes
@@ -4523,53 +4697,450 @@ function verify(html) {
     if (e.kind === 'wildcard') return 'wildcard stub ' + e.to
     const i = PHASES.findIndex((p) => p.file === e.from)
     const j = PHASES.findIndex((p) => p.file === e.to)
+    /* ⚠ ONE EDGE, ONE RUN, AND THE RUN OF THE BUNDLE TRUNK IS THE TRUNK. 02-to-be-plan's three
+       cross-row edges share one stroke — the edge that goes straight down owns it, the other two
+       leave it at their own levels — so this expects that stroke's `bundle` label where the other
+       fifteen expect their own `lane`/`spine` label. The sharing is not an exemption from being
+       checked: the bundle names its three members and TRACE re-derives all three from the ink. */
+    if (i === 4 && e.to === PHASES[7].file) return 'bundle ' + e.from + ' -> ' + [PHASES[6].file, PHASES[7].file, PHASES[8].file].join(' + ')
     return (j - i === 1 ? 'spine ' : 'lane ') + e.from + ' -> ' + e.to
   })
-  const drawnRuns = labels.filter((l) => /^(lane|spine) .+ -> .+$/.test(l) || /^wildcard stub /.test(l))
+  const drawnRuns = labels.filter((l) => /^(lane|spine|bundle) .+ -> .+$/.test(l) || /^wildcard stub /.test(l))
   check('THE OVERVIEW DRAWS EXACTLY ONE RUN PER DERIVED EDGE, AND EVERY EDGE IS DRAWN',
     drawnRuns.slice().sort(), expectedRuns.slice().sort())
+
+  /* ==========================================================================
+     THE READABILITY INVARIANTS — THE PROPERTY NO CHECK EVER HELD
+     ==========================================================================
+
+     Every geometric rule this file had was about COLLISION: `reserve()` throws when two reserved
+     boxes intersect, and the structural checker re-derives the same rule from the manifest. A
+     chart can satisfy all of it and still be unfollowable, and this one was. The owner looked at
+     the rendered picture and said the lines connecting phases were "somewhat broken", and measured
+     off the shipped manifest that was LITERALLY true — three of the sixteen drawn edges were not
+     connected from their source node to their target node at all:
+
+       · 00-requirements.md -> 02-to-be-plan.md    the run ended at x=403, 417 units short of its
+                                                   own arrival stub at x=820: two strokes, one edge;
+       · 00-requirements.md -> 01-as-is.md         the run stopped 6.5 units short of its stub;
+       · 01-as-is.md -> 02-to-be-plan.md           the same 6.5-unit notch.
+
+     Nothing noticed, because the checks counted LABELS: the box reading `lane 00-requirements.md
+     -> 02-to-be-plan.md` existed and had the right words in it, so the edge counted as drawn.
+     These checks are what would have failed. Every one of them is re-derived from the EMITTED
+     manifest and the EMITTED svg, so a drawing that stops matching its own words fails here
+     rather than shipping.
+
+     ⚠ AND THEY ARE BOOLEAN-SHAPED ON PURPOSE. Nine checks in this file and in
+     `check-workflow-map.mjs` used to hand `check()` a NUMBER where its label promised a property —
+     `check('… are dashed', laneRunCount, expectedCount)` passes for any count that matches, and a
+     count that matches says nothing about a dash. Each one below compares what its own label
+     says it compares and reports the FAILING BOXES, not a total. */
+  const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const OVBOX = overviewLayout.boxes.map((b, i) => ({ i, kind: b[0], x: b[1], y: b[2], w: b[3], h: b[4], label: String(b[5]) }))
+  const gaps = (a, b) => ({
+    dx: Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w), 0),
+    dy: Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h), 0),
+  })
+  /** Touching within one stroke width — the same relation the checker calls `meets`. */
+  const ovFit = (a, b, tol = 5) => { const g = gaps(a, b); return g.dx <= tol && g.dy <= tol }
+  const ovDist = (a, b) => { const g = gaps(a, b); return Math.hypot(g.dx, g.dy) }
+  const byLabel = (l) => OVBOX.filter((b) => b.label === l)
+  const oneBox = (l) => byLabel(l)[0]
+  const NODES_L = OVBOX.filter((b) => /^node /.test(b.label))
+  const RAIL_BOX = 'the wildcard input rail'
+  /* The emitted svg, element by element, in the same order the boxes were reserved. The mapping is
+     asserted below: a class read off the wrong element would be a check about nothing. */
+  const ovAt = html.indexOf('data-diagram="overview"')
+  const ovSvg = html.slice(ovAt, html.indexOf('</svg>', ovAt))
+  const cls = {
+    rule: [...ovSvg.matchAll(/<path class="([^"]+)"/g)].map((m) => m[1]),
+    ink: [...ovSvg.matchAll(/<polygon class="([^"]+)"/g)].map((m) => m[1]),
+    box: [...ovSvg.matchAll(/<rect class="([^"]+)"/g)].map((m) => m[1]),
+    text: [...ovSvg.matchAll(/<text class="([^"]+)"/g)].map((m) => m[1]),
+  }
+  const clsOf = {}
+  {
+    let r = 0, k = 0, b = 0, t = 0
+    for (const x of OVBOX) clsOf[x.i] = cls[x.kind === 'rule' ? 'rule' : x.kind === 'ink' ? 'ink' : x.kind === 'box' ? 'box' : 'text'][
+      x.kind === 'rule' ? r++ : x.kind === 'ink' ? k++ : x.kind === 'box' ? b++ : t++]
+  }
+  check('every emitted element is matched to its reserved box, so a class read below is read off the right stroke',
+    [cls.rule.length, cls.ink.length, cls.box.length, cls.text.length],
+    ['rule', 'ink', 'box', 'text'].map((k) => OVBOX.filter((x) => (x.kind === k)).length))
+
+  /* THE CONNECTIONS: the sixteen derived edges, the two back edges, the four sequence links and
+     the cross-run return. Each one names its source, its target, the stroke that is its own RUN,
+     and every stroke that may appear in its chain. */
+  const bundlePat = new RegExp('^bundle ' + escRe(PHASES[4].file) + ' -> ')
+  const CONN = []
+  for (const e of EDGES) {
+    const i = PHASES.findIndex((p) => p.file === e.from)
+    const j = PHASES.findIndex((p) => p.file === e.to)
+    if (e.kind === 'wildcard') {
+      CONN.push({
+        id: e.from + ' -> ' + e.to, from: RAIL_BOX, to: 'node ' + e.to, family: 'wildcard', run: null,
+        strokes: [new RegExp('^wildcard stub ' + escRe(e.to) + '$'), new RegExp('^wildcard head ' + escRe(e.to) + '$')],
+      })
+      continue
+    }
+    const word = j - i === 1 ? 'spine' : 'lane'
+    const own = new RegExp('^' + word + ' ' + escRe(e.from) + ' -> ' + escRe(e.to) + '$')
+    /* 02-to-be-plan's three cross-row edges share one trunk: it IS the run of the edge that goes
+       straight down, and it is part of the chain of the other two. */
+    const shared = [4, 6, 7, 8].includes(i) && j - i > 1 ? [bundlePat] : []
+    /* ⚠ AN ADJACENT EDGE HAS NO STUBS. Its whole drawing is one stroke in the gap between the two
+       boxes plus its arrowhead — so listing `stub out <from>` among its strokes would pull in the
+       source stubs of the LANES that leave the same node, and the check would then report a chain
+       in three pieces for an edge that is drawn perfectly. That was a false alarm in the first
+       draft of this check, and it is the reason the stroke list is built from the SHAPE of the
+       drawing rather than from the edge's endpoints alone. */
+    const stubPats = j - i === 1 ? [] : [
+      new RegExp('^stub (out|cross out) ' + escRe(e.from) + '$'),
+      new RegExp('^stub (in|cross in) ' + escRe(e.to) + '$'),
+    ]
+    CONN.push({
+      id: e.from + ' -> ' + e.to, from: 'node ' + e.from, to: 'node ' + e.to, family: e.kind,
+      run: j - i > 1 && i === 4 && e.to === PHASES[7].file ? [bundlePat] : [own],
+      strokes: [own, ...shared, ...stubPats, new RegExp('^' + word + ' (arrow|head) ' + escRe(e.to) + '$')],
+    })
+  }
+  for (const side of [0, 1]) {
+    const from = side === 0 ? '03.5-code-review.md' : '04-test-summary.md'
+    const to = side === 0 ? '02-to-be-plan.md' : '03.5-code-review.md'
+    const word = side === 0 ? 'reopen' : 'revise'
+    CONN.push({
+      id: word.toUpperCase() + ' ' + from + ' -> ' + to, from: 'node ' + from, to: 'node ' + to, family: word,
+      run: [new RegExp('^' + word + ' (out|shelf) ')],
+      strokes: [new RegExp('^' + word + ' (out|shelf|riser|drop) '), new RegExp('^' + word + ' head ')],
+    })
+  }
+  for (let i = 0; i + 1 < PHASES.length; i++) {
+    if (EDGES.some((e) => e.from === PHASES[i].file && e.to === PHASES[i + 1].file)) continue
+    CONN.push({
+      id: 'sequence ' + PHASES[i].file + ' -> ' + PHASES[i + 1].file, from: 'node ' + PHASES[i].file, to: 'node ' + PHASES[i + 1].file,
+      family: 'sequence', run: [new RegExp('^sequence link ' + escRe(PHASES[i].file) + ' -> ' + escRe(PHASES[i + 1].file) + '$')],
+      strokes: [new RegExp('^sequence link ' + escRe(PHASES[i].file) + ' -> ' + escRe(PHASES[i + 1].file) + '$'),
+        new RegExp('^sequence head ' + escRe(PHASES[i + 1].file) + '$')],
+    })
+  }
+  const CROSS_CARD = OVBOX.find((b) => /^cross-run card: writes/.test(b.label))
+  CONN.push({
+    id: 'CROSS-RUN return into the next run', from: CROSS_CARD.label, to: CROSS_CARD.label, family: 'cross-run',
+    run: [new RegExp('^cross-run return (run|foot)$')],
+    strokes: [new RegExp('^cross-run return (run|drop|foot|head)$')],
+  })
+
+  /* ---- 1. TRACE: one continuous polyline, source stub to target head ---------------------- */
+  const traceOf = (c) => {
+    const start = c.from === RAIL_BOX ? oneBox(RAIL_BOX) : oneBox(c.from)
+    const target = oneBox(c.to)
+    const members = OVBOX.filter((b) => c.strokes.some((p) => p.test(b.label)))
+    const seen = new Set()
+    const queue = members.filter((m) => start && ovFit(start, m))
+    for (const m of queue) seen.add(m.i)
+    while (queue.length > 0) {
+      const cur = queue.pop()
+      for (const m of members) if (!seen.has(m.i) && ovFit(cur, m)) { seen.add(m.i); queue.push(m) }
+    }
+    const chain = members.filter((m) => seen.has(m.i))
+    const reaches = Boolean(target) && chain.some((m) => ovFit(m, target))
+    const headAt = target ? chain.filter((m) => m.kind === 'ink' && ovFit(m, target)).length : 0
+    const stray = members.filter((m) => !seen.has(m.i))
+    return { chain, reaches, headAt, stray, start, target }
+  }
+  const TRACED = CONN.map((c) => ({ c, t: traceOf(c) }))
+  check('TRACE: every drawn connection is ONE continuous polyline from its source to its target and ends in an arrowhead on the target — the sixteen derived edges, the two violet back edges, the four sequence links and the cross-run return ('
+    + TRACED.length + ' connections). A run that stops short of its own arrival, or an arrival that hangs off nothing, fails here',
+    TRACED.filter(({ t }) => !(t.chain.length > 0 && t.reaches && t.headAt >= 1)).map(({ c, t }) => c.id
+      + ' — reaches its target=' + t.reaches + ', arrowheads on target=' + t.headAt
+      + ', strokes reachable from the source: ' + t.chain.map((s) => s.label).join(' + ')),
+    [])
+  /* ⚠ AND NO STROKE IS LEFT OUT OF EVERY CHAIN. A segment that belongs to no connection's chain is
+     an orphan even when it is drawn, and this is the accounting that catches the other half of a
+     break: the arrival stub that hangs in mid-air because its run stopped 375 units short of it.
+     Text and cards are not strokes; only ink that draws a line is accounted for here. */
+  const claimed = new Set(TRACED.flatMap(({ t }) => t.chain.map((m) => m.i)))
+  const EDGE_STROKE = /^(lane|spine|bundle|stub|wildcard|sequence|reopen|revise|cross-run) /
+  const isStroke = (b) => (b.kind === 'rule' || b.kind === 'ink') && EDGE_STROKE.test(b.label)
+  check('NO ORPHAN SEGMENT: every stroke that draws part of a connection belongs to some traced chain',
+    OVBOX.filter((b) => isStroke(b) && !claimed.has(b.i)).map((b) => b.label + ' @' + b.x + ',' + b.y),
+    [])
+
+  /* ---- 2. LANDING MARGIN: an arrowhead points at a phase, not at its boundary --------------- */
+  const onTopEdge = OVBOX.filter((b) => b.kind === 'ink').flatMap((h) => {
+    const tipX = round2(h.x + h.w / 2), tipY = round2(h.y + h.h)
+    return OVBOX.filter((n) => /^node /.test(n.label) && Math.abs(tipY - n.y) <= 5 && tipX >= n.x - 5 && tipX <= n.x + n.w + 5)
+      .map((n) => ({ label: h.label, node: n.label.slice(5), tipX, left: round2(tipX - n.x), right: round2(n.x + n.w - tipX) }))
+  })
+  check('LAND_MARGIN: every arrowhead that lands on a node box lands at least ' + LAND_MARGIN
+    + ' units inside it from BOTH of its vertical edges, so it points at a phase and not at the boundary it shares with the next one ('
+    + onTopEdge.length + ' heads land on a node box)',
+    onTopEdge.filter((h) => h.left < LAND_MARGIN || h.right < LAND_MARGIN)
+      .map((h) => h.label + ' lands ' + h.tipX + ' on ' + h.node + ' — ' + h.left + ' / ' + h.right + ' units from its edges'),
+    [])
+
+  /* ---- 3. PROXIMITY: no run loiters beside a node it does not attach to ---------------------
+     ⚠ THE EXEMPTION IS BY CONNECTION, NOT BY TOUCH. An arrival stub stops one arrowhead-length
+     above its target so that the HEAD can land on the node's edge — the stub itself touches
+     nothing, and a rule keyed on touching would call every arrival stub in the chart a loiterer.
+     What the rule is for is a stroke running ALONGSIDE a node that is not on its own edge, which is
+     the shape a reader reads as "this line belongs to that box". A stroke under RUN_MIN long is a
+     connector or an arrowhead, not a run, and the in-row gap arrows (10 units, in a 22-unit gap)
+     are exempt for that reason. */
+  const RUN_MIN = 24
+  const nodeOf = (l) => (l.startsWith('node ') ? l.slice(5) : null)
+  /* ⚠ THE EXEMPTION IS BY STROKE, NOT BY CONNECTION. The bundle trunk is one stroke shared by
+     three connections, and the node it lands on (04-test-summary) is an endpoint of only one of
+     them — so a rule that asked "is this node on this connection" once per connection reported the
+     trunk as loitering beside its own target twice. Each stroke is exempt from the union of the
+     endpoints of every connection it belongs to. */
+  const strokeEnds = new Map()
+  for (const { c } of TRACED) {
+    const ends = [nodeOf(c.from), nodeOf(c.to)].filter(Boolean)
+    for (const pat of c.strokes) for (const b of OVBOX.filter((x) => isStroke(x) && pat.test(x.label))) {
+      strokeEnds.set(b.i, new Set([...(strokeEnds.get(b.i) || []), ...ends]))
+    }
+  }
+  const PROX = OVBOX.filter((b) => isStroke(b) && Math.max(b.w, b.h) >= RUN_MIN)
+    .flatMap((s) => NODES_L.filter((n) => !(strokeEnds.get(s.i) || new Set()).has(n.label.slice(5)))
+      .map((n) => ({ d: Math.round(ovDist(s, n) * 100) / 100, s: s.label, n: n.label.slice(5) })))
+    .filter((x) => x.d < PROXIMITY_MIN)
+  check('PROXIMITY: no edge stroke longer than ' + RUN_MIN + ' units passes within ' + PROXIMITY_MIN
+    + ' units of a node box that is not on its own connection — a run beside a box it does not attach to is a line a reader reads as belonging to that box',
+    PROX.map((p) => p.s + ' passes ' + p.d + ' units from ' + p.n),
+    [])
+
+  /* ---- 4. CHANNEL SEPARATION: no two edges draw parallel strokes closer than CHANNEL_MIN ----- */
+  const owner = (l) => {
+    const m = l.match(/^(?:lane|spine|bundle) (.+?) -> /)
+    if (m) return m[1]
+    const v = l.match(/^(reopen|revise) /)
+    if (v) return v[1]
+    const st = l.match(/^stub (?:cross )?(?:out|in) (.+)$/)
+    if (st) return 'stub-of ' + st[1]
+    return l
+  }
+  const parallels = []
+  {
+    const strokes = OVBOX.filter((b) => b.kind === 'rule' && EDGE_STROKE.test(b.label))
+    for (let a = 0; a < strokes.length; a++) {
+      for (let b = a + 1; b < strokes.length; b++) {
+        const A = strokes[a], B = strokes[b]
+        /* "parallel" = both taller than wide (verticals) or both wider than tall (horizontals) */
+        const vert = (s) => s.h > s.w * 2, horiz = (s) => s.w > s.h * 2
+        if (!((vert(A) && vert(B)) || (horiz(A) && horiz(B)))) continue
+        const ovl = vert(A) ? Math.min(A.y + A.h, B.y + B.h) - Math.max(A.y, B.y) : Math.min(A.x + A.w, B.x + B.w) - Math.max(A.x, B.x)
+        if (ovl <= 0) continue
+        const gap = vert(A) ? Math.max(A.x - (B.x + B.w), B.x - (A.x + A.w)) : Math.max(A.y - (B.y + B.h), B.y - (A.y + A.h))
+        if (gap < 0 || gap >= CHANNEL_MIN) continue
+        /* two strokes of the SAME edge are that edge's own corner, not two channels */
+        if (owner(A.label) === owner(B.label)) continue
+        parallels.push({ gap: round2(gap), a: A.label, b: B.label })
+      }
+    }
+  }
+  check('CHANNEL: two parallel strokes belonging to DIFFERENT edges are never closer than ' + CHANNEL_MIN
+    + ' units, so no line reads as a doubled neighbour of another',
+    parallels.map((p) => 'gap ' + p.gap + ': ' + p.a + ' | ' + p.b),
+    [])
+
+  /* ---- 5. LABELS: one per run, unique, inside its own run, nearest to its own run ----------- */
+  const texts = OVBOX.filter((b) => b.kind === 'text')
+  /* ⚠ ONLY THE ARROW LABELS COMPETE FOR A RUN. A node's own name row, its `fan-in` line and the
+     words inside a refusal band are all text boxes too, and the first draft of this check measured
+     them against the runs — so the trunk's "nearest label" was the word `04-test-summary` printed
+     inside the node it lands on. A run label is the one kind of text this chart writes with an
+     arrow in it, which is also what makes the convention checkable. */
+  const runTexts = texts.filter((t) => /→|←/.test(t.label))
+  const runBoxes = OVBOX.filter((b) => /^(lane|spine|bundle) .+ -> .+$/.test(b.label))
+  const laneRuns = runBoxes.filter((b) => /^(lane|bundle) /.test(b.label))
+  const nearestRun = (t) => runBoxes.map((r) => ({ r, d: ovDist(t, r) })).sort((a, b) => a.d - b.d)[0]
+  /** A horizontal run holds its label along its width; a vertical run holds it along its height. */
+  const insideRun = (t, run) => (run.w >= run.h
+    ? t.x >= run.x - 0.01 && t.x + t.w <= run.x + run.w + 0.01
+    : t.y >= run.y - 0.01 && t.y + t.h <= run.y + run.h + 0.01)
+  check('LABEL: every lane run carries its own words — the label nearest to each run names the phase that run leads to and sits inside the run it names, so a label can never be read against the wrong stroke',
+    laneRuns.flatMap((run) => {
+      /* The bundle trunk's own destination is the edge that goes straight down (02 -> 04); the
+         other two members leave it at their own levels and carry their own labels. */
+      const to = run.label.startsWith('bundle ') ? PHASES[7].file
+        : (run.label.match(/-> ([^ ]+?)(?: \+.*)?$/) || [])[1]
+      const from = run.label.startsWith('bundle ') ? PHASES[4].file
+        : (run.label.match(/^(?:lane|spine) (.+?) ->/) || [])[1]
+      /* A label answers the question the reader has at that stroke: where does this line go, or —
+         when the run is too short to spell out both ends — where did it come from. */
+      const names = (t) => t.label.endsWith('→ ' + String(to).replace(/\.md$/, ''))
+        || t.label.startsWith('← ' + String(from).replace(/\.md$/, ''))
+      const mine = runTexts.filter((t) => nearestRun(t).r === run)
+      const named = mine.filter(names)
+      const inside = named.filter((t) => insideRun(t, run))
+      if (named.length === 1 && inside.length === 1) return []
+      return [run.label + ' — ' + mine.length + ' label(s) nearest to it, ' + named.length + ' naming "→ '
+        + String(to).replace(/\.md$/, '') + '" or "← ' + String(from).replace(/\.md$/, '') + '", '
+        + inside.length + ' inside its own span'
+        + (mine.length ? ' (' + mine.map((t) => JSON.stringify(t.label) + '@' + t.x + ',' + t.y).join(', ') + ')' : '')]
+    }),
+    [])
+  check('LABEL: the only words the chart may print more than once are its per-node data rows — every label that names a run is unique in the chart, so a repeated label can never leave a reader guessing which stroke it names',
+    texts.map((t) => t.label).filter((l, i, all) => all.indexOf(l) !== i
+      && !/^(fan-in \d|no upstream artifact|no memory plane|any lock or write|memory read|frozen|frozen \+ memory|tdd-evidence|run-start|qa-signoff|phase \d+ — |the wildcard input rail|writes the plane)/.test(l)),
+    [])
+
   check('the overview draws one node per phase',
     labels.filter((l) => /^node /.test(l)).length, PHASES.length)
   /* The interaction types, each asserted as the SHAPE that carries it — this is the check that
-     would fail if the picture went back to being twelve boxes in a row. */
-  check('MULTI-INPUT is a shape: one dashed-border node per phase that reads more than one artifact',
-    PHASES.filter((p) => sourcesOf(p.file) > 1).length, 5)
-  check('every multi-input node carries the fan-in rail label', PHASES.filter((p) => sourcesOf(p.file) > 1)
-    .filter((p) => !Number.isFinite(overviewLayout.boxes.find((b) => b[5] === 'node ' + p.file)?.[2])), [])
-  check('HUMAN DECISION is a shape: one amber marker box per phase a person must answer',
-    labels.filter((l) => /^human decision marker /.test(l)).length, PHASES.filter((p) => p.human).length)
-  check('every human marker carries its own diamond', PHASES.filter((p) => p.human)
-    .filter((p) => !labels.includes('decision diamond ' + p.file)), [])
-  /* The rendered refusal bands: one per PHASE, and each one names the narrowest rule that bites
-     there. The count is over phases, not over (rule, phase) pairs — a band is one box with one
-     label, and the label lists every rule that selects that phase. */
-  check('REFUSAL is a shape: one band under every phase, and the rules the page names are the ones it draws',
-    [labels.filter((l) => /^refusal band /.test(l)).length, REFUSAL_MARKS.filter((r) => r.nodes.length > 0).length],
-    [PHASES.length, 8])
-  check('CONDITIONAL edges are dashed: one lane run per FORWARD, NON-ADJACENT input edge',
-    labels.filter((l) => /^lane .+ -> .+$/.test(l)).length,
-    EDGES.filter((e) => e.kind !== 'wildcard'
-      && PHASES.findIndex((p) => p.file === e.to) - PHASES.findIndex((p) => p.file === e.from) !== 1).length)
-  check('WILDCARD is a shape: a rail, one thick stub per wildcard phase, and the rail is as wide as the row',
-    labels.filter((l) => /^wildcard stub /.test(l)).length, EDGES.filter((e) => e.kind === 'wildcard').length)
-  check('SEQUENCE-ORDER links are their own shape, and there is one per adjacent pair with no edge',
-    labels.filter((l) => /^sequence link /.test(l)).length, 4)
-  /* ⚠ THE SEQUENCE LINKS ARE CHECKED AGAINST THE EDGE SET IN BOTH DIRECTIONS, because the whole
-     point of that shape is the pairs it is NOT drawn on: a dotted link over a pair that has an input
-     edge would claim the order and the dependency are the same thing, which is the mistake the
-     shape exists to prevent. */
-  {
-    const adjacentWithEdge = ['00-requirements.md->00-worktree.md', '01-as-is.md->01.5-root-cause.md',
-      '01.5-root-cause.md->02-to-be-plan.md', '02-to-be-plan.md->03-implementation-summary.md',
-      '03-implementation-summary.md->03.5-code-review.md', '03.5-code-review.md->04-test-summary.md',
-      '06-decisions-update.md->07-state-update.md']
-    const adjacentPairs = PHASES.slice(0, -1).map((p, i) => p.file + '->' + PHASES[i + 1].file)
-    check('a dotted SEQUENCE-ORDER link is drawn on every adjacent pair, and a spine arrow on the rest',
-      [labels.filter((l) => /^sequence link /.test(l)).length, labels.filter((l) => /^spine .+ -> .+$/.test(l)).length],
-      [adjacentPairs.length - adjacentWithEdge.length, adjacentWithEdge.length])
+     would fail if the picture went back to being twelve boxes in a row.
+     ⚠ EVERY ONE OF THESE USED TO COMPARE A NUMBER WITH A NUMBER and never look at the drawing.
+     `check('MULTI-INPUT is a shape: one dashed-border node …', PHASES.filter(…).length, 5)` compares
+     the derived count with the literal 5: both sides come out of PHASES and EDGES, so the emitted
+     class could have been `dg-box` on all twelve nodes and the check would still have passed. The
+     rewritten checks read the CLASS off the emitted rect for each node BY INDEX, and report the
+     phases whose mark is missing rather than a total. */
+  const nodeClass = (f) => clsOf[oneBox('node ' + f).i]
+  check('MULTI-INPUT is a shape: the phases that read more than one artifact carry the dashed fan-in border, and no other phase does',
+    PHASES.filter((p) => (sourcesOf(p.file) > 1) !== /dg-box-fan/.test(nodeClass(p.file)))
+      .map((p) => p.file + ' reads ' + sourcesOf(p.file) + ' and is drawn ' + nodeClass(p.file)),
+    [])
+  check('every node states its own fan-in in words, and the words agree with the linter: the row is inside its own node box and says what sourcesOf() derives',
+    PHASES.filter((p) => {
+      const n = oneBox('node ' + p.file)
+      return !OVBOX.some((t) => t.kind === 'text' && t.label === fanInText(p.file)
+        && t.x >= n.x && t.x + t.w <= n.x + n.w && t.y >= n.y && t.y + t.h <= n.y + n.h)
+    }).map((p) => p.file + ' has no "' + fanInText(p.file) + '" row inside its box'),
+    [])
+  check('HUMAN DECISION is a shape: one amber marker per phase a person must answer, drawn directly above that phase and carrying its own diamond',
+    PHASES.filter((p) => p.human).flatMap((p) => {
+      const n = oneBox('node ' + p.file)
+      const m = oneBox('human decision marker ' + p.file)
+      if (!m) return [p.file + ' has no marker']
+      const bad = []
+      if (clsOf[m.i] !== 'dg-box-human') bad.push('its marker is class ' + clsOf[m.i])
+      if (!(m.y + m.h <= n.y && n.y - (m.y + m.h) <= 8)) bad.push('its marker is not directly above the node')
+      if (!(m.x >= n.x && m.x + m.w <= n.x + n.w)) bad.push('its marker is not over its own column')
+      const d = oneBox('decision diamond ' + p.file)
+      if (!d || clsOf[d.i] !== 'dg-mark' || !(d.x >= m.x && d.x + d.w <= m.x + m.w)) bad.push('its diamond is missing or outside the marker')
+      return bad.map((b) => p.file + ': ' + b)
+    }),
+    [])
+  check('no phase that no person answers carries a human marker',
+    OVBOX.filter((b) => /^human decision marker /.test(b.label))
+      .map((b) => b.label.slice('human decision marker '.length)).filter((f) => !PHASES.some((p) => p.human && p.file === f)),
+    [])
+  /* The rendered refusal bands: one per PHASE, and each one under ITS OWN phase. */
+  /* ⚠ THE OLD VERSION OF THIS CHECK COMPARED A CONSTANT WITH A LITERAL. Its second element was
+     `REFUSAL_MARKS.filter((r) => r.nodes.length > 0).length` against `8` — both of them declared in
+     this file, neither of them read off the page, so the check could not fail unless somebody
+     edited the constant. The band is asserted here as GEOMETRY (a band under its own node, touching
+     nothing else) and as CONTENT (the words the band prints are the rules that select that phase). */
+  check('REFUSAL is a shape: one band under each of the twelve phases, under that phase and not another, and the rule words it prints are the ones that select it',
+    PHASES.flatMap((p) => {
+      const n = oneBox('node ' + p.file)
+      const b = oneBox('refusal band ' + p.file)
+      if (!b) return [p.file + ' has no refusal band']
+      const bad = []
+      if (clsOf[b.i] !== 'dg-box-refuse') bad.push('its band is class ' + clsOf[b.i])
+      if (Math.abs(b.x - n.x) > 0.01) bad.push('its band does not start at its own node')
+      if (!(b.y >= n.y + n.h && b.y - (n.y + n.h) <= 8)) bad.push('its band is not directly under it')
+      const text = OVBOX.find((t) => t.kind === 'text' && t.x >= b.x && t.x + t.w <= b.x + b.w && t.y >= b.y && t.y + t.h <= b.y + b.h)
+      if (!text || text.label !== refusalBandText(p.file)) bad.push('its band prints ' + JSON.stringify(text ? text.label : null))
+      return bad.map((x) => p.file + ': ' + x)
+    }),
+    [])
+  check('every refusal band names only rules the code declares, and every declared rule that bites somewhere names at least one band',
+    [...new Set(REFUSAL_MARKS.map((r) => r.rule))].filter((r) => !REFUSAL_MARKS.some((x) => x.rule === r && x.nodes.length > 0))
+      .concat(REFUSAL_MARKS.filter((r) => r.nodes.some((f) => !PHASES.some((p) => p.file === f))).map((r) => r.rule)),
+    [])
+  /* ⚠ THE CHECK BELOW USED TO COMPARE TWO COUNTS AND NEVER READ A DASH. Its label promised
+     "CONDITIONAL edges are dashed"; its assertion was `labels.filter(/^lane /).length ===
+     EDGES.filter(non-adjacent).length`, which passes with every conditional edge drawn SOLID, and
+     passes again if no stroke in the chart carries the dash class at all. It is now asserted edge
+     by edge, against the class on the emitted stroke — looked up by the box index so the class is
+     read off the right path. */
+  const runOf = (e) => {
+    const i = PHASES.findIndex((p) => p.file === e.from)
+    const j = PHASES.findIndex((p) => p.file === e.to)
+    const word = j - i === 1 ? 'spine' : 'lane'
+    return OVBOX.find((b) => b.label === word + ' ' + e.from + ' -> ' + e.to)
+      || OVBOX.find((b) => /^bundle /.test(b.label) && b.label.includes(' ' + e.to))
   }
-  check('REFUSAL BANDS: one per phase, and each names a rule that is declared to bite there',
-    labels.filter((l) => /^refusal band /.test(l)).length, PHASES.length)
+  const headOf = (e) => {
+    const i = PHASES.findIndex((p) => p.file === e.from)
+    const j = PHASES.findIndex((p) => p.file === e.to)
+    const word = j - i === 1 ? 'spine' : 'lane'
+    return OVBOX.find((b) => b.kind === 'ink' && b.label === word + (word === 'spine' ? ' head ' : ' arrow ') + e.to)
+  }
+  check('CONDITIONAL edges are dashed and REQUIRED edges are not: the class on the emitted run stroke and on its arrowhead matches the edge kind, edge by edge',
+    EDGES.filter((e) => e.kind !== 'wildcard').flatMap((e) => {
+      const want = e.kind === 'conditional' ? 'dg-line-cond' : 'dg-line'
+      const wantHead = e.kind === 'conditional' ? 'dg-head-cond' : 'dg-head'
+      const run = runOf(e)
+      const head = headOf(e)
+      const bad = []
+      if (!run) bad.push('no run stroke')
+      else if (clsOf[run.i] !== want) bad.push('run "' + run.label + '" is ' + clsOf[run.i] + ', expected ' + want)
+      if (!head) bad.push('no arrowhead of its own shape')
+      else if (clsOf[head.i] !== wantHead) bad.push('head "' + head.label + '" is ' + clsOf[head.i] + ', expected ' + wantHead)
+      return bad.map((b) => e.from + ' -> ' + e.to + ' (' + e.kind + '): ' + b)
+    }),
+    [])
+  check('CONDITIONAL: exactly the two conditional edges in the linter carry the dash, and no other stroke in the overview does',
+    OVBOX.filter((b) => b.kind === 'rule' && /^dg-line-cond$/.test(clsOf[b.i]))
+      .map((b) => b.label).filter((l) => !EDGES.some((e) => e.kind === 'conditional' && runOf(e) === OVBOX.find((x) => x.label === l))),
+    [])
+  check('WILDCARD is a shape: a thick stub into each wildcard phase, rising from the rail to that node\'s own bottom edge, and a rail exactly as wide as the row',
+    EDGES.filter((e) => e.kind === 'wildcard').flatMap((e) => {
+      const stub = oneBox('wildcard stub ' + e.to)
+      const head = oneBox('wildcard head ' + e.to)
+      const n = oneBox('node ' + e.to)
+      const bad = []
+      if (!stub || !head) return [e.to + ': no stub or no head']
+      if (clsOf[stub.i] !== 'dg-line-wide') bad.push('the stub is class ' + clsOf[stub.i])
+      if (clsOf[head.i] !== 'dg-head-wide') bad.push('the head is class ' + clsOf[head.i])
+      if (!ovFit(head, n)) bad.push('its head does not land on ' + e.to)
+      if (!ovFit(stub, oneBox(RAIL_BOX))) bad.push('its stub does not rise from the rail')
+      if (!(stub.x >= n.x && stub.x + stub.w <= n.x + n.w)) bad.push('its stub rises outside the node it feeds')
+      return bad.map((b) => e.to + ': ' + b)
+    }).concat((() => {
+      const rail = oneBox(RAIL_BOX)
+      const left = Math.min(...NODES_L.map((n) => n.x)), right = Math.max(...NODES_L.map((n) => n.x + n.w))
+      return Math.abs(rail.x - left) > 1 || Math.abs(rail.x + rail.w - right) > 1
+        ? ['the rail spans ' + rail.x + '..' + round2(rail.x + rail.w) + ' against the row ' + left + '..' + right] : []
+    })()),
+    [])
+  /* ⚠ THIS ONE PROMISED "THEY ARE THEIR OWN SHAPE" AND COUNTED FOUR LABELS. The dot is the whole
+     point of the shape — a dotted link claims SEQUENCE ORDER WITHOUT A DEPENDENCY, and a dotted
+     link drawn solid would say the opposite of what the page means. So the class is read off each
+     link's own stroke, and the pairs it is drawn on are compared with the edge set in BOTH
+     directions: a dotted link over a pair that HAS an input edge would claim the order and the
+     dependency are the same thing, which is the mistake the shape exists to prevent. */
+  const seqPairs = PHASES.slice(0, -1)
+    .map((p, i) => [p.file, PHASES[i + 1].file])
+    .filter(([a, b]) => !EDGES.some((e) => e.from === a && e.to === b))
+  check('SEQUENCE-ORDER links are their own DOTted shape, drawn on exactly the adjacent pairs that have no input edge, and named for both ends',
+    seqPairs.flatMap(([a, b]) => {
+      const run = oneBox('sequence link ' + a + ' -> ' + b)
+      const head = oneBox('sequence head ' + b)
+      const bad = []
+      if (!run) bad.push('no link')
+      else if (clsOf[run.i] !== 'dg-line-seq') bad.push('the link is class ' + clsOf[run.i])
+      if (!head) bad.push('no arrowhead')
+      else if (clsOf[head.i] !== 'dg-head-seq') bad.push('the head is class ' + clsOf[head.i])
+      return bad.map((x) => a + ' -> ' + b + ': ' + x)
+    }).concat(OVBOX.filter((b) => b.kind === 'rule' && clsOf[b.i] === 'dg-line-seq')
+      .filter((b) => !seqPairs.some(([a, c]) => b.label === 'sequence link ' + a + ' -> ' + c))
+      .map((b) => 'a dotted link is drawn where the pair HAS an input edge: ' + b.label)),
+    [])
+  check('a SPINE mark is drawn in the gap of every adjacent pair that does have an input edge',
+    PHASES.slice(0, -1).map((p, i) => [p.file, PHASES[i + 1].file])
+      .filter(([a, b]) => EDGES.some((e) => e.from === a && e.to === b))
+      .flatMap(([a, b]) => {
+        const run = oneBox('spine ' + a + ' -> ' + b)
+        const head = oneBox('spine head ' + b)
+        if (run && head) return []
+        return [a + ' -> ' + b + ': ' + (run ? '' : 'no spine run ') + (head ? '' : 'no arrowhead')]
+      }),
+    [])
   /* ⚠ EVERY RULE THE BANDS NAME IS RE-DERIVED FROM THE SOURCE THAT DECLARES IT. The refusal marks
      are a transcription, and a transcription is exactly what this generator exists to keep honest:
      the four built-in rules are read off `builtInToolPolicyRules` (whose `label:` literals are
@@ -4590,14 +5161,56 @@ function verify(html) {
   check('the guards table declares the late-phase baseline as TWO rules, which is why the bands name phases',
     GUARDS.filter((g) => /baseline/.test(g.k)).map((g) => g.k),
     ['phase 6/7/8 baseline', 'phase 6/7 baseline', 'phase 1/2 baseline'])
-  check('BACK-EDGE is a shape: a shelf, a riser and an entry arrowhead per back edge',
-    [labels.filter((l) => /^reopen (shelf|riser|drop)/.test(l)).length,
-      labels.filter((l) => /^revise (shelf|riser|drop)/.test(l)).length], [3, 3])
-  check('the two back-edge arrowheads point at nodes EARLIER in the sequence than their sources',
-    labels.filter((l) => /^(reopen|revise) head /.test(l)).length, 2)
-  check('CROSS-RUN is a shape: a return run, a return drop, a return foot and an arrowhead that lands on the next run',
-    ['cross-run return run', 'cross-run return drop', 'cross-run return foot', 'cross-run return head']
-      .filter((l) => !labels.includes(l)), [])
+  /* ⚠ THIS CHECK COUNTED TWO HEADS AND CALLED IT "POINT AT NODES EARLIER IN THE SEQUENCE". The
+     labels it counted contain the answer (`reopen head 02-to-be-plan.md`), but the assertion only
+     asked how MANY there were — so a head drawn anywhere, or attached to any node, passed. It is
+     now read off the geometry: the head's tip must touch the node it names, and that node must come
+     EARLIER in PHASE_SEQUENCE than the node the arc left. */
+  const backEdges = [
+    { word: 'reopen', from: '03.5-code-review.md', to: '02-to-be-plan.md' },
+    { word: 'revise', from: '04-test-summary.md', to: '03.5-code-review.md' },
+  ]
+  check('BACK-EDGE is a shape: two arcs, each of them a run, a riser and a drop that land on the node the arc names, entering it EARLIER in PHASE_SEQUENCE than the node it left',
+    backEdges.flatMap(({ word, from, to }) => {
+      const bad = []
+      const head = oneBox(word + ' head ' + to)
+      const n = oneBox('node ' + to)
+      const src = oneBox('node ' + from)
+      if (!head) bad.push('no entry arrowhead')
+      else {
+        if (clsOf[head.i] !== 'dg-head-loop') bad.push('its head is class ' + clsOf[head.i])
+        if (!ovFit(head, n)) bad.push('its head does not touch ' + to)
+      }
+      if (!(PHASES.findIndex((p) => p.file === to) < PHASES.findIndex((p) => p.file === from))) {
+        bad.push('it does not run backwards at all')
+      }
+      const parts = OVBOX.filter((b) => b.kind === 'rule' && new RegExp('^' + word + ' (out|shelf|riser|drop) ').test(b.label))
+      /* The reopen leaves its source through the source's right edge and the revise leaves through
+         the source's bottom edge, so the reopen is four strokes and the revise three; what both
+         must do is leave the node they name and enter the node they name. */
+      if (parts.length < 3) bad.push('it is drawn in ' + parts.length + ' strokes, not at least 3')
+      if (!parts.some((p) => ovFit(p, src))) bad.push('none of its strokes leaves ' + from)
+      /* The arc's last stroke stops one arrowhead-length short of the node so that the HEAD can
+         land on the edge — the head is the stroke that enters, and TRACE above walks the rest.
+         Rounded to the manifest's own precision before comparing: 416.8 - 344.4 - 72.4 is
+         8.000000000000057 in binary floating point, and a rule that fires on that is a rule that
+         gets switched off. */
+      if (!parts.some((p) => round2(ovDist(p, n)) <= 8)) bad.push('no stroke of it comes within an arrowhead-length of ' + to
+        + ' (' + parts.map((p) => p.label + ' d=' + round2(ovDist(p, n))).join(', ') + ')')
+      return bad.map((x) => word + ': ' + x)
+    }),
+    [])
+  check('CROSS-RUN is a shape: a return run, a return drop, a return foot and an arrowhead that lands back on the run it leaves',
+    (() => {
+      const card = OVBOX.find((b) => /^cross-run card: writes/.test(b.label))
+      const head = oneBox('cross-run return head')
+      const foot = oneBox('cross-run return foot')
+      const bad = []
+      if (!head || !ovFit(head, card)) bad.push('the return arrowhead does not land on the card the run leaves')
+      if (!foot || !ovFit(foot, card)) bad.push('the return foot does not leave that card')
+      return bad
+    })(),
+    [])
   check('the cross-run band draws the three steps of the cycle, edge to edge',
     labels.filter((l) => /^cross-run card: /.test(l)).length, 3)
   /* ==========================================================================

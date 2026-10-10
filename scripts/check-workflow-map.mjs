@@ -29,6 +29,18 @@ const target = resolve(process.argv[2] ?? 'workflow-map/recursive-mode-workflow.
 const fails = []
 const passes = []
 const check = (label, ok, detail = '') => (ok ? passes.push(label) : fails.push(label + (detail ? ' — ' + detail : '')))
+/**
+ * ⚠ A CHECK WHOSE VALUE IS A LIST OF FAULTS, AND WHY IT NEEDS ITS OWN HELPER.
+ *
+ * `check(label, ok, detail)` passes whenever `ok` is TRUTHY — and a non-empty ARRAY is truthy. A
+ * check written in the generator's dialect (`check(label, expected, actual)`) but run through this
+ * checker's signature is therefore green WITH FAULTS IN IT. That is not a hypothetical: the first
+ * draft of section 8.13 below was written that way and reported nine passes over a chart with
+ * faults in every one of them, which is the same vacuity those checks exist to remove,
+ * reintroduced by writing them in the wrong dialect. `checkNoFaults` takes the list, decides the
+ * boolean itself, and prints the faults when there are any.
+ */
+const checkNoFaults = (label, faults) => check(label, faults.length === 0, faults.slice(0, 4).join(' | '))
 
 if (!existsSync(target)) {
   console.error('no such file: ' + target)
@@ -463,19 +475,46 @@ const OV_NODES = ['00-requirements.md', '00-worktree.md', '01-as-is.md', '01.5-r
 check('8.11.1 the overview draws all twelve phase nodes',
   OV_NODES.filter((f) => !OVL.includes('node ' + f)).length === 0,
   OV_NODES.filter((f) => !OVL.includes('node ' + f)).join(', '))
-/* THE 16 EDGES. Written out here as [from, to] pairs, derived by hand from
-   `getPhaseExpectedInputArtifactNames` — so this list is an INDEPENDENT expectation. */
+/**
+ * THE 16 EDGES, WITH THEIR KINDS. Written out here as [from, to, kind] derived by hand from
+ * `getPhaseExpectedInputArtifactNames` — so this list is an INDEPENDENT expectation. The kind is
+ * the thing the drawing has to make visible: a `conditional` edge is dashed, a `wildcard` edge is
+ * the thick stub off the rail, and everything else is a solid arrow.
+ */
 const OV_EDGES = [
-  ['00-requirements.md', '00-worktree.md'], ['00-requirements.md', '01-as-is.md'],
-  ['00-requirements.md', '02-to-be-plan.md'], ['01-as-is.md', '01.5-root-cause.md'],
-  ['01-as-is.md', '02-to-be-plan.md'], ['01.5-root-cause.md', '02-to-be-plan.md'],
-  ['02-to-be-plan.md', '03-implementation-summary.md'], ['02-to-be-plan.md', '03.5-code-review.md'],
-  ['02-to-be-plan.md', '04-test-summary.md'], ['02-to-be-plan.md', '05-manual-qa.md'],
-  ['03-implementation-summary.md', '03.5-code-review.md'], ['03-implementation-summary.md', '04-test-summary.md'],
-  ['03.5-code-review.md', '04-test-summary.md'], ['06-decisions-update.md', '07-state-update.md'],
-  ['EVERY PRESENT ARTIFACT', '06-decisions-update.md'], ['EVERY PRESENT ARTIFACT', '08-memory-impact.md'],
+  ['00-requirements.md', '00-worktree.md', 'required'], ['00-requirements.md', '01-as-is.md', 'required'],
+  ['00-requirements.md', '02-to-be-plan.md', 'required'], ['01-as-is.md', '01.5-root-cause.md', 'required'],
+  ['01-as-is.md', '02-to-be-plan.md', 'required'], ['01.5-root-cause.md', '02-to-be-plan.md', 'conditional'],
+  ['02-to-be-plan.md', '03-implementation-summary.md', 'required'], ['02-to-be-plan.md', '03.5-code-review.md', 'required'],
+  ['02-to-be-plan.md', '04-test-summary.md', 'required'], ['02-to-be-plan.md', '05-manual-qa.md', 'required'],
+  ['03-implementation-summary.md', '03.5-code-review.md', 'required'], ['03-implementation-summary.md', '04-test-summary.md', 'required'],
+  ['03.5-code-review.md', '04-test-summary.md', 'conditional'], ['06-decisions-update.md', '07-state-update.md', 'required'],
+  ['EVERY PRESENT ARTIFACT', '06-decisions-update.md', 'wildcard'], ['EVERY PRESENT ARTIFACT', '08-memory-impact.md', 'wildcard'],
 ]
-const ovEdgeRuns = OVL.filter((l) => /^(lane|spine) .+ -> .+$/.test(String(l)) || /^wildcard stub /.test(l))
+/**
+ * ⚠ THE RUN OF ONE EDGE, AND THE ONE EDGE WHOSE RUN IS SHARED.
+ *
+ * 02-to-be-plan has three edges across the row boundary and a free strip 51.5 units wide under its
+ * node, so its three cross-row edges are drawn as ONE labelled bundle: the edge that goes straight
+ * down owns the trunk, and the other two leave it at their own levels. The expectation below says
+ * so explicitly — the sharing is declared in the manifest, not inferred — and the trace below
+ * re-derives all three edges from the ink, so a bundle that stopped feeding one of them fails.
+ */
+const BUNDLE_RE = /^bundle 02-to-be-plan\.md -> 03\.5-code-review\.md \+ 04-test-summary\.md \+ 05-manual-qa\.md$/
+const wordOf = (a, b) => (OV_NODES.indexOf(b) - OV_NODES.indexOf(a) === 1 ? 'spine' : 'lane')
+const runLabelOf = ([a, b, kind]) => {
+  if (kind === 'wildcard') return null
+  if (a === '02-to-be-plan.md' && b === '04-test-summary.md') return 'bundle 02-to-be-plan.md -> 03.5-code-review.md + 04-test-summary.md + 05-manual-qa.md'
+  return wordOf(a, b) + ' ' + a + ' -> ' + b
+}
+const headLabelOf = ([a, b, kind]) => (kind === 'wildcard' ? 'wildcard head ' + b
+  : wordOf(a, b) + (wordOf(a, b) === 'spine' ? ' head ' : ' arrow ') + b)
+const ovEdgeRuns = OVL.filter((l) => /^(lane|spine|bundle) .+ -> .+$/.test(String(l)) || /^wildcard stub /.test(l))
+check('8.11.2 THE OVERVIEW DRAWS ALL SIXTEEN DERIVED EDGES, ONE RUN EACH (drawn ' + ovEdgeRuns.length + ')',
+  ovEdgeRuns.length === OV_EDGES.length, 'expected ' + OV_EDGES.length + ', drew ' + ovEdgeRuns.length)
+checkNoFaults('8.11.2 every one of the sixteen is drawn, under the run name that belongs to its shape — including the two the bundle carries, which declare themselves as members of it',
+  OV_EDGES.map(runLabelOf).filter((l) => l !== null && !OVL.includes(l)).map((l) => 'missing run "' + l + '"'))
+/* THE INTERACTION TYPES, as shapes. */
 /**
  * ⚠ NINE OF THE CHECKS IN THIS SECTION USED TO HAND A NUMBER WHERE A BOOLEAN BELONGS, and a
  * checker that cannot fail is not a check. `check(label, ok)` passes whenever `ok` is truthy — and
@@ -490,31 +529,256 @@ const ovEdgeRuns = OVL.filter((l) => /^(lane|spine) .+ -> .+$/.test(String(l)) |
  *     03-implementation-summary declares tdd-mode as a gate, not as a phase-level human decision.
  * The chart satisfies every one of them, before and after the rewrite.
  */
-const missEdges = OV_EDGES.filter(([a, b]) => {
-  if (a === 'EVERY PRESENT ARTIFACT') return !OVL.includes('wildcard stub ' + b)
-  const i = OV_NODES.indexOf(a), j = OV_NODES.indexOf(b)
-  return !OVL.includes((j - i === 1 ? 'spine ' : 'lane ') + a + ' -> ' + b)
+/* ==========================================================================
+   8.13 THE READABILITY INVARIANTS — THE PROPERTY THAT WAS NEVER CHECKED
+   ==========================================================================
+
+   Every rule above this line is about COLLISION: no two reserved boxes may intersect, a label may
+   not overrun its box, no box may straddle another. A chart can satisfy all of it and still be
+   unfollowable, and this one was. The owner looked at the rendered picture and said "the lines
+   connecting phases or showing phase interactions are somewhat broken", and measured off the
+   manifest that was LITERALLY true: three of the sixteen drawn edges did not connect their source
+   node to their target node at all. 00-requirements -> 02-to-be-plan was drawn as TWO strokes with
+   a 417-unit hole between them, and the runs into 01-as-is and into 02-to-be-plan stopped 6.5 units
+   short of their own arrival stubs. Every check in this file passed, because they COUNTED LABELS:
+   the box reading `lane 00-requirements.md -> 02-to-be-plan.md` existed and had the right words in
+   it, so the edge counted as drawn.
+
+   The numbers below are stated HERE rather than imported from the generator, on the same principle
+   as the edge list above: two scripts that agree because they measured the same file have agreed
+   about a fact, where two scripts that share a constant have only agreed about a constant.
+
+     · LAND_MARGIN 16 — an arrowhead landing on a node's top edge must land this far inside it from
+       both of its vertical edges. A head in the corner is ambiguous with the next column, which is
+       how the violet reopen arc was read as pointing at 03-implementation-summary: it came down 11
+       units inside 02-to-be-plan.
+     · CHANNEL_MIN 12 — two parallel strokes of DIFFERENT edges may not be closer than this. Two
+       5-unit strokes 7 units apart are one doubled line to the eye; the strip under 02-to-be-plan
+       held four strokes at gaps of 7, 7, 7 and 9.
+     · PROXIMITY_MIN 14 — a stroke at least RUN_MIN (24) long may not pass this close to a node box
+       that is not on its own connection. The reopen riser ran 6.5 units from the right edge of
+       both nodes in column 5, attached to one of them.
+     · LABEL — the label nearest each run must name that run's own destination and sit inside it. */
+const READ = { LAND_MARGIN: 16, CHANNEL_MIN: 12, PROXIMITY_MIN: 14, RUN_MIN: 24 }
+const OVB = OV.boxes.map((b, i) => ({ i, kind: b[0], x: b[1], y: b[2], w: b[3], h: b[4], label: String(b[5]) }))
+/* The class of each reserved box, taken from the emitted element in the same position. The counts
+   are compared first: a class read off the wrong element is a check about nothing. */
+const ovRectsC = [...OVERVIEW.svg.matchAll(/<rect class="([^"]+)"/g)].map((m) => m[1])
+const ovPathsC = [...OVERVIEW.svg.matchAll(/<path class="([^"]+)"/g)].map((m) => m[1])
+const ovInksC = [...OVERVIEW.svg.matchAll(/<polygon class="([^"]+)"/g)].map((m) => m[1])
+const ovCls = {}
+{
+  let r = 0, p = 0, k = 0
+  for (const b of OVB) ovCls[b.i] = b.kind === 'box' ? ovRectsC[r++] : b.kind === 'rule' ? ovPathsC[p++] : b.kind === 'ink' ? ovInksC[k++] : null
+}
+check('8.13.0 every emitted element maps to its own reserved box, so a class read below is read off the right stroke ('
+  + OVB.filter((b) => b.kind === 'box').length + ' rects / ' + OVB.filter((b) => b.kind === 'rule').length + ' paths / '
+  + OVB.filter((b) => b.kind === 'ink').length + ' polygons)',
+  ovRectsC.length === OVB.filter((b) => b.kind === 'box').length
+  && ovPathsC.length === OVB.filter((b) => b.kind === 'rule').length
+  && ovInksC.length === OVB.filter((b) => b.kind === 'ink').length)
+const ovOne = (l) => OVB.find((b) => b.label === l)
+const ovGap = (a, b) => ({ dx: Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w), 0), dy: Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h), 0) })
+const ovTouch = (a, b, tol = 5) => { const g = ovGap(a, b); return g.dx <= tol && g.dy <= tol }
+const ovDist2 = (a, b) => { const g = ovGap(a, b); return Math.hypot(g.dx, g.dy) }
+const ovR2 = (n) => Math.round(n * 100) / 100
+const OV_NODE_BOXES = OVB.filter((b) => /^node /.test(b.label))
+const OV_RAIL = ovOne('the wildcard input rail')
+const escOv = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/* The connections this chart is supposed to draw, each with the strokes that may carry it. */
+const OV_BUNDLE = /^bundle 02-to-be-plan\.md -> /
+const OV_CONN = OV_EDGES.map(([a, b, kind]) => {
+  if (kind === 'wildcard') return { id: a + ' -> ' + b, from: 'the wildcard input rail', to: 'node ' + b, strokes: [new RegExp('^wildcard stub ' + escOv(b) + '$'), new RegExp('^wildcard head ' + escOv(b) + '$')] }
+  const adj = OV_NODES.indexOf(b) - OV_NODES.indexOf(a) === 1
+  const shared = a === '02-to-be-plan.md' && !adj ? [OV_BUNDLE] : []
+  return {
+    id: a + ' -> ' + b, from: 'node ' + a, to: 'node ' + b,
+    strokes: [new RegExp('^' + (runLabelOf([a, b, kind]) === null ? 'spine' : wordOf(a, b)) + ' ' + escOv(a) + ' -> ' + escOv(b) + '$'),
+      ...shared, new RegExp('^' + headLabelOf([a, b, kind]).replace(/ /g, ' ') + '$'),
+      ...(adj ? [] : [new RegExp('^stub (cross )?out ' + escOv(a) + '$'), new RegExp('^stub (cross )?in ' + escOv(b) + '$')])],
+  }
 })
-check('8.11.2 THE OVERVIEW DRAWS ALL SIXTEEN DERIVED EDGES, ONE RUN EACH (drawn ' + ovEdgeRuns.length + ')',
-  ovEdgeRuns.length === OV_EDGES.length, 'expected ' + OV_EDGES.length + ', drew ' + ovEdgeRuns.length)
-check('8.11.2 every one of the sixteen is drawn, by endpoint',
-  missEdges.length === 0, missEdges.map(([a, b]) => a + ' -> ' + b).join(', '))
-/* THE INTERACTION TYPES, as shapes. */
-check('8.11.3 MULTI-INPUT: five nodes carry the dashed fan-in border, and they are the five that read more than one artifact',
-  (OVERVIEW.svg.match(/dg-box-fan/g) || []).length === 5 && OV_NODES.filter((f) => !OVL.includes('node ' + f)).length === 0,
-  'fan borders ' + (OVERVIEW.svg.match(/dg-box-fan/g) || []).length + ', of 12 nodes')
-check('8.11.3 every node states its own fan-in in words, so the count is not carried by the border alone',
-  OVL.filter((l) => /^fan-in \d|^no upstream artifact|^reads every present/.test(String(l))).length >= 12)
-check('8.11.3 CONDITIONAL: SEVEN lane runs, one per forward NON-ADJACENT input edge',
-  ovCount(/^lane .+ -> .+$/) === 7, 'drew ' + ovCount(/^lane .+ -> .+$/))
-check('8.11.3 the two conditional edges are drawn at all, as spine runs',
-  OVL.includes('spine 01.5-root-cause.md -> 02-to-be-plan.md') && OVL.includes('spine 03.5-code-review.md -> 04-test-summary.md'))
-check('8.11.3 exactly two runs and two arrowheads carry the conditional dash',
-  (OVERVIEW.svg.match(/dg-line-cond/g) || []).length === 2 && (OVERVIEW.svg.match(/dg-head-cond/g) || []).length === 2,
-  'dashed runs ' + (OVERVIEW.svg.match(/dg-line-cond/g) || []).length + ', dashed heads ' + (OVERVIEW.svg.match(/dg-head-cond/g) || []).length)
-check('8.11.4 WILDCARD: a thick stub into each wildcard phase and a rail that spans the row',
-  ovCount(/^wildcard stub /) === 2 && (OVERVIEW.svg.match(/dg-line-wide/g) || []).length === 2,
-  'stubs ' + ovCount(/^wildcard stub /) + ', thick runs ' + (OVERVIEW.svg.match(/dg-line-wide/g) || []).length)
+for (const [word, from, to] of [['reopen', '03.5-code-review.md', '02-to-be-plan.md'], ['revise', '04-test-summary.md', '03.5-code-review.md']]) {
+  OV_CONN.push({ id: word + ' ' + from + ' -> ' + to, from: 'node ' + from, to: 'node ' + to,
+    strokes: [new RegExp('^' + word + ' (out|shelf|riser|drop) '), new RegExp('^' + word + ' head ')] })
+}
+for (let i = 0; i + 1 < OV_NODES.length; i++) {
+  if (OV_EDGES.some(([a, b]) => a === OV_NODES[i] && b === OV_NODES[i + 1])) continue
+  OV_CONN.push({ id: 'sequence ' + OV_NODES[i] + ' -> ' + OV_NODES[i + 1], from: 'node ' + OV_NODES[i], to: 'node ' + OV_NODES[i + 1],
+    strokes: [new RegExp('^sequence link ' + escOv(OV_NODES[i]) + ' -> ' + escOv(OV_NODES[i + 1]) + '$'), new RegExp('^sequence head ' + escOv(OV_NODES[i + 1]) + '$')] })
+}
+OV_CONN.push({ id: 'cross-run return', from: 'cross-run card: writes the plane, then REGIS', to: 'cross-run card: writes the plane, then REGIS',
+  strokes: [/^cross-run return (run|drop|foot|head)$/] })
+
+const ovTrace = (c) => {
+  const start = c.from === 'the wildcard input rail' ? OV_RAIL : ovOne(c.from)
+  const target = ovOne(c.to)
+  const members = OVB.filter((b) => c.strokes.some((p) => p.test(b.label)))
+  const seen = new Set()
+  const queue = members.filter((m) => start && ovTouch(start, m))
+  for (const m of queue) seen.add(m.i)
+  while (queue.length > 0) {
+    const cur = queue.pop()
+    for (const m of members) if (!seen.has(m.i) && ovTouch(cur, m)) { seen.add(m.i); queue.push(m) }
+  }
+  const chain = members.filter((m) => seen.has(m.i))
+  return {
+    chain, members,
+    reaches: Boolean(target) && chain.some((m) => ovTouch(m, target)),
+    headAt: target ? chain.filter((m) => m.kind === 'ink' && ovTouch(m, target)).length : 0,
+  }
+}
+const OV_TRACED = OV_CONN.map((c) => ({ c, t: ovTrace(c) }))
+check('8.13.1 TRACE: every drawn connection is ONE polyline from its source to its target, ending in an arrowhead on that target — the sixteen derived edges, the two violet back edges, the four sequence links and the cross-run return ('
+  + OV_TRACED.length + ' connections). A run that stops short of its own arrival stub fails here, and so does an arrival stub that hangs off nothing',
+  OV_TRACED.every(({ t }) => t.chain.length > 0 && t.reaches && t.headAt >= 1),
+  OV_TRACED.filter(({ t }) => !(t.chain.length > 0 && t.reaches && t.headAt >= 1))
+    .map(({ c, t }) => c.id + ' reaches=' + t.reaches + ' heads=' + t.headAt + ' (' + t.chain.length + '/' + t.members.length + ' strokes)').slice(0, 4).join(' | '))
+checkNoFaults('8.13.2 NO ORPHAN SEGMENT: every stroke that draws part of a connection belongs to some traced chain, so no segment is drawn that nothing reaches',
+  (() => {
+    const claimed = new Set(OV_TRACED.flatMap(({ t }) => t.chain.map((m) => m.i)))
+    const strokeRe = /^(lane|spine|bundle|stub|wildcard|sequence|reopen|revise|cross-run) /
+    return OVB.filter((b) => (b.kind === 'rule' || b.kind === 'ink') && strokeRe.test(b.label) && !claimed.has(b.i))
+      .map((b) => b.label + ' @' + b.x + ',' + b.y)
+  })())
+checkNoFaults('8.13.3 LANDING MARGIN: every arrowhead that lands on a node box lands at least ' + READ.LAND_MARGIN
+  + ' units inside it from BOTH of its vertical edges — an arrow in the corner reads as pointing at the boundary between two phases',
+  (() => {
+    const bad = []
+    for (const h of OVB.filter((b) => b.kind === 'ink')) {
+      const tipX = ovR2(h.x + h.w / 2), tipY = ovR2(h.y + h.h)
+      for (const n of OV_NODE_BOXES) {
+        if (Math.abs(tipY - n.y) > 5 || tipX < n.x - 5 || tipX > n.x + n.w + 5) continue
+        const left = ovR2(tipX - n.x), right = ovR2(n.x + n.w - tipX)
+        if (left < READ.LAND_MARGIN || right < READ.LAND_MARGIN) bad.push(h.label + ' lands ' + tipX + ' on ' + n.label.slice(5) + ': ' + left + '/' + right)
+      }
+    }
+    return bad
+  })())
+checkNoFaults('8.13.4 PROXIMITY: no edge stroke longer than ' + READ.RUN_MIN + ' units passes within ' + READ.PROXIMITY_MIN
+  + ' units of a node box that is not on its own connection — a run beside a box it does not attach to reads as belonging to that box',
+  (() => {
+    const ends = new Map()
+    for (const { c } of OV_TRACED) {
+      const e2 = [c.from, c.to].filter((l) => l.startsWith('node ')).map((l) => l.slice(5))
+      for (const pat of c.strokes) for (const b of OVB.filter((x) => pat.test(x.label))) ends.set(b.i, new Set([...(ends.get(b.i) || []), ...e2]))
+    }
+    const strokeRe = /^(lane|spine|bundle|stub|wildcard|sequence|reopen|revise|cross-run) /
+    const bad = []
+    for (const s of OVB.filter((b) => (b.kind === 'rule' || b.kind === 'ink') && strokeRe.test(b.label) && Math.max(b.w, b.h) >= READ.RUN_MIN)) {
+      for (const n of OV_NODE_BOXES) {
+        if ((ends.get(s.i) || new Set()).has(n.label.slice(5))) continue
+        const d = ovR2(ovDist2(s, n))
+        if (d < READ.PROXIMITY_MIN) bad.push(s.label + ' passes ' + d + ' from ' + n.label.slice(5))
+      }
+    }
+    return bad
+  })())
+checkNoFaults('8.13.5 CHANNEL: two PARALLEL strokes belonging to different edges are never closer than ' + READ.CHANNEL_MIN
+  + ' units, so no line reads as the doubled neighbour of another',
+  (() => {
+    const strokeRe = /^(lane|spine|bundle|stub|wildcard|sequence|reopen|revise|cross-run) /
+    const own = (l) => { const m = l.match(/^(?:lane|spine|bundle) (.+?) -> /); if (m) return m[1]; const v = l.match(/^(reopen|revise) /); return v ? v[1] : l }
+    const S = OVB.filter((b) => b.kind === 'rule' && strokeRe.test(b.label))
+    const vert = (s) => s.h > s.w * 2, horiz = (s) => s.w > s.h * 2
+    const bad = []
+    for (let a = 0; a < S.length; a++) for (let b = a + 1; b < S.length; b++) {
+      const A = S[a], B = S[b]
+      if (!((vert(A) && vert(B)) || (horiz(A) && horiz(B)))) continue
+      const ovl = vert(A) ? Math.min(A.y + A.h, B.y + B.h) - Math.max(A.y, B.y) : Math.min(A.x + A.w, B.x + B.w) - Math.max(A.x, B.x)
+      if (ovl <= 0) continue
+      const gap = vert(A) ? Math.max(A.x - (B.x + B.w), B.x - (A.x + A.w)) : Math.max(A.y - (B.y + B.h), B.y - (A.y + A.h))
+      if (gap < 0 || gap >= READ.CHANNEL_MIN || own(A.label) === own(B.label)) continue
+      bad.push('gap ' + ovR2(gap) + ': ' + A.label + ' | ' + B.label)
+    }
+    return bad
+  })())
+checkNoFaults('8.13.6 LABEL: the label nearest each lane run names that run\'s own destination and is drawn inside it, so a label can never be read against the wrong stroke',
+  (() => {
+    const runs = OVB.filter((b) => /^(lane|bundle) /.test(b.label) && / -> /.test(b.label))
+    const texts = OVB.filter((b) => b.kind === 'text' && /→|←/.test(b.label))
+    const runBoxes = OVB.filter((b) => /^(lane|spine|bundle) .+ -> .+$/.test(b.label))
+    const nearest = (t) => runBoxes.map((r) => ({ r, d: ovDist2(t, r) })).sort((a, b) => a.d - b.d)[0]
+    const bad = []
+    for (const run of runs) {
+      /* ⚠ `String(match[1])`, NOT `String(match)[1]`. The second form indexes the STRINGIFIED
+         array — i.e. the second CHARACTER of "lane 00-…,01-as-is.md,…" — so every run looked for a
+         label ending in a single letter and found none. It is the same class of mistake as reading
+         a class off the wrong element: a check that looks in the wrong place and stays green or
+         red for reasons unrelated to the chart. */
+      const toMatch = run.label.match(/-> ([^ ]+?)(?: \+.*)?$/)
+      const fromMatch = run.label.match(/^(?:lane|spine|bundle) (.+?) ->/)
+      const to = (run.label.startsWith('bundle ') ? '04-test-summary' : (toMatch ? toMatch[1] : '')).replace(/\.md$/, '')
+      const from = (run.label.startsWith('bundle ') ? '02-to-be-plan' : (fromMatch ? fromMatch[1] : '')).replace(/\.md$/, '')
+      const mine = texts.filter((t) => nearest(t).r === run)
+      const named = mine.filter((t) => t.label.endsWith('→ ' + to) || t.label.startsWith('← ' + from))
+      const inside = named.filter((t) => (run.w >= run.h
+        ? t.x >= run.x - 0.01 && t.x + t.w <= run.x + run.w + 0.01
+        : t.y >= run.y - 0.01 && t.y + t.h <= run.y + run.h + 0.01))
+      if (named.length !== 1 || inside.length !== 1) {
+        bad.push(run.label.slice(0, 40) + ' — ' + mine.length + ' nearest, ' + named.length + ' naming it, ' + inside.length + ' inside')
+      }
+    }
+    return bad
+  })())
+checkNoFaults('8.13.7 LABEL: the only words this chart prints twice are its per-node data rows — every label that names a run is unique',
+  (() => {
+    const texts = OVB.filter((b) => b.kind === 'text').map((b) => b.label)
+    const repeatable = /^(fan-in [0-9]|no upstream artifact|no memory plane|any lock or write|memory read|frozen|frozen \+ memory|tdd-evidence|run-start|qa-signoff|phase [0-9]+ — |the wildcard input rail|writes the plane)/
+    return [...new Set(texts.filter((l, i) => texts.indexOf(l) !== i && !repeatable.test(l)))]
+  })())
+
+/* ==========================================================================
+   8.11 THE INTERACTION TYPES, AS SHAPES THAT ARE ACTUALLY READ OFF THE DRAWING
+   ==========================================================================
+
+   ⚠ NINE OF THE CHECKS IN THIS SECTION USED TO HAND A NUMBER WHERE A BOOLEAN BELONGS, and a
+   checker that cannot fail is not a check. `check(label, ok)` passes whenever `ok` is truthy — and
+   `7` is truthy, and so is an EMPTY ARRAY — but the vacuity went deeper than truthiness: several of
+   them compared a count with a count, so the CLASS the label promised was never read at all.
+   `8.11.3 CONDITIONAL: SEVEN lane runs` counted lane-labelled boxes and would have passed with
+   every conditional edge drawn SOLID; `8.11.3 MULTI-INPUT: five nodes carry the dashed fan-in
+   border` counted nodes derived from the edge list and would have passed with all twelve borders
+   solid; `8.11.8 each back-edge arrowhead enters a node EARLIER in the sequence` looked for the
+   WORDS `reopen head 02-to-be-plan.md` — the label contains the answer, and the check read the
+   label rather than the arrowhead, which is why it was green while the arc came down over the
+   wrong column. Each one below now reads the emitted CLASS of the element it names and the
+   GEOMETRY of the strokes, and reports the offending boxes instead of a total. */
+check('8.11.3 MULTI-INPUT: exactly the phases that read more than one artifact carry the dashed fan-in border (read off each node\'s own rect, by index)',
+  (() => {
+    const want = ['02-to-be-plan.md', '03.5-code-review.md', '04-test-summary.md', '06-decisions-update.md', '08-memory-impact.md']
+    const got = OV_NODE_BOXES.filter((n) => /dg-box-fan/.test(ovCls[n.i] || '')).map((n) => n.label.slice(5))
+    return got.slice().sort().join(',') === want.slice().sort().join(',')
+  })(), OV_NODE_BOXES.filter((n) => /dg-box-fan/.test(ovCls[n.i] || '')).map((n) => n.label.slice(5)).join(', '))
+check('8.11.3 every node states its own fan-in in words (twelve rows, each inside its own node box)',
+  OV_NODE_BOXES.every((n) => OVB.some((t) => t.kind === 'text' && /^(fan-in \d|no upstream artifact)/.test(t.label)
+    && t.x >= n.x && t.x + t.w <= n.x + n.w && t.y >= n.y && t.y + t.h <= n.y + n.h)))
+checkNoFaults('8.11.3 CONDITIONAL: the two conditional edges carry the dash on their own run and their own arrowhead, and no required edge does',
+  (() => {
+    const bad = []
+    for (const [a, b, kind] of OV_EDGES) {
+      if (kind === 'wildcard') continue
+      const runBox = ovOne(runLabelOf([a, b, kind]) || '')
+      const headBox = ovOne(headLabelOf([a, b, kind]))
+      const wantRun = kind === 'conditional' ? 'dg-line-cond' : 'dg-line'
+      const wantHead = kind === 'conditional' ? 'dg-head-cond' : 'dg-head'
+      if (!runBox) bad.push(a + '->' + b + ': no run')
+      else if (ovCls[runBox.i] !== wantRun) bad.push(a + '->' + b + ': run is ' + ovCls[runBox.i])
+      if (!headBox) bad.push(a + '->' + b + ': no head')
+      else if (ovCls[headBox.i] !== wantHead) bad.push(a + '->' + b + ': head is ' + ovCls[headBox.i])
+    }
+    return bad
+  })())
+check('8.11.3 exactly two runs and two arrowheads in the whole overview carry the conditional dash',
+  ovPathsC.filter((c) => c === 'dg-line-cond').length === 2 && ovInksC.filter((c) => c === 'dg-head-cond').length === 2,
+  'dashed runs ' + ovPathsC.filter((c) => c === 'dg-line-cond').length + ', dashed heads ' + ovInksC.filter((c) => c === 'dg-head-cond').length)
+check('8.11.4 WILDCARD: two thick stubs, each leaving the rail and landing on the bottom edge of the phase that reads the wildcard',
+  OV_EDGES.filter(([a, b, kind]) => kind === 'wildcard').every(([a, b]) => {
+    const stub = ovOne('wildcard stub ' + b), head = ovOne('wildcard head ' + b), n = ovOne('node ' + b)
+    return stub && head && n && ovCls[stub.i] === 'dg-line-wide' && ovCls[head.i] === 'dg-head-wide'
+      && ovTouch(head, n) && ovTouch(stub, OV_RAIL) && stub.x >= n.x && stub.x + stub.w <= n.x + n.w
+  }))
 check('8.11.4 the wildcard rail is as wide as the twelve-node row',
   (() => {
     const rail = OV.boxes.find((b) => b[5] === 'the wildcard input rail')
@@ -523,29 +787,51 @@ check('8.11.4 the wildcard rail is as wide as the twelve-node row',
     const left = Math.min(...nodes.map((n) => n[1])), right = Math.max(...nodes.map((n) => n[1] + n[3]))
     return Math.abs(rail[1] - left) < 1 && Math.abs(rail[1] + rail[3] - right) < 1
   })(), true)
-check('8.11.5 HUMAN DECISION: one amber marker for each phase a person must answer (2)',
-  ovCount(/^human decision marker /) === 2, 'drew ' + ovCount(/^human decision marker /))
-check('8.11.5 each marker carries its own diamond',
-  ovCount(/^decision diamond /) === 2, 'drew ' + ovCount(/^decision diamond /))
-check('8.11.6 REFUSAL: one band under each of the twelve phases',
-  ovCount(/^refusal band /) === 12, 'drew ' + ovCount(/^refusal band /))
-check('8.11.7 SEQUENCE ORDER: the four adjacent pairs with no input edge are drawn as their own shape',
-  ovCount(/^sequence link /) === 4 && (OVERVIEW.svg.match(/dg-line-seq/g) || []).length === 4,
-  'links ' + ovCount(/^sequence link /) + ', dotted runs ' + (OVERVIEW.svg.match(/dg-line-seq/g) || []).length)
-check('8.11.8 BACK-EDGE: two arcs, each a riser + a shelf + a drop and a violet entry arrowhead',
-  ovCount(/^reopen (riser|shelf|drop)/) === 3 && ovCount(/^reopen head /) === 1
-  && ovCount(/^revise (riser|shelf|drop)/) === 3 && ovCount(/^revise head /) === 1
-  && (OVERVIEW.svg.match(/dg-head-loop/g) || []).length === 3,
-  'reopen ' + ovCount(/^reopen (riser|shelf|drop)/) + '/head ' + ovCount(/^reopen head /)
-  + ', revise ' + ovCount(/^revise (riser|shelf|drop)/) + '/head ' + ovCount(/^revise head /)
-  + ', violet heads ' + (OVERVIEW.svg.match(/dg-head-loop/g) || []).length)
-check('8.11.8 each back-edge arrowhead enters a node EARLIER in the sequence than the node it left',
-  OVL.includes('reopen head 02-to-be-plan.md') && OVL.includes('revise head 03.5-code-review.md'))
-check('8.11.9 CROSS-RUN: the loop is drawn as a return path with an arrowhead, not as a sentence',
-  ovCount(/^cross-run return (run|drop|foot)$/) === 3 && ovCount(/^cross-run return head$/) === 1
-  && ovCount(/^cross-run card: /) === 3,
-  'return marks ' + ovCount(/^cross-run return (run|drop|foot)$/) + ', heads ' + ovCount(/^cross-run return head$/)
-  + ', cards ' + ovCount(/^cross-run card: /))
+check('8.11.5 HUMAN DECISION: the two phases a person must answer carry an amber marker, directly above their own node, with its own diamond inside it',
+  ['00-requirements.md', '05-manual-qa.md'].every((f) => {
+    const n = ovOne('node ' + f), m = ovOne('human decision marker ' + f), d = ovOne('decision diamond ' + f)
+    return n && m && d && ovCls[m.i] === 'dg-box-human' && ovCls[d.i] === 'dg-mark'
+      && m.y + m.h <= n.y && n.y - (m.y + m.h) <= 8 && m.x >= n.x && m.x + m.w <= n.x + n.w
+      && d.x >= m.x && d.x + d.w <= m.x + m.w
+  }), OVL.filter((l) => /^human decision marker /.test(String(l))).join(', '))
+check('8.11.6 REFUSAL: one band under each of the twelve phases, each under ITS OWN node',
+  OV_NODES.every((f) => {
+    const n = ovOne('node ' + f), b = ovOne('refusal band ' + f)
+    return n && b && ovCls[b.i] === 'dg-box-refuse' && Math.abs(b.x - n.x) < 0.01 && b.y >= n.y + n.h && b.y - (n.y + n.h) <= 8
+  }), OVL.filter((l) => /^refusal band /.test(String(l))).length + ' bands')
+checkNoFaults('8.11.7 SEQUENCE ORDER: the four adjacent pairs with no input edge are drawn as their own DOTted shape, on their own strokes, and nowhere else',
+  (() => {
+    const pairs = OV_NODES.slice(0, -1).map((f, i) => [f, OV_NODES[i + 1]]).filter(([a, b]) => !OV_EDGES.some(([x, y]) => x === a && y === b))
+    const bad = []
+    for (const [a, b] of pairs) {
+      const run = ovOne('sequence link ' + a + ' -> ' + b), head = ovOne('sequence head ' + b)
+      if (!run || !head) bad.push(a + '->' + b + ': missing')
+      else if (ovCls[run.i] !== 'dg-line-seq' || ovCls[head.i] !== 'dg-head-seq') bad.push(a + '->' + b + ': ' + ovCls[run.i] + '/' + ovCls[head.i])
+    }
+    const extra = OVB.filter((b) => b.kind === 'rule' && ovCls[b.i] === 'dg-line-seq')
+      .filter((b) => !pairs.some(([a, c]) => b.label === 'sequence link ' + a + ' -> ' + c))
+    return bad.concat(extra.map((b) => 'dotted link where the pair HAS an edge: ' + b.label))
+  })())
+checkNoFaults('8.11.8 BACK-EDGE: two violet arcs, each drawn in at least three strokes that leave the node it names, and each head landing ON the node it names',
+  (() => {
+    const bad = []
+    for (const [word, from, to] of [['reopen', '03.5-code-review.md', '02-to-be-plan.md'], ['revise', '04-test-summary.md', '03.5-code-review.md']]) {
+      const head = ovOne(word + ' head ' + to), n = ovOne('node ' + to), src = ovOne('node ' + from)
+      const parts = OVB.filter((b) => b.kind === 'rule' && new RegExp('^' + word + ' (out|shelf|riser|drop) ').test(b.label))
+      if (!head || ovCls[head.i] !== 'dg-head-loop' || !ovTouch(head, n)) bad.push(word + ': its head does not land on ' + to)
+      if (parts.length < 3) bad.push(word + ': ' + parts.length + ' strokes')
+      if (!parts.some((p) => ovTouch(p, src))) bad.push(word + ': nothing leaves ' + from)
+      if (!(OV_NODES.indexOf(to) < OV_NODES.indexOf(from))) bad.push(word + ': it does not run backwards')
+    }
+    return bad
+  })())
+check('8.11.9 CROSS-RUN: the loop is drawn as a return path whose arrowhead lands back on the card the run leaves',
+  (() => {
+    const card = OVB.find((b) => /^cross-run card: writes/.test(b.label))
+    const head = ovOne('cross-run return head'), foot = ovOne('cross-run return foot')
+    return card && head && foot && ovTouch(head, card) && ovTouch(foot, card)
+  })(), 'cross-run marks ' + OVL.filter((l) => /^cross-run return/.test(String(l))).join(', '))
+
 /* ==========================================================================
    8.12 THE COMPOSITION BUDGETS — the invariant that was missing
    ==========================================================================

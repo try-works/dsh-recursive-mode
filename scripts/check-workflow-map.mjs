@@ -188,7 +188,7 @@ const dec = (s) => s.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt
    The expectations are written out HERE rather than imported from the generator, on
    the same principle as the phase-panel list above: an independent expectation is one
    the generator cannot satisfy by agreeing with itself. */
-const DIAGRAM_IDS = ['overview', 'phase-graph', 'learning-loop']
+const DIAGRAM_IDS = ['overview', 'learning-loop']
 const DIAGRAMS = []
 for (const m of html.matchAll(/<div class="diagram" id="dg-([a-z-]+)" data-diagram="([a-z-]+)" role="img" aria-label="([^"]*)" style="--dg-w:([\d.]+)px" data-layout="([^"]*)">([\s\S]*?)<\/div>/g)) {
   const before = html.slice(0, m.index)
@@ -201,7 +201,7 @@ for (const m of html.matchAll(/<div class="diagram" id="dg-([a-z-]+)" data-diagr
 }
 check('8.0 every chart wrapper is well formed and each one carries an aria-label: ' + DIAGRAMS.length + ' charts',
   DIAGRAMS.length === DIAGRAM_IDS.length && DIAGRAMS.every((d) => d.label.length > 60 && d.width > 300 && d.svg !== ''))
-check('8.0 the three charts are the three named views: ' + DIAGRAMS.map((d) => d.view).join(', '),
+check('8.0 the two charts are the two named views: ' + DIAGRAMS.map((d) => d.view).join(', '),
   DIAGRAMS.map((d) => d.view).join(',') === DIAGRAM_IDS.join(','))
 check('8.0 each chart lives in its own panel, and no two share one: '
   + DIAGRAMS.map((d) => d.view + '@' + d.panel).join(' '),
@@ -234,7 +234,13 @@ for (const d of DIAGRAMS) {
 
   /* -- 8.2 no two reserved boxes may intersect, except by declared exemption */
   const CONTAINS = Array.isArray(L?.contains) ? L.contains.filter((p) => Array.isArray(p) && p.length === 2) : []
-  const containsBox = (o, i) => i[1] >= o[1] && i[2] >= o[2] && i[1] + i[3] <= o[1] + o[3] && i[2] + i[4] <= o[2] + o[4]
+  /* ⚠ A CONTAINMENT IS DECIDED AT THE MANIFEST'S OWN PRECISION, not at floating point's. Every box
+     in the manifest is rounded to hundredths, and two boxes computed along the same edge can land one
+     hundredth apart — 51.5 + 18.5 is 70.00000000000001 in binary floating point against a container
+     whose right edge was rounded to 70. Treating that as "not contained" would fail a layout that is
+     exact on the page, so the comparison is made at the emitted precision. */
+  const containsBox = (o, i) => Math.round((i[1] - o[1]) * 100) >= 0 && Math.round((i[2] - o[2]) * 100) >= 0
+    && Math.round((o[1] + o[3] - i[1] - i[3]) * 100) >= 0 && Math.round((o[2] + o[4] - i[2] - i[4]) * 100) >= 0
   const declaredPair = new Set([...CONTAINS].map(([i, c]) => i + '>' + c))
   const EPS = 0.05
   const boxHits = []
@@ -252,22 +258,29 @@ for (const d of DIAGRAMS) {
   R.containments = CONTAINS.length
   R.hits = boxHits
   if (boxHits.length > 0) fail(boxHits.length + ' undeclared intersections: ' + boxHits.slice(0, 3).join(' | '))
-  /* A declared containment is one of two things, and both are geometric facts:
-     · the container is a BOX and geometrically holds the box inside it;
-     · the container is a RULE and the contained rule/arrowhead MEETS it — the two
-       reserved boxes touch within one stroke width (5 units), which is the arc's corner
-       and the only place in the chart where two strokes share a reservation. */
+  /* A declared containment is one of three things, and all three are geometric facts:
+     · the container is a BOX and geometrically holds the contained box;
+     · the container is a RULE or an INK box and geometrically holds the contained box — an
+       arrowhead reserved at the size of the run it terminates, or a run reserved wide enough to
+       hold its arrowhead, is the same "say it in the geometry" move as a card holding its label;
+     · the container is a RULE and the contained rule/arrowhead MEETS it — the two reserved boxes
+       touch within one stroke width (5 units), which is a corner where two strokes join and the
+       only place in a chart where two strokes share a reservation. */
   const meets = (o, i) => Math.abs(Math.min(i[1] + i[3], o[1] + o[3]) - Math.max(i[1], o[1])) <= 5
     && Math.abs(Math.min(i[2] + i[4], o[2] + o[4]) - Math.max(i[2], o[2])) <= 5
   const declaredOk = ([i, c]) => {
     const A = BOXES[i], C = BOXES[c]
     if (!A || !C) return false
-    if (C[0] === 'box' && containsBox(C, A)) return true
+    if (containsBox(C, A)) return true
     return C[0] === 'rule' && (A[0] === 'rule' || A[0] === 'ink') && meets(C, A)
   }
   const badContains = CONTAINS.filter((p) => !declaredOk(p))
   if (!(CONTAINS.length > 8 && badContains.length === 0)) {
-    fail('a declared containment is not real (' + badContains.slice(0, 3).map(([i, c]) => i + ',' + c).join(' | ') + ')')
+    fail('a declared containment is not real (' + badContains.slice(0, 3).map(([i, c]) => i + ',' + c
+      + ' holds=' + containsBox(BOXES[c], BOXES[i])
+      + ' meets=' + (BOXES[c][0] === 'rule' && (BOXES[i][0] === 'rule' || BOXES[i][0] === 'ink') && meets(BOXES[c], BOXES[i]))
+      + ' [' + JSON.stringify([BOXES[i]?.[0], BOXES[i]?.[1], BOXES[i]?.[2], BOXES[i]?.[3], BOXES[i]?.[4], BOXES[i]?.[5]]) + ']'
+      + ' in [' + JSON.stringify([BOXES[c]?.[0], BOXES[c]?.[1], BOXES[c]?.[2], BOXES[c]?.[3], BOXES[c]?.[4], BOXES[c]?.[5]]) + ']').join(' | ') + ')')
   }
 
   /* -- 8.3 the drawing matches the manifest ------------------------------- */
@@ -418,8 +431,117 @@ const BOXES = Array.isArray(L?.boxes) ? L.boxes : []
 const FIT = Array.isArray(L?.fit) ? L.fit : []
 check('8.8 the diagram wrapper scrolls horizontally in one strip (the tab-strip mechanism)',
   /\.diagram\{[^}]*overflow-x:auto/.test(CSS) && /overscroll-behavior-inline:contain/.test(CSS))
-check('8.8 every chart keeps its own coordinate system (three wrappers, three widths)',
+check('8.8 every chart keeps its own coordinate system (its own wrapper and width)',
   new Set(DIAGRAMS.map((d) => d.width)).size >= 2, DIAGRAMS.map((d) => d.width).join(', '))
+
+/* ==========================================================================
+   8.11 THE OVERVIEW IS THE GRAPH — structural invariants on the merged chart
+   ==========================================================================
+
+   WHY THIS IS A SEPARATE SECTION. Everything above asks whether the drawing is WELL FORMED: no
+   overlaps, labels inside boxes, the manifest matching the markup. None of it asks whether the
+   picture is the RIGHT PICTURE. The overview used to be twelve labelled boxes in a row with the
+   sixteen directed edges on a second tab and three paragraphs of prose above it, and every invariant
+   in this file was green while that shipped — because "a row of boxes with no arrows" is not a
+   layout defect, it is a content defect.
+
+   So these read the OVERVIEW'S OWN MANIFEST and assert the things the picture is supposed to SHOW:
+   one run per derived edge anywhere in the chart, the multi-input nodes marked, the human decisions
+   marked, the wildcard rail, the sequence-order links, the two back-edge arcs, the cross-run return.
+   Each is counted from the labels the generator writes, and each expected count is written out HERE
+   — not imported from the generator — so the two scripts cannot agree with each other by sharing a
+   mistake. They are labelled `8.11.n` so a failure names the interaction type it lost. */
+const OVERVIEW = DIAGRAMS.find((d) => d.view === 'overview')
+const OV = (() => { try { return JSON.parse(dec(OVERVIEW.layoutRaw)) } catch { return null } })()
+const OVL = Array.isArray(OV?.boxes) ? OV.boxes.map((b) => b[5]) : []
+const ovCount = (re) => OVL.filter((l) => re.test(String(l))).length
+check('8.11.0 the overview ships a manifest to check (' + OVL.length + ' boxes)', OVL.length > 100)
+/* The twelve nodes, in the artifact name the rest of the page cites. */
+const OV_NODES = ['00-requirements.md', '00-worktree.md', '01-as-is.md', '01.5-root-cause.md',
+  '02-to-be-plan.md', '03-implementation-summary.md', '03.5-code-review.md', '04-test-summary.md',
+  '05-manual-qa.md', '06-decisions-update.md', '07-state-update.md', '08-memory-impact.md']
+check('8.11.1 the overview draws all twelve phase nodes',
+  OV_NODES.filter((f) => !OVL.includes('node ' + f)), [])
+/* THE 16 EDGES. Written out here as [from, to] pairs, derived by hand from
+   `getPhaseExpectedInputArtifactNames` — so this list is an INDEPENDENT expectation. */
+const OV_EDGES = [
+  ['00-requirements.md', '00-worktree.md'], ['00-requirements.md', '01-as-is.md'],
+  ['00-requirements.md', '02-to-be-plan.md'], ['01-as-is.md', '01.5-root-cause.md'],
+  ['01-as-is.md', '02-to-be-plan.md'], ['01.5-root-cause.md', '02-to-be-plan.md'],
+  ['02-to-be-plan.md', '03-implementation-summary.md'], ['02-to-be-plan.md', '03.5-code-review.md'],
+  ['02-to-be-plan.md', '04-test-summary.md'], ['02-to-be-plan.md', '05-manual-qa.md'],
+  ['03-implementation-summary.md', '03.5-code-review.md'], ['03-implementation-summary.md', '04-test-summary.md'],
+  ['03.5-code-review.md', '04-test-summary.md'], ['06-decisions-update.md', '07-state-update.md'],
+  ['EVERY PRESENT ARTIFACT', '06-decisions-update.md'], ['EVERY PRESENT ARTIFACT', '08-memory-impact.md'],
+]
+const ovEdgeRuns = OVL.filter((l) => /^(lane|spine) .+ -> .+$/.test(String(l)) || /^wildcard stub /.test(String(l)))
+check('8.11.2 THE OVERVIEW DRAWS ALL SIXTEEN DERIVED EDGES, ONE RUN EACH (drawn ' + ovEdgeRuns.length + ')',
+  ovEdgeRuns.length, OV_EDGES.length)
+check('8.11.2 every one of the sixteen is drawn, by endpoint',
+  OV_EDGES.filter(([a, b]) => {
+    if (a === 'EVERY PRESENT ARTIFACT') return !OVL.includes('wildcard stub ' + b)
+    const i = OV_NODES.indexOf(a), j = OV_NODES.indexOf(b)
+    return !OVL.includes((j - i === 1 ? 'spine ' : 'lane ') + a + ' -> ' + b)
+  }), [])
+/* THE INTERACTION TYPES, as shapes. */
+check('8.11.3 MULTI-INPUT: five nodes carry the dashed fan-in border, and they are the five that read more than one artifact',
+  [ovCount(/ dg-box-fan"/), OV_NODES.filter((f) => !OVL.includes('node ' + f)).length], [5, 0])
+check('8.11.3 every node states its own fan-in in words, so the count is not carried by the border alone',
+  OVL.filter((l) => /^fan-in \d|^no upstream artifact|^reads every present/.test(String(l))).length >= 12, true)
+check('8.11.3 CONDITIONAL: eight lane runs for the eight forward, non-adjacent edges — and the two conditional ones are among them',
+  ovCount(/^lane /), 8)
+check('8.11.3 the two conditional edges are drawn at all (a missing one would leave seven lanes)',
+  ['lane 01.5-root-cause.md -> 02-to-be-plan.md', 'lane 03.5-code-review.md -> 04-test-summary.md']
+    .filter((l) => !OVL.includes(l)), [])
+check('8.11.4 WILDCARD: a thick stub into each wildcard phase and a rail that spans the row',
+  ovCount(/^wildcard stub /), 2)
+check('8.11.4 the wildcard rail is as wide as the twelve-node row',
+  (() => {
+    const rail = OV.boxes.find((b) => b[5] === 'the wildcard input rail')
+    const nodes = OV.boxes.filter((b) => String(b[5]).startsWith('node '))
+    if (!rail || nodes.length !== 12) return false
+    const left = Math.min(...nodes.map((n) => n[1])), right = Math.max(...nodes.map((n) => n[1] + n[3]))
+    return Math.abs(rail[1] - left) < 1 && Math.abs(rail[1] + rail[3] - right) < 1
+  })(), true)
+check('8.11.5 HUMAN DECISION: one amber marker above each phase a person must answer (3)',
+  ovCount(/^human decision marker /), 3)
+check('8.11.5 each marker carries its own diamond',
+  ovCount(/^decision diamond /), 3)
+check('8.11.6 REFUSAL: one band under each of the twelve phases',
+  ovCount(/^refusal band /), 12)
+check('8.11.7 SEQUENCE ORDER: the four adjacent pairs with no input edge are drawn as their own shape',
+  ovCount(/^sequence link /), 4)
+check('8.11.8 BACK-EDGE: two arcs, each a riser + a shelf + a drop + an entry arrowhead',
+  [ovCount(/^reopen (riser|shelf|drop)$/), ovCount(/^reopen head /), ovCount(/^revise (riser|shelf|drop)$/), ovCount(/^revise head /)],
+  [3, 1, 3, 1])
+check('8.11.8 each back-edge arrowhead enters a node EARLIER in the sequence than the node it left',
+  [OVL.includes('reopen head 02-to-be-plan.md'), OVL.includes('revise head 03.5-code-review.md')], [true, true])
+check('8.11.9 CROSS-RUN: the loop is drawn as a return path with an arrowhead, not as a sentence',
+  [ovCount(/^cross-run return (run|drop|foot)$/), ovCount(/^cross-run return head$/), ovCount(/^cross-run card: /)],
+  [3, 1, 3])
+/* AND THE PROSE IS GONE. The overview carries a title, a one-line lede, a signpost and the chart —
+   nothing else above the picture. This is the invariant the OWNER asked for in words: "you are just
+   adding more and more text above the workflow instead of making the workflow a real proper
+   diagram". It is checked as a BOUND on how much markup sits between the panel opening and the
+   chart, which is the only form of it a script can hold. ⚠ The slice starts AT the overview panel's
+   id and ends at the NEXT chart, so it cannot pick up a callout belonging to another view — the
+   first version matched from the first `<section>` in the document and measured the wrong region. */
+const ovAt = html.indexOf('id="panel-overview"')
+const ovPrologue = html.slice(ovAt, html.indexOf('<div class="diagram"', ovAt))
+check('8.11.10 the overview has NO callout above the chart — the prose walls are gone (region ' + ovPrologue.length + ' bytes)',
+  (ovPrologue.match(/class="callout"/g) || []).length === 0,
+  (ovPrologue.match(/class="callout"/g) || []).length + ' callout(s) above the chart')
+check('8.11.10 the prologue above the chart is a heading, a one-line lede and a one-line signpost',
+  (ovPrologue.match(/<p /g) || []).length <= 2, true)
+check('8.11.10 the Facts moved to the Notes view rather than being deleted',
+  ['Notes &amp; caveats', 'the two optionality declarations', 'two independent optionality declarations',
+    'may be absent', 'Every edge, in full', 'The fan-in, per phase']
+    .filter((s) => !html.includes(s)), [])
+check('8.11.10 the moved caveats are reachable in ONE line from the overview',
+  /href="#tab-notes"/.test(ovPrologue), true)
+check('8.11.11 the overview is the FIRST panel and the FIRST tab, so a reader lands on the graph',
+  /<section class="panel is-active" id="panel-overview"/.test(html)
+  && html.indexOf('id="tab-overview"') < html.indexOf('id="tab-notes"'), true)
 
 /* -- 8.9 nothing is painted inside a positioned element's box ------------
    Every absolutely/fixed positioned element in the sheet, with what it is for. A

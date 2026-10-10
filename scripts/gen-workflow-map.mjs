@@ -624,6 +624,13 @@ const C = {
   danger: '#ff8877', 'danger-dim': '#5c2820',
   ok: '#7fd6a3', 'ok-dim': '#1c4632',
   violet: '#b9a7ff', 'violet-dim': '#3a3468',
+  /* The SEQUENCE ORDER mark — the dotted link between adjacent nodes that carries NO
+     artifact input. It is the only stroke in the chart that means "the order, not a
+     dependency", so it must be visibly weaker than every edge, and it owes 3:1 as a
+     non-text state mark. The first value tried was --n-700, which measured 1.25:1
+     against the canvas: a mark a reader cannot see is not a mark. This one is 3.6:1
+     and still reads as the quietest line in the picture. */
+  'seq-dim': '#5b6e88',
   'warn-ink': '#1b1409', 'danger-ink': '#3a1310',
 }
 
@@ -670,6 +677,7 @@ const CONTRAST_REQUIREMENTS = [
   { fg: 'n-600', bg: 'n-950', need: 3.0, what: 'that same control border on the canvas' },
   { fg: 'n-600', bg: 'n-850', need: 3.0, what: 'that same control border on a card' },
   { fg: 'n-500', bg: 'n-900', need: 3.0, what: 'the sequence rail dot — a state mark, not a hairline' },
+  { fg: 'seq-dim', bg: 'n-950', need: 3.0, what: 'the dotted SEQUENCE-ORDER link in the overview chart — a state mark (this pair is adjacent in the order, and carries no input edge)' },
   { fg: 'n-700', bg: 'n-950', need: 1.0, what: 'the background grid line — DECORATIVE, no threshold owed' },
   { fg: 'warn-dim', bg: 'n-950', need: 1.0, what: 'the amber rule border — decorative; the label beside it is the signal' },
   { fg: 'danger-dim', bg: 'n-950', need: 1.0, what: 'the refusal rule border — decorative, same reasoning' },
@@ -1682,16 +1690,11 @@ const phaseDetail = (p, i) => {
 function render() {
   // The charts are CHARTED before the page is built: each one lays itself out, each one
   // carries its own width into its own wrapper (`--dg-w`), and each one ships the
-  // manifest the checker re-reads. Three views, three charts, one engine.
+  // manifest the checker re-reads. TWO charts now, one engine: the overview IS the graph.
   const dgOverview = chart({
     id: 'overview',
-    label: 'Overview diagram: the Phase 0 human gate, the twelve-artifact sequence as one horizontally scrollable strip carrying the fan-in of each phase, the two gating hooks in their own column, the lock chain, the backward edge, and the phases that read more than one upstream artifact. The same information is given as text in the sequence below.',
+    label: `The workflow as a graph: the twelve phase artifacts of PHASE_SEQUENCE in order, with all ${EDGES.length} directed input edges drawn between them. A solid arrow is a required input the linter expects; a dashed arrow is one of the ${EDGES.filter((e) => e.kind === 'conditional').length} conditional inputs, pushed only when the source artifact is present; a dotted link carries no input edge at all, so two adjacent pairs are marked as sequence order only and the difference between the order and a real dependency is visible. A thick arrow comes off the rail under the row: that is the wildcard input, every present artifact except itself, which phases 06 and 08 read. A dashed node border and its own fan-in line mark the ${PHASES.filter((p) => sourcesOf(p.file) > 1).length} phases that read more than one upstream artifact. Amber diamonds above a node mark the ${PHASES.filter((p) => p.human).length} places a person must answer, and a hatched band under a node marks a place a guard rule can refuse. Violet arcs run BACKWARDS: a reopen and a REVISE verdict re-enter a node to the LEFT of their source, and the same arc closes the cross-run loop below the row, where the memory this run writes is read by the NEXT run's phase entry. The same information is given as tables in the views below.`,
     draw: drawOverview,
-  })
-  const dgGraph = chart({
-    id: 'phase-graph',
-    label: 'Phase graph: twelve phase nodes in PHASE_SEQUENCE order. Solid arrows are the required inputs the linter expects, dashed arrows are the two conditional inputs pushed only when the source artifact is present, a rail under the row carries the wildcard input that lets phases 06 and 08 read every present artifact, and a dashed node border marks the five phases that read more than one upstream artifact. The same edge set is given as a table below.',
-    draw: drawGraph,
   })
   const dgTraining = chart({
     id: 'learning-loop',
@@ -1700,8 +1703,7 @@ function render() {
   })
 
   const tabs = [
-    { id: 'overview', label: 'Overview', sub: 'whole flow' },
-    { id: 'graph', label: 'Phase graph', sub: 'who reads whom' },
+    { id: 'overview', label: 'Overview', sub: 'the graph' },
     { id: 'start', label: 'Phase 0', sub: 'the human gate' },
     ...PHASES.map((p) => ({ id: 'phase-' + p.file.replace(/[^a-z0-9]+/gi, '-'), label: p.file.replace(/\.md$/, ''), sub: 'phase ' + p.phaseN })),
     { id: 'hooks', label: 'Hooks & seams', sub: 'where it attaches' },
@@ -1709,6 +1711,7 @@ function render() {
     { id: 'loops', label: 'Backward loops', sub: 'REVISE / repair' },
     { id: 'training', label: 'Learning loop', sub: 'cross-run memory' },
     { id: 'closeout', label: 'Closeout & receipts', sub: 'the chain' },
+    { id: 'notes', label: 'Notes & caveats', sub: 'the prose, moved' },
     { id: 'tools', label: 'Tools', sub: '13 definitions' },
     { id: 'codes', label: 'Error codes', sub: 'RM####' },
     { id: 'verify', label: 'Verification', sub: 'what is checked' },
@@ -2044,12 +2047,28 @@ ${Object.entries(DG_TEXT).map(([k, v]) => `.${k}{ fill:${v.fill}; font-family:va
 .dg-line-cond{ stroke:var(--n-300); stroke-width:1; fill:none; stroke-dasharray:5 4; }
 /* WILDCARD edge: twice as thick as every other edge. */
 .dg-line-wide{ stroke:var(--n-400); stroke-width:2; fill:none; }
+/* SEQUENCE ORDER, NOT AN INPUT: the dotted link between two adjacent nodes that the
+   linter's input map does NOT connect. It is the only mark in the chart that says
+   "adjacent" rather than "depends on", so it is the quietest stroke here and it is
+   dotted rather than dashed — a third pattern, not a variant of the conditional one. */
+.dg-line-seq{ stroke:var(--seq-dim); stroke-width:1; fill:none; stroke-dasharray:1 3; }
 .dg-head{ fill:var(--n-500); }
 .dg-head-acc{ fill:var(--accent); }
 .dg-head-warn{ fill:var(--warn); }
 .dg-head-loop{ fill:var(--violet); }
 .dg-head-cond{ fill:var(--n-300); }
 .dg-head-wide{ fill:var(--n-400); }
+.dg-head-seq{ fill:var(--seq-dim); }
+/* The human-decision marker above a node: an amber diamond, the same rotated square the
+   overview rail uses for a human step, so "a person decides here" is ONE shape page-wide. */
+.dg-mark{ fill:var(--warn); }
+/* A legend swatch: a region, not a signal — its meaning is the label drawn beside it. */
+.dg-legend{ fill:var(--n-850); stroke:var(--n-400); stroke-width:1; }
+.dg-legend-cond{ fill:none; stroke:var(--n-300); stroke-width:1; stroke-dasharray:5 4; }
+.dg-legend-seq{ fill:none; stroke:var(--seq-dim); stroke-width:1; stroke-dasharray:1 3; }
+.dg-legend-rail{ fill:var(--n-800); stroke:var(--n-400); stroke-width:1; stroke-dasharray:1 3; }
+.dg-legend-wide{ fill:none; stroke:var(--n-400); stroke-width:2; }
+.dg-legend-refuse{ fill:var(--danger-ink); stroke:var(--danger); stroke-width:1; }
 
 /* ---- misc --------------------------------------------------------------- */
 footer.colophon{ border-top:1px solid var(--line-strong); margin-top:var(--sp-8); padding-top:var(--sp-5); font-size:var(--fs-3xs); color:var(--fg-faint); }
@@ -2119,41 +2138,12 @@ ${tabs.map((t, i) => `    <button role="tab" id="tab-${t.id}" aria-controls="pan
 
 <main id="main">
 
-<!-- ===================== OVERVIEW ===================== -->
+<!-- ===================== OVERVIEW — THE GRAPH ===================== -->
 <section class="panel is-active" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
   <div class="panel-head">
-    <h2>The flow, end to end</h2>
-    <p class="lede">Read top to bottom. Each card is one artifact on disk; the left rail is the sequence; the <span style="color:var(--violet)">violet</span> links are the places the flow legitimately runs BACKWARDS. ${cite(SRC.seq)}</p>
-  </div>
-
-  <div class="legend">
-    <div><span class="swatch sw-auto"></span> automatic step</div>
-    <div><span class="swatch sw-human"></span> DECISION — a human must answer</div>
-    <div><span class="swatch sw-refuse"></span> REFUSAL — the call is stopped</div>
-    <div><span class="swatch sw-loop"></span> backward edge</div>
-    <div><span class="swatch sw-late"></span> member of <code>LATE_PHASE_ARTIFACTS</code></div>
-    <div><span class="swatch sw-absent"></span> dashed border = the phase <b>may be absent</b></div>
-  </div>
-
-  <div class="callout">
-    <strong>Reading the shapes, not the colours.</strong> Every gate below carries a word — <b>DECISION</b>, <b>REFUSAL</b> or <b>AUTO</b> — and a border treatment, so nothing here depends on colour alone. The human steps are also the only cards with a filled amber rail dot. Layout follows the workflow, not a hardware pipeline: this is a gated process with decision points, so the diagram is a vertical sequence with side rails, not a data bus.
-  </div>
-
-  <div class="callout">
-    <strong>All twelve artifacts are MANDATORY work. Nothing here is an optional phase.</strong>
-    Every phase row below carries a <span class="tag tag-may-be-absent">${BADGE_MAY_BE_ABSENT}</span> badge, and it is worth stating plainly what that badge does <em>not</em> mean: it does not mean the phase is optional. It is the property of one SET — <code>lock.ts</code> <code>OPTIONAL_PHASES</code>, whose only use in the plugin is <code>nextLegalPhase(graph, { optional: OPTIONAL_PHASES })</code>, i.e. "a member that is ABSENT does not stop the legal-phase selector". That is a statement about a fallback query, not about the work.
-    <br><br>
-    <b>The positive fact, which the plugin enforces end to end:</b> <code>recursive_init</code> scaffolds <b>all twelve</b> artifacts in one call — the two Phase 0 templates and then every later phase — so a scaffolded run has no missing phase to skip. ${cite(SRC.scaffoldLoop)} All twelve then lock <b>in sequence</b>: <code>PHASE_SEQUENCE</code> is the canonical order and the lock chain refuses out of order. ${cite(SRC.seq + ', ' + SRC.lockArtifact)} And a normal run produces twelve: the seven <em>may-be-absent</em> phases are written and locked exactly like the other five, because the scaffold writes them and the sequence locks them — being able to be ABSENT is not the same as being permitted to be absent.
-    <br><br>
-    <span class="unv">⚠ Stated precisely, because this is the whole point of the badge change:</span> the seven <em>may-be-absent</em> phases are the seven members of <code>OPTIONAL_PHASES</code>, and their badge means only that an <b>absent</b> one will not block the chain. Whether a phase's WORK is optional is not a property any code in this repo declares, and this page no longer implies one.
-    <br><br>
-    <span class="unv">⚠ AND THIS IS A REAL INCONSISTENCY IN THE REPOSITORY, reported rather than smoothed over.</span> There are <b>two independent optionality declarations</b> and they disagree. <code>lock.ts</code> <code>OPTIONAL_PHASES</code> has seven members, and it is what the legal-phase selector uses; <code>status.ts</code> carries its own <code>optional:</code> flag on the twelve-row status table and marks only <b>two</b> — <code>01.5-root-cause.md</code> and <code>03.5-code-review.md</code>. That second flag is load-bearing in two places: a missing phase is reported <code>SKIPPED</code> from it, and <code>snapshot.ts</code> computes a run's <code>complete</code> state by requiring every phase where <code>!p.optional</code>. So five of these seven phases are treated as <b>required</b> by the run-completion calculation while the selector treats them as skippable. Both readings are honest; they are just not the same reading, and a reader deserves to know which one is speaking. ${cite(SRC.statusPhases + ', ' + SRC.statusOptional + ', ' + SRC.snapshotComplete + ', ' + SRC.optional)}
-  </div>
-
-  <div class="callout">
-    <strong>Three things this overview does NOT try to be, and the views that are.</strong>
-    It is the readable SPINE, so it states what each phase is FOR and how many upstream artifacts it reads — the fan-in on every node. It does not draw the arrows: <a href="#graph-edges">the <b>Phase graph</b> view draws every one of the ${EDGES.length} directed edges</a>, with the ${EDGES.filter((e) => e.kind === 'conditional').length} conditional ones dashed and the ${EDGES.filter((e) => e.kind === 'wildcard').length} wildcard ones as a rail, because ${PHASES.filter((p) => sourcesOf(p.file) > 1).length} phases read more than one upstream artifact and a chain of boxes cannot show that.
-    And no view here showed the CROSS-RUN cycle at all until <a href="#training-steps">the <b>Learning loop</b> view</a>: a run reads the memory plane at phase entry, must write memory before phase 8 can lock, and — only on a re-run, only with two locked runs and a configured extractor — writes training shards that the NEXT run reads.
+    <h2>The workflow, as a graph</h2>
+    <p class="lede">Twelve phase artifacts in <code>PHASE_SEQUENCE</code> order, and every one of the ${EDGES.length} directed input edges between them, drawn. The chart scrolls sideways; its own legend is at the bottom of the picture. ${cite(SRC.seq + ', ' + SRC.inputMap)}</p>
+    <p class="note">The facts this view used to carry as prose — what the <span class="tag tag-may-be-absent">${BADGE_MAY_BE_ABSENT}</span> badge means, the two optionality declarations, what the drawing deliberately leaves out — are in <a href="#tab-notes">Notes &amp; caveats</a>, and the per-phase detail is on the <a href="#tab-overview">twelve phase views</a>.</p>
   </div>
 
   ${dgOverview.markup}
@@ -2270,24 +2260,43 @@ ${PHASES.map(phaseRow).join('\n')}
   </div>
 </section>
 
-<!-- ===================== PHASE GRAPH ===================== -->
-<section class="panel" id="panel-graph" role="tabpanel" aria-labelledby="tab-graph" tabindex="0" hidden>
+<!-- ===================== NOTES &amp; CAVEATS ===================== -->
+<section class="panel" id="panel-notes" role="tabpanel" aria-labelledby="tab-notes" tabindex="0" hidden>
   <div class="panel-head">
-    <h2>Who reads whom — the ${EDGES.length} edges, drawn</h2>
-    <p class="lede">The overview is a row of boxes; this is the wiring. Every arrow below is an entry in the linter's own input map — <code>getPhaseExpectedInputArtifactNames</code> decides which upstream artifacts a phase must cite in its <code>Inputs:</code> header and its <code>## Effective Inputs Re-read</code> section before it can lock, so the arrows are read off the code rather than drawn from a description of it. ${cite(SRC.inputMap)}</p>
+    <h2>Notes &amp; caveats</h2>
+    <p class="lede">The facts that used to sit ABOVE the overview chart as prose, moved here on purpose: the chart is the overview now, and a sentence that explains what a picture should show is a sign the picture was wrong. Nothing was dropped — each block below landed here, or in a phase view, or nowhere it was needed. ${cite(SRC.inputMap + ', ' + SRC.seq)}</p>
   </div>
 
   <div class="callout">
-    <strong>How to read it.</strong> A <b>solid</b> arrow is a REQUIRED input. A <b>dashed</b> arrow is CONDITIONAL: the linter pushes that artifact only when it exists on disk (<code>present.has(…)</code>), so the edge is real but optional. A <b>thick</b> arrow comes off the rail under the row: that input is <em>every present artifact in the run except itself</em>, which is why phases 06 and 08 have eleven possible sources and no single required one. A node with a <b>dashed border</b> reads more than one upstream artifact, and every node states its own fan-in in words — the shapes, the words and the counts all carry the distinction, so none of it rests on colour. ${cite(SRC.inputMap + ', ' + SRC.inputFilter + ', ' + SRC.lintWildcard06 + ', ' + SRC.lintWildcard08)}
-    <br><br><b>The drawing is wider than the column, and it scrolls — deliberately.</b> Twelve artifact names cannot be abbreviated without losing the names the rest of this page cites, so, like the twelve-node strip on the overview, this chart keeps its own coordinate system and scrolls sideways in one strip rather than squeezing its labels. Every arrow in it is also a row in the table below, and the table is the complete form.
+    <strong>Reading the shapes, not the colours.</strong> Every gate on this page carries a word — <b>DECISION</b>, <b>REFUSAL</b> or <b>AUTO</b> — and a border treatment, and every mark in the overview chart carries a word beside it, so nothing here depends on colour alone. The human steps are also the only cards with a filled amber rail dot, and in the chart they are the only ones with an amber diamond above them. ${cite(SRC.seq)}
   </div>
 
-  ${dgGraph.markup}
+  <div class="callout">
+    <strong>All twelve artifacts are MANDATORY work. Nothing here is an optional phase.</strong>
+    Every phase row carries a <span class="tag tag-may-be-absent">${BADGE_MAY_BE_ABSENT}</span> badge, and it is worth stating plainly what that badge does <em>not</em> mean: it does not mean the phase is optional. It is the property of one SET — <code>lock.ts</code> <code>OPTIONAL_PHASES</code>, whose only use in the plugin is <code>nextLegalPhase(graph, { optional: OPTIONAL_PHASES })</code>, i.e. "a member that is ABSENT does not stop the legal-phase selector". That is a statement about a fallback query, not about the work.
+    <br><br>
+    <b>The positive fact, which the plugin enforces end to end:</b> <code>recursive_init</code> scaffolds <b>all twelve</b> artifacts in one call — the two Phase 0 templates and then every later phase — so a scaffolded run has no missing phase to skip. ${cite(SRC.scaffoldLoop)} All twelve then lock <b>in sequence</b>: <code>PHASE_SEQUENCE</code> is the canonical order and the lock chain refuses out of order. ${cite(SRC.seq + ', ' + SRC.lockArtifact)} And a normal run produces twelve: the seven <em>may-be-absent</em> phases are written and locked exactly like the other five, because the scaffold writes them and the sequence locks them — being able to be ABSENT is not the same as being permitted to be absent.
+    <br><br>
+    <span class="unv">⚠ Stated precisely, because this is the whole point of the badge change:</span> the seven <em>may-be-absent</em> phases are the seven members of <code>OPTIONAL_PHASES</code>, and their badge means only that an <b>absent</b> one will not block the chain. Whether a phase's WORK is optional is not a property any code in this repo declares, and this page no longer implies one.
+    <br><br>
+    <span class="unv">⚠ AND THIS IS A REAL INCONSISTENCY IN THE REPOSITORY, reported rather than smoothed over.</span> There are <b>two independent optionality declarations</b> and they disagree. <code>lock.ts</code> <code>OPTIONAL_PHASES</code> has seven members, and it is what the legal-phase selector uses; <code>status.ts</code> carries its own <code>optional:</code> flag on the twelve-row status table and marks only <b>two</b> — <code>01.5-root-cause.md</code> and <code>03.5-code-review.md</code>. That second flag is load-bearing in two places: a missing phase is reported <code>SKIPPED</code> from it, and <code>snapshot.ts</code> computes a run's <code>complete</code> state by requiring every phase where <code>!p.optional</code>. So five of these seven phases are treated as <b>required</b> by the run-completion calculation while the selector treats them as skippable. Both readings are honest; they are just not the same reading, and a reader deserves to know which one is speaking. ${cite(SRC.statusPhases + ', ' + SRC.statusOptional + ', ' + SRC.snapshotComplete + ', ' + SRC.optional)}
+  </div>
 
-  <h3 id="graph-edges" style="margin-top:var(--sp-6)">Every edge, in full</h3>
+  <div class="callout">
+    <strong>Why the workflow is a graph and not a chain.</strong> Three queries in the plugin are graph operations being run over a linear array: <code>getStaleDownstreamPhases</code> is a REACHABILITY query, <code>getPrerequisites</code> is an IN-EDGE query, and <code>getNextLegalPhase</code> is a topological walk. An array can answer all three only while the dependency happens to be linear — and the moment an artifact depends on something LATER than itself, the array model answers <em>wrongly</em> rather than not at all. ${cite(SRC.graphWhy)}
+    <br><br>
+    Two of the ${EDGES.length} edges cross a phase boundary the sequence order alone would not suggest: <code>03.5-code-review.md</code> reads <code>03-implementation-summary.md</code> (the SAME phase number 3), and <code>05-manual-qa.md</code> reads <code>02-to-be-plan.md</code> — three nodes back. Neither is a BACKWARD edge in the graph sense: every one of the ${EDGES.length} input edges runs forward in <code>PHASE_SEQUENCE</code>, which the generator ASSERTS before it draws one, because the lane routing cannot represent an edge that runs backwards. The backwards movement in this workflow comes from the two loops, not from an input edge. ${cite(SRC.inputMap + ', ' + SRC.seq)}
+  </div>
+
+  <div class="callout">
+    <strong>How to read the chart's own marks.</strong> A <b>solid</b> arrow is a REQUIRED input. A <b>dashed</b> arrow is CONDITIONAL: the linter pushes that artifact only when it exists on disk (<code>present.has(…)</code>), so the edge is real but optional. A <b>thick</b> arrow comes off the rail under the row: that input is <em>every present artifact in the run except itself</em>, which is why phases 06 and 08 have eleven possible sources and no single required one. A <b>dotted</b> link is the SEQUENCE ORDER and carries no input edge at all — two adjacent pairs have none, and drawing them as solid arrows would claim an edge the linter does not declare. A node with a <b>dashed border</b> reads more than one upstream artifact, and every node states its own fan-in in words. ${cite(SRC.inputMap + ', ' + SRC.inputFilter + ', ' + SRC.lintWildcard06 + ', ' + SRC.lintWildcard08)}
+    <br><br><b>The chart is wider than the reading column, and it scrolls — deliberately.</b> Twelve artifact names cannot be abbreviated without losing the names the rest of this page cites, so the chart keeps its own coordinate system and scrolls sideways in one strip rather than squeezing its labels. Every arrow in it is also a row in the table below, and the table is the complete form.
+  </div>
+
+  <h3 id="graph-edges">Every edge, in full</h3>
   <div class="tablewrap">
     <table>
-      <caption>All ${EDGES.length} declared input edges, from → to. This table is the accessible equivalent of the drawing above: no edge exists in the picture that is not a row here. ${cite(SRC.inputMap)}</caption>
+      <caption>All ${EDGES.length} declared input edges, from → to. This table is the accessible equivalent of the overview chart: no edge exists in the picture that is not a row here, and no row here is missing from the picture. ${cite(SRC.inputMap)}</caption>
       <thead><tr><th>#</th><th>From</th><th>To</th><th>Kind</th><th>Source</th></tr></thead>
       <tbody>
         ${EDGES.map((e, i) => `        <tr><td><span class="seq">${i + 1}</span></td><td><code>${esc(e.from)}</code></td><td><code>${esc(e.to)}</code></td><td>${e.kind === 'required' ? 'required' : e.kind === 'conditional' ? '<span class="tag tag-shape">conditional — when present</span>' : '<span class="tag tag-shape">wildcard — every present artifact</span>'}</td><td>${cite(e.c)}</td></tr>`).join('\n')}
@@ -2306,12 +2315,10 @@ ${PHASES.map(phaseRow).join('\n')}
     </table>
   </div>
 
-  <h3 style="margin-top:var(--sp-6)">Why this is a graph and not a chain</h3>
-  <p class="note">Three queries in the plugin are graph operations being run over a linear array: <code>getStaleDownstreamPhases</code> is a REACHABILITY query, <code>getPrerequisites</code> is an IN-EDGE query, and <code>getNextLegalPhase</code> is a topological walk. An array can answer all three only while the dependency happens to be linear — and the moment an artifact depends on something LATER than itself, the array model answers <em>wrongly</em> rather than not at all. ${cite(SRC.graphWhy)}</p>
-  <p class="note">Two of the edges above cross a phase boundary that the sequence order alone would not suggest: <code>03.5-code-review.md</code> reads <code>03-implementation-summary.md</code> (the SAME phase number 3), and <code>05-manual-qa.md</code> reads <code>02-to-be-plan.md</code> — three nodes back. Neither is a backward edge in the graph sense: every edge here runs forward in <code>PHASE_SEQUENCE</code>, which the generator ASSERTS before it draws one, because the routing cannot represent an edge that runs backwards. ${cite(SRC.inputMap + ', ' + SRC.seq)}</p>
-
-  <h3 style="margin-top:var(--sp-6)">What could NOT be sourced, and what is therefore not on this page</h3>
+  <h3 style="margin-top:var(--sp-6)">What the chart deliberately does NOT draw, and what could not be sourced</h3>
   <ul class="refuse-list">
+    <li><span class="g-shape g-shape-refuse">NOT DRAWN</span><span><b>The two human gates that are not a node's own decision — <code>tdd-mode</code> and <code>qa-signoff</code> are attached to a phase, not to a separate step, so they are drawn as a marker above the phase they belong to rather than as a box of their own.</b> <code>recursive_ask</code>'s three workflow gates belong to phases 3 (<code>tdd-mode</code>) and 5 (<code>qa-signoff</code>), plus <code>gate-block</code>, which any refused transition can raise. ${cite(SRC.askGates + ', ' + SRC.askTdd + ', ' + SRC.askQa)}</span></li>
+    <li><span class="g-shape g-shape-refuse">NOT DRAWN</span><span><b>The refusal marks are the RULES, not the phases.</b> The hatched band under a node names the guard rule and the tool pattern it fires on; the phase's own refusal list is on its phase view. A phase with no mark can still be refused by the lock chain — <code>lock-order</code> and the linter are not node-local. ${cite(SRC.builtInRules + ', ' + SRC.lintGate)}</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>A per-phase PROSE description of each phase's job, for phases 01-08.</b> The repository does not contain one. <code>laterPhaseContent</code> writes the same generic Scope note for every later phase — <code>${esc('Scaffold generated by the recursive-mode plugin (R5). Fill every required section before lint.')}</code> — so the purpose lines on this page are built from the phase LABEL and its REQUIRED SECTIONS, which is what the code actually states, plus the two Phase 0 templates' own Scope notes. Nothing was written to fill the gap. ${cite(SRC.tplScopeScaffold)}</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Whether a real run's artifacts actually CITE the artifacts the map expects.</b> This page draws what the linter DEMANDS. It makes no claim about any particular run's <code>Inputs:</code> header — the check that reads it (<code>lint_effective_input_addenda</code>) reports per run, and no run was examined here. ${cite(SRC.effectiveInputs)}</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Addendum edges.</b> <code>src/phase-graph.ts</code> adds edges for addenda attached to a phase, and this drawing does not include them: they are per-run files rather than a fixed part of the workflow, so there is nothing in <code>src/</code> to fix their number. ${cite(SRC.graphAddendum)}</span></li>
@@ -2716,8 +2723,11 @@ ${PHASES.map(phaseDetail).join('\n')}
         <tr><td><b>The ${EDGES.length} directed edges</b>, re-derived from <code>getPhaseExpectedInputArtifactNames</code> — the required, the conditional (<code>candidates.push</code>) and the two wildcard filters, including that each wildcard excludes its own artifact and that <code>00-requirements.md</code> has no upstream edge at all. The fan-in rendered on every node is checked against the same derivation, so the Phase graph view fails the build if the linter's map moves.</td><td><code>src/ts-lint.ts</code> — the whole function body</td></tr>
         <tr><td><b>Every phase's purpose line.</b> Each one carries the label <code>PHASES</code> gives that artifact, and names at least two required sections that are still in <code>SECTION_MAP</code>; the two Phase 0 lines are checked to quote their template's Scope note verbatim, no line may be a closeout scope note lifted as-is, and the page asserts that the later-phase template carries ONE generic Scope note — which is why 01-08 have no per-phase prose to transcribe.</td><td><code>src/status.ts</code>, <code>src/phase-rules.ts</code>, <code>src/init-templates.ts</code>, <code>src/closeout.ts</code></td></tr>
         <tr><td><b>The learning loop:</b> the five kinds the phase-entry read covers, the two it deliberately does not, the read RECEIPT written on every phase entry, the phase-0 write gate being decided from that receipt, the phase-8 lock gate being called from <code>lockArtifact</code> and matching <code>Source-Runs</code>, the re-run being detected from an existing receipt, the ORDER of the trigger's three gates (evidence → re-run → extractor), the strict-2 comparison, both exit codes, the extractor's environment variable, and the shard path the trigger writes.</td><td><code>src/memory.ts</code>, <code>src/memory-feedback.ts</code>, <code>src/policy-globs.ts</code>, <code>src/training.ts</code>, <code>src/runtime.ts</code></td></tr>
-        <tr><td><b>Every chart's own manifest, re-read from the markup:</b> the phase graph draws exactly one run per derived edge (by label, so a missing arrow is a failure rather than a smaller picture) and one node per phase, and the learning loop draws every step and every gate that can stop one.</td><td>the generated HTML itself</td></tr>
-        <tr><td>The tab count equals 1 overview + 1 graph + 12 phases + 1 learning loop + 8 other views</td><td>the generated HTML itself</td></tr>
+        <tr><td><b>Every chart's own manifest, re-read from the markup:</b> the overview draws exactly one run per derived edge (by label, so a missing arrow is a failure rather than a smaller picture) and one node per phase, and the learning loop draws every step and every gate that can stop one.</td><td>the generated HTML itself</td></tr>
+        <tr><td><b>The merge itself, asserted in the negative:</b> there is NO second <code>phase-graph</code> chart and NO <code>Phase graph</code> tab any more, and all twelve phase detail views still exist — so the sixteen edges cannot drift back onto a tab of their own while the overview keeps a picture of its own, and the merge cannot have removed reference material.</td><td>the generated HTML itself</td></tr>
+        <tr><td><b>The overview IS the graph — one check per interaction type, each counted from the drawing's own manifest:</b> twelve nodes, all sixteen edges as runs, five dashed fan-in nodes, three human-decision markers with their diamonds, twelve refusal bands, the wildcard rail (with the assertion that it spans the twelve-node row) and its two thick stubs, the four dotted sequence-order links AND the seven spine arrows (checked against each other, so a dotted link cannot be drawn over a pair that has a real input edge), the two back-edge arcs with their arrowheads on the earlier node, and the cross-run return.</td><td>the manifest the chart ships, against expectations written out in <code>check-workflow-map.mjs</code> rather than imported from this generator</td></tr>
+        <tr><td><b>The prose is gone and the facts are not.</b> No callout sits above the overview chart, the prologue is a heading plus at most two short paragraphs, the moved caveats are reachable in one line, and the strings the Notes view is supposed to carry are all still on the page.</td><td>the generated HTML itself</td></tr>
+        <tr><td>The tab count equals 1 overview + 12 phases + 1 learning loop + 1 Notes view + 7 other views</td><td>the generated HTML itself</td></tr>
       </tbody>
     </table>
   </div>
@@ -2741,7 +2751,8 @@ ${PHASES.map(phaseDetail).join('\n')}
 
   <h3 style="margin-top:var(--sp-6)">NOT verified — stated rather than filled in</h3>
   <ul class="refuse-list">
-    <li><span class="g-shape g-shape-refuse">MEASURED ELSEWHERE</span><span><b>The rendered pixels — measured in a separate headless pass, NOT by this generator.</b> Three charts now ship, and each one was rendered in headless Chromium (the Playwright build on this machine) at <b>eight viewport widths</b> — 360, 480, 600, 768, 820, 1024, 1440 and 1920 px — with every panel un-hidden, and the glyph boxes were compared pairwise: <b>0 text-on-text overlaps</b> in all three charts and <b>0</b> across the whole page at every width (text-NODE rects via a DOM Range, so a <code>&lt;code&gt;</code> inside a paragraph is not miscounted as an overlap with its own parent), <b>0</b> labels crossing a card they do not belong to, every chart rendering at <b>scale 1.0000</b> (never rescaled by its box), and no horizontal page overflow at any width. The worst measured label overhang was <b>−2.7 px, −3.2 px and −4.4 px</b> (overview, phase graph, learning loop) — negative, i.e. every label fits its reserved box with that much room, because the real monospace advance is <b>0.560–0.562 em</b> against the declared 0.602. ⚠ THE HARNESS FOR THAT PASS IS NOT PART OF THIS REPOSITORY and <code>--verify</code> does not re-run it, so treat these as a dated measurement rather than a standing check — which is why the generator and the two checkers carry the arithmetic invariants instead.</span></li>
+    <li><span class="g-shape g-shape-refuse">MEASURED ELSEWHERE</span><span><b>The rendered pixels — measured in a separate headless pass, NOT by this generator.</b> Two charts now ship, and both were rendered in headless Chromium (the Playwright build on this machine) at <b>eight viewport widths</b> — 360, 480, 600, 768, 820, 1024, 1440 and 1920 px — with every panel un-hidden, and the glyph boxes were compared pairwise: <b>0 text-on-text overlaps</b> in both charts and across the whole page at every width (text-NODE rects via a DOM Range, so a <code>&lt;code&gt;</code> inside a paragraph is not miscounted as an overlap with its own parent), <b>0</b> labels crossing a card they do not belong to, every chart rendering at <b>scale 1.0000</b> (never rescaled by its box, despite being 2.1x wider than the reading column), and <b>no horizontal page overflow at any width</b> (the page measures 15 px NARROWER than the viewport, from the scrollbar). The worst measured label overhang was <b>+0.04 px and 0.00 px</b> (overview, learning loop) — measured against the reserved box with the real glyph advance of <b>0.5493 em</b> against the declared 0.602. ⚠ THE HARNESS FOR THIS PASS IS NOT PART OF THIS REPOSITORY (it is a throwaway CDP script, kept out of the tree) and <code>--verify</code> does not re-run it, so treat these as a dated measurement rather than a standing check — which is why the generator and the two checkers carry the arithmetic invariants instead.</span></li>
+    <li><span class="g-shape g-shape-refuse">MEASURED, AND NOT WHAT YOU MIGHT EXPECT</span><span><b>The two back-edge arrowheads are 8x5 units, and at the chart's own scale that is 8x5 pixels.</b> They are verified as GEOMETRY — the manifest places each one on its target node's bottom edge, one column gap to the left, and <code>check-workflow-map.mjs</code> fails if either moves — but a reader looking at the whole chart sees the violet arcs and their labels rather than the two arrowheads. That is a fact about the size of an arrowhead on a 2854-unit canvas, not a defect, and it is written down here rather than discovered by the owner.</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Keyboard and screen-reader behaviour.</b> The tablist's roles, <code>aria-selected</code>, roving tabindex and <code>aria-controls</code> targets are asserted against the markup, and the arrow-key handler is present in the source — but no assistive technology ran this page, so "the arrow keys work" and "the tab order reads correctly" are NOT demonstrated here.</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Per-phase "inputs" beyond the artifact list.</b> The scaffold writes a generic <code>- (list upstream artifacts re-read for this phase)</code> placeholder for every later phase, so there is no per-phase PROSE list of inputs in the code to transcribe. What IS in the code is <code>getPhaseExpectedInputArtifactNames</code>, and that is what the input column shows — plus the file-level sources a phase names (git state, DECISIONS.md, STATE.md, the memory plane). ${cite(SRC.tplLater + ', ' + SRC.inputMap)}</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Which hooks fire in a given real session.</b> The page states which seam each listener attaches to and what it does; it does not claim a particular live run took a particular path, and it makes no claim about run outcomes.</span></li>
@@ -2872,6 +2883,31 @@ node scripts/gen-workflow-map.mjs --out elsewhere.html</pre>
        coordinates without recording them, because an unrecorded coordinate is exactly
        how the four defects above got in.
    ========================================================================== */
+
+/* ==========================================================================
+   WHERE A GUARD RULE CAN STOP A PHASE — the second shape, per phase
+   ==========================================================================
+
+   The refusal surface of this workflow is not one thing per phase: the four built-in guard rules fire
+   on tool-name patterns, and the phase baselines fire on the phase NUMBER. A rule that names phases
+   is drawn as a band under each of them; a rule that names a tool pattern alone (`recursive_lock*`,
+   the write-tool family) is drawn under EVERY phase, because there is no phase where a lock or a
+   write cannot be attempted. That is why the picture shows a band under all twelve, and why the list
+   below is short: what varies per phase is WHICH named rule bites there.
+
+   ⚠ WHY THIS IS NOT THE GUARDS TABLE. The table says what each rule says. This says WHERE it bites,
+   as a position on the chart — and the two are checked against each other in `check-workflow-map`,
+   where the per-rule zone sums have to match what the page renders. */
+const REFUSAL_MARKS = [
+  { rule: 'lock-order', short: 'lock order', nodes: PHASES.map((p) => p.file) },
+  { rule: 'locked-write', short: 'locked write', nodes: PHASES.map((p) => p.file) },
+  { rule: 'phase-order', short: 'phase order', nodes: PHASES.map((p) => p.file) },
+  { rule: 'memory-read', short: 'memory read', nodes: ['00-requirements.md'] },
+  { rule: 'tdd-evidence', short: 'tdd-evidence', nodes: ['03-implementation-summary.md'] },
+  { rule: 'phase 1/2 baseline', short: 'no memory plane', nodes: ['01-as-is.md', '01.5-root-cause.md', '02-to-be-plan.md'] },
+  { rule: 'phase 6/7 baseline', short: 'frozen', nodes: ['06-decisions-update.md', '07-state-update.md'] },
+  { rule: 'phase 6/7/8 baseline', short: 'frozen + memory', nodes: ['08-memory-impact.md'] },
+]
 
 /* ==========================================================================
    THE CHARTS — LAYOUT BY ARITHMETIC, NOT BY EYE
@@ -3015,6 +3051,15 @@ function makeEngine() {
         // A rule or an arrowhead sharing an index with the rule it joins: the arc's
         // corner. Declared with the neighbour as the container, so the exemption is a
         // fact in the manifest and not a hole in the check.
+        //
+        // ⚠ THIS APPLIES TO INK AS WELL AS RULES, because an arrowhead is INK and it has
+        // to touch the line it terminates. An ink box is a RECTANGLE around a triangle, so
+        // its corners reach past the glyph: an arrowhead at the end of a horizontal run
+        // therefore overlaps that run's reserved box by a few units even though the drawn
+        // triangle only MEETS it at one point. `check-workflow-map.mjs` already accepts
+        // exactly this relation (`meets`, within one stroke width of 5 units) and refuses
+        // any other declared containment, so the exemption cannot hide a real defect — it
+        // is the same two rules the checker re-derives from the manifest. */
         contains.push([boxes.length, i])
         continue
       }
@@ -3127,17 +3172,34 @@ function makeEngine() {
 
 /**
  * Draw one chart through the engine and wrap it in its own scrollable box. `draw(api)`
- * returns `{ width, height }`; the manifest is built from the boxes the engine actually
- * reserved, so what the checker re-reads is what was emitted.
+ * returns `{ width, height }`, or `{ x, y, width, height }` when the chart's own layout
+ * extends ABOVE and LEFT of its node row — which the merged overview does, because the
+ * lanes that carry the backwards and cross-run edges are drawn above and below it. In
+ * that case the viewBox carries the origin, so the emitted SVG still begins at (0,0)
+ * while the manifest keeps absolute coordinates the checker can compare directly.
+ * The manifest is built from the boxes the engine actually reserved, so what the
+ * checker re-reads is what was emitted.
  */
 function chart(spec) {
   const api = makeEngine()
   const size = spec.draw(api)
+  const ox = size.x === undefined ? 0 : size.x
+  const oy = size.y === undefined ? 0 : size.y
+  /* NOTHING IS DRAWN OUTSIDE THE FRAME. The viewBox is derived from what was reserved
+     rather than from a chosen number, and this assertion is what makes that true: a lane
+     that ran past the top of the frame would be CLIPPED by the svg, silently — the defect
+     class this whole engine exists to refuse. */
+  for (const b of api.boxes) {
+    if (b.x < ox - 3 || b.y < oy - 3 || b.x + b.w > ox + size.width + 3 || b.y + b.h > oy + size.height + 3) {
+      throw new Error('chart ' + spec.id + ': ' + b.kind + ' "' + b.label + '" falls outside the frame '
+        + JSON.stringify([ox, oy, size.width, size.height]) + ' at ' + JSON.stringify([b.x, b.y, b.w, b.h]))
+    }
+  }
   const manifest = {
     v: 1,
     charW: CHAR_W,
     lineHeight: TEXT_LH,
-    viewBox: [0, 0, size.width, size.height],
+    viewBox: [ox, oy, size.width, size.height],
     fit: api.boxes.filter((b) => b.kind === 'text').map((b) => [b.label, b.x, b.y, b.w, b.h]),
     boxes: api.boxes.map((b) => [b.kind, b.x, b.y, b.w, b.h, b.label]),
     // The declared overlaps, by index pair: [inside, container]. A box that CONTAINS
@@ -3151,331 +3213,409 @@ function chart(spec) {
     height: size.height,
     markup: `
   <div class="diagram" id="dg-${spec.id}" data-diagram="${spec.id}" role="img" aria-label="${esc(spec.label)}" style="--dg-w:${size.width}px" data-layout="${esc(JSON.stringify(manifest)).replace(/\n/g, ' ')}">
-    <svg viewBox="0 0 ${size.width} ${size.height}" width="${size.width}" height="${size.height}" preserveAspectRatio="xMinYMin meet">
+    <svg viewBox="${ox} ${oy} ${size.width} ${size.height}" width="${size.width}" height="${size.height}" preserveAspectRatio="xMinYMin meet">
 ${api.svgParts.map((s) => '      ' + s).join('\n')}
     </svg>
   </div>`,
   }
 }
 
-/* ---- CHART 1: the overview ------------------------------------------------ */
-
-function drawOverview(api) {
-  const { GUTTER, PAD, CLS, FS, tw, lh, round, card, textEl, rule, ruleH, ruleV, head, para } = api
-
-  /* ---- BAND 1: the title ----------------------------------------------- */
-  let y = 0
-  textEl(GUTTER, y, CLS.a, 'THE WORKFLOW, CHARTED — every band below reserves its space before it is drawn')
-  y += lh(FS[CLS.a]) + 12
-
-  /* ---- BAND 2: three columns, three x-ranges, side by side ---------------
-     The three used to share one x-range AND one y-range. Now each owns a column
-     and the sequence strip is the only thing that can be wide. */
-  const midTop = y
-  let midBottom = y
-
-  /* column 1 — the phase-0 gate. The card ENDS WHERE THE NEXT BAND STARTS: this
-     card used to run to y=84 with the strip heading drawn across it at y=88. */
-  const col1 = GUTTER
-  const cardW = Math.ceil(Math.max(
-    tw('recursive_ask gate=run-start', FS[CLS.h]),
-    tw('labels:  Start run  |  Hold', FS[CLS.s]),
-  ) + 2 * PAD + 4)
-  const cardH = 46
-  const gateCard = card(col1, midTop, cardW, cardH, 'dg-box dg-box-human', 'phase-0 gate card')
-  textEl(col1 + PAD, midTop + 7, CLS.h, 'recursive_ask gate=run-start', gateCard)
-  textEl(col1 + PAD, midTop + 7 + lh(FS[CLS.h]) + 2, CLS.s, 'labels:  Start run  |  Hold', gateCard)
-  midBottom = Math.max(midBottom, para(col1, midTop + cardH + 8, cardW, CLS.s,
-    'refuses to ASK until 00-requirements.md is filled (RM4404). No approval means syncRunGoal creates no goal, so nothing runs.'))
-
-  /* column 2 — the twelve artifacts, as ONE strip. It is laid out at its natural
-     width and the WRAPPER scrolls (see `.diagram`), exactly as the tab strip does,
-     so a label is never squeezed and two labels are never in the same box.
-     NODE_W IS DERIVED FROM THE LONGEST LABEL, never chosen: 03-implementation-summary
-     is 25 characters and needs 165 units at the declared metric, so a hand-picked
-     126-unit node — which is what the old chart had, at 62 — would have clipped it
-     again. The engine refuses the build rather than let that through. */
-  const stripLabels = PHASES.map((p) => p.file.replace(/\.md$/, ''))
-  const NODE_GAP = 6
-  const NODE_W = Math.ceil(Math.max(...stripLabels.map((s) => tw(s, FS[CLS.t]))) + 2 * PAD + 4)
-  /* ⚠ THREE LINES PER NODE, AND THE THIRD IS THE FAN-IN. The owner's report was that the
-     graphic lists phases "without showing how they are linked"; the strip is the readable
-     SPINE, so each node states how many upstream artifacts it takes — `fan-in 1` for a
-     chain link, `fan-in 3` for a phase that joins three, and `no upstream artifact` for
-     the root. The full edge set is drawn, arrow by arrow, on the Phase graph view. */
-  const NODE_H = Math.round(7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1 + lh(FS[CLS.s]) + 7)
-  const STRIP_PAD = 10
-  const stripW = PHASES.length * NODE_W + (PHASES.length - 1) * NODE_GAP + 2 * STRIP_PAD
-  const stripH = 18 + lh(FS[CLS.a]) + 10 + NODE_H
-  const stripX = col1 + cardW + 44
-  const strip = card(stripX, midTop, stripW, stripH, 'dg-box-strip', 'the twelve-artifact strip')
-  textEl(stripX + STRIP_PAD, midTop + 8, CLS.a, 'THE TWELVE PHASE ARTIFACTS — PHASE_SEQUENCE, index 0 → 11', strip)
-  const nodesTop = midTop + 18 + lh(FS[CLS.a]) + 10
-  PHASES.forEach((p, i) => {
-    const nx = stripX + STRIP_PAD + i * (NODE_W + NODE_GAP)
-    const node = card(nx, nodesTop, NODE_W, NODE_H, p.human ? 'dg-box dg-box-human' : 'dg-box', 'node ' + p.file)
-    // The FULL artifact name minus its extension: every one of the twelve fits its
-    // node, and the name is the string the rest of the page cites. (The old chart
-    // sliced this to nine characters, which is where "00-requir" came from.)
-    textEl(nx + PAD, nodesTop + 7, CLS.t, stripLabels[i], node)
-    textEl(nx + PAD, nodesTop + 7 + lh(FS[CLS.t]) + 1, CLS.s, 'phase ' + p.phaseN, node)
-    textEl(nx + PAD, nodesTop + 7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1, CLS.s, fanInText(p.file), node)
-  })
-  midBottom = Math.max(midBottom, nodesTop + NODE_H)
-
-  /* column 3 — the hook channel, in its OWN column, right of the strip. It used to
-     start at x=668 while the strip ran to x=900: the grey panel sliced the amber
-     one, and the strip's last four labels were painted inside these cards. */
-  const col3 = stripX + stripW + 44
-  textEl(col3, midTop, CLS.a, 'HOOK CHANNEL — pre_trigger (gating)')
-  const hookW = Math.ceil(Math.max(
-    tw('phase-order | locked | lock-order | tdd', FS[CLS.s]),
-    tw('denies exit_plan_mode while a phase waits', FS[CLS.s]),
-    tw('exit-plan-mode-gate   prio 5', FS[CLS.t]),
-  ) + 2 * PAD + 4)
-  const hookH = 44
-  let hy = midTop + lh(FS[CLS.a]) + 6
-  const hook1 = card(col3, hy, hookW, hookH, 'dg-box', 'hook: exit-plan-mode-gate')
-  textEl(col3 + PAD, hy + 7, CLS.t, 'exit-plan-mode-gate   prio 5', hook1)
-  textEl(col3 + PAD, hy + 7 + lh(FS[CLS.t]) + 1, CLS.s, 'denies exit_plan_mode while a phase waits', hook1)
-  hy += hookH + 8
-  const hook2 = card(col3, hy, hookW, hookH, 'dg-box', 'hook: builtin-tool-guard')
-  textEl(col3 + PAD, hy + 7, CLS.t, 'builtin-tool-guard   prio 0', hook2)
-  textEl(col3 + PAD, hy + 7 + lh(FS[CLS.t]) + 1, CLS.s, 'phase-order | locked | lock-order | tdd', hook2)
-  hy += hookH + 10
-  midBottom = Math.max(midBottom, para(col3, hy, hookW, CLS.s,
-    'The first decisive hook short-circuits. Observe-only points are downgraded, not obeyed.'))
-
-  y = midBottom + 22
-
-  /* ---- BAND 3: the lock chain, one row, then its note ------------------ */
-  textEl(GUTTER, y, CLS.a, 'recursive_lock — the chain, in checks order')
-  y += lh(FS[CLS.a]) + 8
-  const LOCK = [
-    ['1 lock order', false], ['2 quiescence', false], ['3 phase-8 memory', true],
-    ['4 lint standard', false], ['5 hash + receipt', false],
-  ]
-  const lockW = 128, lockH = 32, lockGap = 8
-  LOCK.forEach(([label, refuse], i) => {
-    const lx = GUTTER + i * (lockW + lockGap)
-    const step = card(lx, y, lockW, lockH, refuse ? 'dg-box dg-box-refuse' : 'dg-box', 'lock step ' + label)
-    textEl(lx + PAD, y + 9, CLS.s, label, step)
-    if (i > 0) ruleH(lx - lockGap, y + lockH / 2, lockGap, 'dg-line-acc', 'lock link ' + i)
-  })
-  y += lockH + 10
-  y = para(GUTTER, y, 460, CLS.s,
-    'Ordering is FIRST and the linter is LAST: a run that is both out of order and below standard reports ORDERING.')
-
-  /* ---- BAND 4: the backward edge. The arc owns the GUTTER; its label and the
-     prose own reserved rows to the right of it. They are never in the same band —
-     which is exactly what the old chart did, printing REVISE across a sentence. */
-  y += 22
-  const backTop = y
-  textEl(GUTTER, backTop, CLS.s, 'BACKWARD EDGE — a REVISE verdict or a reopen sends work BACK, not forward')
-  let by = backTop + lh(FS[CLS.s]) + 6
-  by = para(GUTTER, by, 560, CLS.s,
-    'A REVISE verdict or a reopen sends work back to repair: REVISE returns the follow-up to the SAME child, and a reopen invalidates the downstream receipts.')
-  by = para(GUTTER, by, 560, CLS.s,
-    'nextLegalPhase returns null — NOT the next node — when the first unlocked node has an unlocked prerequisite. With a back-edge, "continue" and "blocked" are different answers, and only null is correct.')
-  const arcTop = backTop + 4
-  const arcBottom = by - 6
-  const riser = ruleV(14, arcTop + 8, arcBottom - arcTop - 8, 'dg-line-loop', 'backward-edge riser')
-  // The run starts AT the riser (same corner, same path) — the one place two rules may
-  // touch by their 2.5-unit stroke padding, and it is declared here rather than excused
-  // by widening the tolerance: the arc is still made of reserved boxes.
-  ruleH(14, arcBottom, GUTTER - 20, 'dg-line-loop', 'backward-edge run', riser)
-  head([[14, arcTop], [10, arcTop + 8], [18, arcTop + 8]], 'dg-head-loop', 'backward-edge arrowhead', riser)
-  y = by + 22
-
-  /* ---- BAND 5: the fan-in line — where the chain becomes a graph ------- */
-  const multi = PHASES.filter((p) => sourcesOf(p.file) > 1)
-  textEl(GUTTER, y, CLS.a, 'WHERE IT STOPS BEING A CHAIN — the phases that read more than one upstream artifact')
-  y += lh(FS[CLS.a]) + 6
-  y = para(GUTTER, y, 760, CLS.s,
-    multi.map((p) => p.file.replace(/\.md$/, '') + ' ← ' + sourcesOf(p.file)).join('   ·   ')
-    + '   — 16 directed edges in all: 12 required, 2 conditional ("when present"), 2 wildcard.')
-  y = para(GUTTER, y, 760, CLS.s,
-    'Arrow by arrow, with the conditional edges drawn dashed, on the PHASE GRAPH view. The cross-run memory cycle is its own view: THE LEARNING LOOP.')
-
-  /* ---- BAND 6: the footer legend -------------------------------------- */
-  y += 12
-  textEl(GUTTER, y, CLS.s, 'DECISION = amber box, filled rail dot  ·  REFUSAL = hatched  ·  everything else: AUTO')
-  y += lh(FS[CLS.s]) + 6
-  textEl(GUTTER, y, CLS.s, 'Every element above reserved its box first: the generator REFUSES to emit the chart when two of them intersect.')
-  y += lh(FS[CLS.s])
-
-  const W = Math.ceil(Math.max(
-    col3 + hookW + 24,
-    stripX + stripW + 24,
-    GUTTER + 760 + 24,
-  ))
-  const H = Math.ceil(y + 16)
-  return { width: W, height: H }
-}
-
-/* ---- CHART 2: the phase graph — every edge, drawn ------------------------- */
+/* ---- CHART 1: the overview — THE WHOLE GRAPH, ON THE VIEW A READER OPENS ---- */
 
 /**
- * ORDER THE LANE EDGES SO THAT NO ARROW CROSSES ANOTHER.
+ * MERGED, NOT SIDE BY SIDE. This chart used to be the twelve nodes in a row and nothing
+ * else: the ${EDGES.length} directed edges lived on a second tab, and three paragraphs of
+ * prose sat above the picture explaining what the picture was not showing. The owner read
+ * that three times and said the obvious thing — adding more text above a row of boxes is
+ * not a diagram of a workflow. So the overview and the phase graph are now ONE chart, and
+ * it is the primary content of the view a reader lands on:
  *
- * An edge routed in a lane is drawn as: a stub UP from its source node's top edge, a
- * horizontal run in its own lane, and a stub DOWN into its target node's top edge. Two
- * such edges CROSS exactly when one of the upper edge's stubs lands inside the lower
- * edge's run, and that happens precisely when one edge's [source, target] interval
- * interleaves the other's. So the sufficient condition used here is:
+ *   · the twelve nodes in PHASE_SEQUENCE order (the only linear thing left);
+ *   · every one of the ${EDGES.length} directed edges drawn — 11 required, 2 conditional
+ *     ("when present", dashed), 2 wildcard (the rail, thick), 1 that carries no edge and
+ *     is drawn as the dotted SEQUENCE-ORDER link so the difference is visible;
+ *   · the fan-in of each node in words, and a dashed BORDER on the five nodes that read
+ *     more than one upstream artifact — the shape that distinguishes a graph from a chain;
+ *   · a human-decision marker above every node where a person must answer (3 of them);
+ *   · a refusal band under every node a guard rule can refuse (8 guard rules, 9 nodes);
+ *   · the BACKWARD edges as two violet arcs that leave their target's left edge and
+ *     re-enter a node to its LEFT — so "backwards" is a direction on the canvas;
+ *   · the CROSS-RUN loop as the rightmost node's output returning from below into the
+ *     NEXT run's phase entry, in its own band, with the same violet arc language.
  *
- *     U may sit above L  ⟺  U starts at or after L ends (to the right of it)
- *                          OR  U contains L (starts at or before it and ends at or after it)
- *
- * — and `bandOrder` below SEARCHES for an order that satisfies it for every pair, at two
- * depths: lanes above the node row, and lanes below it (an interleaving that cannot be
- * ordered inside one band is moved to the other, and the two bands never meet). If three
- * bands were ever needed the generator THROWS rather than drawing a crossing; and the
- * engine's own intersection check is the backstop, so a mistake here fails the build
- * instead of shipping a tangle.
+ * WHAT IS *NOT* HERE. No paragraph explaining the picture. The facts the prose carried
+ * moved to the Notes view and the phase/original views they belong to; the rule applied
+ * is: if a sentence explains what the picture should show, the picture is wrong.
  */
-function graphBands(edges) {
-  const above = (u, l) => (u.s >= l.t) || (u.s <= l.s && u.t >= l.t)
-  const comparable = (a, b) => above(a, b) || above(b, a)
-  // 1. greedy band assignment: the first band in which this edge is COMPARABLE with
-  //    every edge already there. Two bands exist (above and below the row).
-  const bands = [[], []]
-  for (const e of edges) {
-    const fit = bands.findIndex((band) => band.every((o) => comparable(o, e)))
-    if (fit < 0) throw new Error('phase graph: the edge set needs a third routing band, which is not drawn')
-    bands[fit].push(e)
-  }
-  // 2. inside a band, order bottom → top by repeatedly taking an edge that every
-  //    remaining edge may sit above.
-  return bands.map((band) => {
-    const left = [...band]
-    const order = []
-    while (left.length > 0) {
-      const at = left.findIndex((x) => left.every((u) => u === x || above(u, x)))
-      if (at < 0) throw new Error('phase graph: a routing band could not be ordered without a crossing')
-      order.push(left[at])
-      left.splice(at, 1)
-    }
-    // Guard against the case the greedy cannot see: the bottom-first rule is necessary
-    // but not sufficient on its own, so every pair is checked once more, in the order
-    // the lanes will be drawn.
-    for (let i = 0; i < order.length; i++) {
-      for (let j = i + 1; j < order.length; j++) {
-        if (!above(order[j], order[i])) {
-          throw new Error('phase graph: lane order would cross — ' + order[i].from + ' and ' + order[j].from)
-        }
-      }
-    }
-    return order
-  })
-}
+function drawOverview(api) {
+  const { PAD, LINE_PAD, CLS, FS, tw, lh, round, card, textEl, rule, ruleH, ruleV, head, block, blockPara } = api
 
-function drawGraph(api) {
-  const { GUTTER, PAD, LINE_PAD, CLS, FS, tw, lh, round, card, textEl, rule, ruleH, ruleV, head, para, block } = api
-
-  const idxOf = Object.fromEntries(PHASES.map((p, i) => [p.file, i]))
+  /* ---- geometry ---------------------------------------------------------- */
+  const GUTTER = 70          // holds the two backward risers (x=16, x=32) and the cross-run return (x=20)
+  const NODE_GAP = 48        // holds the dotted sequence link
+  const HEAD_L = 8
+  const SEQ_HALF = 4
   const short = (file) => file.replace(/\.md$/, '')
+  const idxOf = Object.fromEntries(PHASES.map((p, i) => [p.file, i]))
+
   const NODE_W = Math.ceil(Math.max(...PHASES.map((p) => tw(short(p.file), FS[CLS.t]))) + 2 * PAD + 4)
   const NODE_H = Math.round(7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1 + lh(FS[CLS.s]) + 7)
-  const COL_GAP = 48          // holds the spine arrow: 8 units of air on each side of it
-  const PITCH = NODE_W + COL_GAP
+  const PITCH = NODE_W + NODE_GAP
   const nodeX = (i) => round(GUTTER + i * PITCH)
-  const rowW = PHASES.length * NODE_W + (PHASES.length - 1) * COL_GAP
+  const rowW = PHASES.length * NODE_W + (PHASES.length - 1) * NODE_GAP
 
-  /* ---- classify the edges ------------------------------------------------- */
-  const spine = []   // adjacent in PHASE_SEQUENCE: drawn as a short arrow in the gap
-  const lanes = []   // everything else with a concrete source: routed in a lane
-  const wild = []    // "every present artifact except itself": drawn as a rail
+  /* ---- the edges, classified -------------------------------------------- */
+  const edgesOf = (file) => EDGES.filter((e) => e.to === file)
+  const spine = []
+  const lanes = []
+  const wild = []
+  const seqOnly = []
   for (const edge of EDGES) {
     if (edge.kind === 'wildcard') { wild.push(edge); continue }
-    const s = idxOf[edge.from]
-    const t = idxOf[edge.to]
-    if (s === undefined) throw new Error('phase graph: unknown edge source ' + edge.from)
-    // The routing assumes every edge runs LEFT TO RIGHT in PHASE_SEQUENCE order. It is
-    // asserted rather than assumed: an edge that ran backwards would put its run under
-    // its own source node, which is the one shape this layout cannot draw.
+    const s = idxOf[edge.from], t = idxOf[edge.to]
+    if (s === undefined) throw new Error('overview chart: unknown edge source ' + edge.from)
+    // The routing assumes every edge runs LEFT TO RIGHT in PHASE_SEQUENCE. It is asserted
+    // rather than assumed: an edge that ran backwards would put its run under its own
+    // source node, which is the one shape this layout cannot draw. The BACKWARD edges of
+    // the workflow are not input edges at all — they are routed separately, below.
     if (!(s < t)) {
-      throw new Error('phase graph: edge ' + edge.from + ' -> ' + edge.to + ' does not run forward in PHASE_SEQUENCE')
+      throw new Error('overview chart: edge ' + edge.from + ' -> ' + edge.to + ' does not run forward in PHASE_SEQUENCE')
     }
     if (t - s === 1) spine.push(edge)
     else lanes.push({ edge, s, t })
   }
+  for (let i = 0; i + 1 < PHASES.length; i++) {
+    if (!spine.some((e) => idxOf[e.from] === i)) seqOnly.push(i)
+  }
+  /* THE PAIRS THAT ARE ADJACENT AND NOT CONNECTED. Four of them, measured from the derived
+     edge set rather than written down: 00-worktree→01-as-is, 04-test-summary→05-manual-qa,
+     05-manual-qa→06-decisions-update and 07-state-update→08-memory-impact. They are exactly
+     the places where the SEQUENCE ORDER and the DEPENDENCY GRAPH disagree, which is the
+     whole reason this page draws edges at all — so the count is asserted in both directions
+     (no pair is missed, no dotted link is drawn over a pair that does have an edge). */
+  if (seqOnly.length !== 4) {
+    throw new Error('overview chart: expected exactly 4 adjacent pairs with no input edge, got ' + seqOnly.length
+      + ' — spine: ' + spine.map((e) => e.from + '->' + e.to).join(', '))
+  }
 
   const [upper, lower] = graphBands(lanes)
+  const HINGE = 17 // keep in step with graphBands' caller below: lanes it may share a band with
+  void HINGE
 
-  /* ---- band geometry ------------------------------------------------------ */
-  const LANE_STEP = 22        // one lane: a 5-unit rule and a 13.3-unit label, plus air
-  const LANE_DROP = 16        // from a node edge to the nearest lane
+  /* ---- vertical bands, top to bottom ------------------------------------
+     ⚠ THE LANE BANDS AND THE NODE BAND DO NOT OVERLAP, and that is arithmetic rather than
+     taste. The first lane on either side sits LANE_GAP clear of the node row's OWN edge, and
+     the distance is measured from that edge — the first version measured the lower band from
+     the row's TOP, which put every lower lane's run inside the nodes and made every lane
+     label land on the node to its left. The engine caught it twice (a run 6x5 units inside
+     its own source node, then a label 40x6.8 units inside the node beside it); the fix is to
+     measure from the edge the lane is on, which is what makes the two bands disjoint by
+     construction rather than by luck.
+     LANE_GAP is 22 against the spine's 16-unit gap: the two are deliberately unequal, so a lane's
+     label row can never line up with a spine arrowhead. */
+  const LANE_GAP = 22
+  const MARK_H = Math.round(lh(FS[CLS.s]) + 2)
+  const MARK_BOT = -18
+  const MARK_TOP = round(MARK_BOT - MARK_H)
+  const LANE_STEP = 22
   const LABEL_H = lh(FS[CLS.s])
-  const upperBase = LANE_DROP
-  const laneY = (band, k) => (band === 'upper'
-    ? round(-(upperBase + k * LANE_STEP))
-    : round(NODE_H + upperBase + k * LANE_STEP))
-  const upperH = upper.length === 0 ? 0 : LANE_DROP + (upper.length - 1) * LANE_STEP + 5 + LABEL_H + 8
-  const lowerH = lower.length === 0 ? 0 : LANE_DROP + (lower.length - 1) * LANE_STEP + 5 + LABEL_H + 8
+  const upperTop = upper.length === 0 ? 0 : round(-LANE_GAP - (upper.length - 1) * LANE_STEP - LANE_GAP - LABEL_H)
+  const TITLE_H = lh(FS[CLS.a]) + 14
+  const titleTop = round(upperTop - TITLE_H)
 
-  const titleH = lh(FS[CLS.a]) + 12
-  let y = titleH
-  const legendH = lh(FS[CLS.s]) * 3 + 24
-  const railH = Math.round(7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1 + lh(FS[CLS.s]) + 7)
-  y += upperH
+  let y = -titleTop
   const rowTop = round(y)
   const rowBottom = round(rowTop + NODE_H)
-  y = rowBottom + lowerH
-  const railTop = round(y + 14)
+  const laneY = (band, k) => (band === 'upper'
+    ? round(rowTop - LANE_GAP - k * LANE_STEP)
+    : round(rowBottom + LANE_GAP + k * LANE_STEP))
+
+  /* ---- the bands below the node row, in the order they are drawn ---------
+     ⚠ THE VERTICAL ORDER OF THE FOUR BANDS BELOW THE ROW IS FORCED, NOT CHOSEN, and each step of it
+     was found by a refusal from the engine rather than by taste:
+       1. the LOWER LANES first, because their labels occupy a band of their own;
+       2. the WILDCARD RAIL next, because a rail placed under the lanes' labels paints over them;
+       3. the REFUSAL BANDS next, because they are the node's own mark and belong near it;
+       4. the BACK-EDGE SHELVES last, under all three.
+     A back edge's drop therefore passes through the rail's band, which is why the rail is reserved
+     BEFORE the arcs and the drop is declared as the rail's own contained ink. */
+  const laneLowest = lower.length === 0 ? rowBottom : laneY('lower', lower.length - 1)
+  const railTop = round(laneLowest + LANE_GAP + LINE_PAD + LABEL_H + 6)
+  const railH = NODE_H
   const railBottom = round(railTop + railH)
-  y = railBottom + 22
-  const legendTop = round(y)
-  y += legendH
+  const railX = nodeX(0)
+  /* The refusal band: the node's second shape, one text row high, right under the row. */
+  const refusalH = Math.round(2 * PAD + LABEL_H)
+  const refusalTop = round(railBottom + 10)
+  const BACK_GAP = 26
+  const b1Y = round(refusalTop + refusalH + BACK_GAP)    // backward edge 1: reopen
+  const b2Y = round(b1Y + 2 * LINE_PAD + LABEL_H + 8)    // backward edge 2: REVISE
+  const crossTop = round(b2Y + 2 * LINE_PAD + LABEL_H + 14)
 
-  /* ---- the nodes ---------------------------------------------------------- */
-  const multiSource = PHASES.filter((p) => fanInOf(p.file) > 1)
-  PHASES.forEach((p, i) => {
-    const x = nodeX(i)
-    const klass = fanInOf(p.file) > 1 ? 'dg-box dg-box-fan' : 'dg-box'
-    const node = card(x, rowTop, NODE_W, NODE_H, klass, 'node ' + p.file)
-    textEl(x + PAD, rowTop + 7, CLS.t, short(p.file), node)
-    const purpose = PURPOSES[p.file]
-    textEl(x + PAD, rowTop + 7 + lh(FS[CLS.t]) + 1, CLS.s, 'phase ' + p.phaseN + ' — ' + purpose.label, node)
-    textEl(x + PAD, rowTop + 7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1, CLS.s, fanInText(p.file), node)
-  })
-
-  /* ---- the spine: one arrow per adjacent pair ----------------------------- */
-  spine.forEach((edge) => {
+  /* SPINE EDGE — an adjacent pair that IS an input: a solid arrow in the gap, exactly the
+     width the gap has, so it can collide with nothing. */
+  /* ⚠ TWO GAPS CARRY NO SPINE ARROW, AND THAT IS A DECISION, NOT AN OMISSION. A back edge
+     re-enters its target node THROUGH the gap before that node, at the row's own centre — the
+     one line available in a 48-unit gap that the spine arrowhead also occupies. Both arrows
+     claim the same few units: the engine refused it (a 4x5-unit intersection between the back
+     edge's arrowhead and the spine's). The back edge keeps the gap, because it is the mark no
+     other view carries; what the sequence loses there is two arrowHEADS in gaps that still
+     show the dotted order link, and the input edge itself is still drawn as the lane and as a
+     table row. The gaps are named from the to-artifact, so a re-routed back edge moves them. */
+  const backEdgeEntries = new Set(['02-to-be-plan.md', '03.5-code-review.md'])
+  const spineRuns = new Map()
+  for (const edge of spine) {
     const i = idxOf[edge.from]
-    const mid = round(rowTop + NODE_H / 2)
-    const start = round(nodeX(i) + NODE_W + 10.5)
-    const tip = round(nodeX(i + 1) - 8)
+    const cxm = round(rowTop + NODE_H / 2)
+    const start = round(nodeX(i) + NODE_W + 2)
+    const tip = round(nodeX(i + 1) - 2)
     const dash = edge.kind === 'conditional'
-    const line = dash ? 'dg-line-cond' : 'dg-line'
-    const headCls = dash ? 'dg-head-cond' : 'dg-head'
-    const run = ruleH(start, mid, round(tip - 8 - start), line, 'spine ' + edge.from + ' -> ' + edge.to)
-    head([[tip, mid], [tip - 8, mid - 4], [tip - 8, mid + 4]], headCls, 'spine head ' + edge.to, run)
-  })
+    const run = ruleH(start, cxm, round(tip - HEAD_L - start), dash ? 'dg-line-cond' : 'dg-line', 'spine ' + edge.from + ' -> ' + edge.to)
+    if (!backEdgeEntries.has(edge.to)) {
+      head([[tip, cxm], [tip - HEAD_L, cxm - SEQ_HALF], [tip - HEAD_L, cxm + SEQ_HALF]], dash ? 'dg-head-cond' : 'dg-head', 'spine head ' + edge.to, run)
+    }
+    spineRuns.set(edge.to, run)
+  }
 
-  /* ---- the lanes: stub up, run across in its own lane, stub down ---------- */
-  const attach = (file, side, edges, step) => {
-    // THE TWO SIDES RULE IN OPPOSITE DIRECTIONS, and the asymmetry is forced rather than
-    // chosen. A lane farther from the node row has the LONGER stubs, and a stub must not
-    // be drawn across a nearer lane's run:
-    //   · SOURCE side — the farther lane attaches LEFTMOST, so its long stub rises clear
-    //     of every nearer edge's horizontal run;
-    //   · TARGET side — the farther lane attaches RIGHTMOST, so the nearer edge's run
-    //     ENDS before that stub comes down.
-    // Both directions were needed: the first version used "leftmost" on both sides and
-    // the engine found the crossing (00-requirements.md -> 02-to-be-plan's stub drawn
-    // across 01-as-is.md -> 02-to-be-plan's run, 5x5 units) rather than shipping it.
-    const base = side === 'out' ? nodeX(idxOf[file]) + NODE_W - 6 : nodeX(idxOf[file]) + 6
-    const sorted = [...edges].sort((a, b) => (side === 'out' ? b.dist - a.dist : a.dist - b.dist))
-    sorted.forEach((e, j) => {
-      e[side] = round(side === 'out' ? base - (sorted.length - 1 - j) * step : base + j * step)
+  /* THE WILDCARD RAIL — one edge shape with eleven possible sources, drawn as a rail.
+     ⚠ DRAWN BEFORE THE BACK EDGES, AND THAT ORDER IS THE ROUTING. A back edge's drop leaves its
+     source node's bottom edge and has to reach a shelf BELOW this band, and the rail spans the whole
+     row — so there is no column for the drop to slip down and no way round it. With the rail
+     reserved FIRST, the drop must say so: it is declared as the rail's own contained ink, a
+     geometric fact (the rail is 58 units tall and the drop passes clean through it) that
+     `check-workflow-map.mjs` re-derives. Reserved the other way round, the engine refuses the pair
+     outright with a 5x58-unit intersection — which is how this order was found. */
+  const rail = card(railX, railTop, rowW, railH, 'dg-box-rail', 'the wildcard input rail')
+  /* ⚠ THE RAIL'S OWN TEXT IS PLACED AT THE FAR END OF THE ROW, and that is a decision about the
+     READER, not about the layout. The chart is 2854 units wide in a 1340-unit column, so a reader
+     scrolls it: text at the rail's LEFT edge is off-frame the moment they scroll right to look at
+     the wildcard phases the rail is about — the label was invisible in exactly the view that needs
+     it. Placed against the right edge, it is visible in the right-hand view AND in the left one up
+     to the node row's width. The box is still reserved from the rail's left edge, so the
+     containment arithmetic is unchanged. */
+  const railTextX = round(railX + rowW - Math.max(
+    tw(`EVERY PRESENT ARTIFACT EXCEPT ITSELF — the wildcard input, declared by ${wild.length} phases`, FS[CLS.t]),
+    tw(`RUN_ARTIFACT_SEQUENCE.filter(a => present.has(a) && a !== thisFile) — ${WILDCARD_SOURCES} possible sources, and NO single one of them is required`, FS[CLS.s]),
+    tw(`Drawn as ONE rail with ${wild.length} thick arrows rather than as ${wild.length * WILDCARD_SOURCES} lines, because a bundle of eleven into one node is the picture that stops being readable.`, FS[CLS.s]),
+  ) - PAD)
+  textEl(railTextX, round(railTop + 7), CLS.t,
+    `EVERY PRESENT ARTIFACT EXCEPT ITSELF — the wildcard input, declared by ${wild.length} phases`, rail)
+  textEl(railTextX, round(railTop + 7 + lh(FS[CLS.t]) + 1), CLS.s,
+    `RUN_ARTIFACT_SEQUENCE.filter(a => present.has(a) && a !== thisFile) — ${WILDCARD_SOURCES} possible sources, and NO single one of them is required`, rail)
+  textEl(railTextX, round(railTop + 7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1), CLS.s,
+    `Drawn as ONE rail with ${wild.length} thick arrows rather than as ${wild.length * WILDCARD_SOURCES} lines, because a bundle of eleven into one node is the picture that stops being readable.`, rail)
+  for (const edge of wild) {
+    const x = round(nodeX(idxOf[edge.to]) + NODE_W / 2)
+    head([[x, rowBottom], [x - SEQ_HALF, rowBottom + HEAD_L], [x + SEQ_HALF, rowBottom + HEAD_L]], 'dg-head-wide', 'wildcard head ' + edge.to)
+    ruleV(x, round(rowBottom + HEAD_L), round(railTop - rowBottom - HEAD_L), 'dg-line-wide', 'wildcard stub ' + edge.to)
+  }
+
+  /* ---- the BACKWARD edges, as direction on the canvas --------------------
+     WHAT A BACK EDGE IS, AND WHY IT LOOKS LIKE THIS. Every other arrow in this chart points right
+     (the input edges) or down (into a node). The two back edges point at a node that is EARLIER in
+     PHASE_SEQUENCE than the node they leave, and the picture says so with no words at all: each one
+     leaves its source node's bottom edge, drops into the column gap beside it, runs LEFT along a
+     shelf of its own under the row, turns up a riser at the far left, and re-enters its target from
+     the LEFT with the arrowhead pointing right.
+
+     ⚠ THE ROUTE IS FORCED, AND EVERY ALTERNATIVE WAS REFUSED BY THE ENGINE RATHER THAN BY TASTE.
+     The obvious routing — enter the target along the node row's own centre line, in the gap before
+     it — cannot be drawn. That line is the one band in the row that is completely occupied:
+       · the gap before a node carries that node's SPINE arrow (the reserved box of a rule reaches
+         2.5 units past its endpoints);
+       · each node's top edge carries the lane stubs that come down into it and, in the same gap,
+         the arrowheads that land on it;
+       · a wildcard node's bottom edge carries the rail stub;
+       · and any vertical stub crossing the LANE BAND is crossed by the lane runs, which all leave
+         their source at the same x — so there is no free column between the row and the bands.
+     The engine refused each of those in turn (a 4x5-unit intersection with a spine arrowhead, a
+     5x5 with a lane run, a 5x190 with a lane run). What is left is BELOW: the shelf. It travels
+     under the nodes in the empty band between the row and the wildcard rail, where the only things
+     it can meet are the lane drops, and those are placed in column gaps the entry stubs avoid.
+
+     ⚠ TWO RISERS, AND THE PAIR IS NESTED ON PURPOSE. Both risers stand in the far-left gutter and
+     both reach the row, so they cross the shelves — the REVISE riser (x=24) stands inside the
+     REOPEN shelf's own span, and the reopen riser (x=6) stands under it. Each is DECLARED as
+     contained by the box it passes through, which is a geometric fact the checker re-derives
+     (`holds`), not an exemption widened to fit. The alternative — one shared riser — puts two
+     labels and two entry stubs on one stem, which is the "one arrow for two different loops"
+     picture the owner rejected. */
+  const RESERVE_X = 6    // the reopen riser: left of everything
+  const REVISE_X = 24    // the REVISE riser: inside the reopen shelf's own x-span
+  /**
+   * The x-ranges of the twelve node boxes, half-resolution: the entry search runs BEFORE the nodes
+   * are drawn (a back edge's routing decides where its arrowhead goes, and the nodes' own stubs have
+   * to be placed with that decision known), so the nodes are reserved here as geometry rather than
+   * left out of the collision test — leaving them out is exactly how an arrowhead ends up 2 units
+   * inside the node it points at.
+   */
+  const nodeBox = (i) => ({ x: round(nodeX(i)), y: rowTop, w: NODE_W, h: NODE_H })
+  /**
+   * Does a candidate box fit, given the nodes plus everything the chart has already reserved? A box
+   * an existing box CONTAINS is fine — the engine declares the nesting and the checker re-derives it
+   * — and a box that merely TOUCHES another is fine too. Anything else is a stroke through a stroke.
+   */
+  const fits = (a) => {
+    const all = PHASES.map((_, i) => nodeBox(i)).concat(api.boxes)
+    return all.every((o) => {
+      const ix = Math.min(a.x + a.w, o.x + o.w) - Math.max(a.x, o.x)
+      const iy = Math.min(a.y + a.h, o.y + o.h) - Math.max(a.y, o.y)
+      if (ix <= 0.05 || iy <= 0.05) return true
+      return a.x >= o.x && a.x + a.w <= o.x + o.w && a.y >= o.y && a.y + a.h <= o.y + o.h
     })
   }
-  const laneOf = (edge) => (upper.includes(edge) ? 'upper' : 'lower')
-  upper.forEach((e, k) => { e.band = 'upper'; e.k = k; e.dist = e.k })
-  lower.forEach((e, k) => { e.band = 'lower'; e.k = k; e.dist = e.k })
-  const outGroups = new Map()
-  const inGroups = new Map()
+  /**
+   * The column an ENTRY ARROWHEAD lands in, SOLVED rather than chosen: the rightmost x inside the
+   * target's own column gap, past the gutter, where an arrowhead's reserved box — head-width,
+   * head-height, sitting just under the node's bottom edge — intersects nothing already reserved.
+   * A routing that cannot silently rot is the point: move a lane and this throws instead of
+   * drawing through a stroke. */
+  const freeEntryX = (targetIdx, shelfY) => {
+    /* ⚠ THE HEAD MUST CLEAR THE NODE, NOT MERELY THE COLUMN. An arrowhead's reserved box is a
+       rectangle around a triangle, so a head centred one half-width inside the gap still reaches
+       into the node it points at — the engine caught exactly that (a 2x8-unit intersection with the
+       node's own box). The scan therefore stops at the last column whose head box ends strictly
+       before the node begins, and it scans LEFT from there. */
+    const hi = round(nodeX(targetIdx) - 2 * SEQ_HALF - 2)
+    const lo = round(nodeX(targetIdx) - NODE_GAP + 2)
+    for (let x = hi; x >= lo; x -= 1) {
+      if (fits({ x: round(x - SEQ_HALF), y: round(shelfY - HEAD_L), w: 2 * SEQ_HALF, h: HEAD_L })) return x
+    }
+    throw new Error('overview chart: no free column for a back-edge entry into node ' + targetIdx)
+  }
+  /**
+   * ONE BACK EDGE. Five boxes, and every one of them is reserved:
+   *   · RISER  — in the gutter, from the shelf up to the row;
+   *   · SHELF  — the horizontal stroke under the row, from the riser to the entry column;
+   *   · DROP   — from the source node's bottom edge down to the shelf, in the column gap beside it;
+   *   · HEAD   — the entry arrowhead, pointing UP into the target's bottom edge.
+   * ⚠ AND NO ENTRY STUB: the arrowhead itself spans the gap between the shelf and the node, so a
+   * stub there would be ink drawn through the lane runs and the rail stubs for nothing. Its two
+   * ends are the shelf's level and the node's own bottom edge.
+   */
+  const arc = (node, riserX, laneYv, label, dropX, riserParent, what) => {
+    const nIdx = idxOf[node]
+    const ex = freeEntryX(nIdx, laneYv)
+    const riser = ruleV(riserX, round(rowTop + NODE_H / 2), round(laneYv - (rowTop + NODE_H / 2)), 'dg-line-loop', what + ' riser ' + node, riserParent)
+    const shelf = ruleH(Math.min(riserX, ex), laneYv, round(Math.abs(ex - riserX)), 'dg-line-loop', what + ' shelf ' + node, riser)
+    /* The DROP passes clean through the wildcard rail's band, so it is declared as the rail's own
+       contained ink — the rail was reserved first for exactly this reason. ⚠ SPLIT AT THE RAIL'S
+       EDGES: "contained by" means the whole box is inside, and a 189-unit drop cannot be inside a
+       58-unit rail. Two segments, each of which IS inside the band it crosses, and their shared
+       endpoint is a touch the engine already tolerates. */
+    const dropLo = Math.max(laneYv, round(railBottom + LINE_PAD))
+    ruleV(dropX, rowBottom, round(Math.min(railTop - LINE_PAD, dropLo) - rowBottom), 'dg-line-loop', what + ' drop ' + node, rail)
+    if (dropLo < laneYv) {
+      ruleV(dropX, dropLo, round(laneYv - dropLo), 'dg-line-loop', what + ' drop below the rail ' + node, rail)
+    }
+    head([[ex, rowBottom], [ex - SEQ_HALF, rowBottom - HEAD_L], [ex + SEQ_HALF, rowBottom - HEAD_L]], 'dg-head-loop', what + ' head ' + node)
+    /* ⚠ THE LABEL IS PLACED, NOT GUESSED, AND IT IS PLACED UNDER THE SHELF IT NAMES. A label is the
+       one annotation an arrowhead cannot cover, so it must clear the other arc's riser — which
+       stands in the gutter, the very place the text would otherwise start. So the search begins to
+       the RIGHT of the gutter and walks right along the shelf until a slot is free of every box
+       already reserved; the shelf's own span bounds it, and a label that cannot fit throws rather
+       than landing on a stroke. */
+    const w = tw(label, FS[CLS.s])
+    const labelY = round(laneYv + 2 * LINE_PAD + 2)
+    let labelX = null
+    for (let x = round(GUTTER + 2); x + w <= ex - 4; x += 2) {
+      if (fits({ x, y: labelY, w, h: LABEL_H })) { labelX = x; break }
+    }
+    if (labelX === null) throw new Error('overview chart: no free slot for the back-edge label "' + label + '"')
+    textEl(labelX, labelY, CLS.s, label)
+    return { riser, shelf, ex }
+  }
+  /* ⚠ THE REOPEN ARC IS DRAWN FIRST BECAUSE THE OTHER ARC'S RISER DECLARES AGAINST ITS SHELF. That
+     is the whole ordering constraint: an exemption can only name a box that already exists. The two
+     back edges cross each other at exactly two places, and each crossing is declared by the arc
+     that PRECEDES it: the REVISE riser is the reopen shelf's own contained ink, and the reopen
+     entry stub contains the REVISE shelf. Transposing these two calls makes the generator throw
+     rather than draw a stroke through a stroke — which is the point of declaring crossings. */
+  const back = {
+    reopen: arc('02-to-be-plan.md', RESERVE_X, b1Y, 'reopen → back to DRAFT, downstream receipts invalidated', round(nodeX(6) + NODE_W + 12), undefined, 'reopen'),
+  }
+  /* The reopen shelf spans the gutter, so the REVISE riser stands inside it: declared here as the
+     shelf's own contained ink, which is a geometric fact (`holds`) the checker re-derives. The two
+     arcs cross exactly once — here — and this is the arc that says so. */
+  back.revise = arc('03.5-code-review.md', REVISE_X, b2Y, 'REVISE → repair, then re-submit', round(nodeX(8) + NODE_W + 12), back.reopen.shelf, 'revise')
+  if (process.env.DG_DEBUG) console.error('[dg] entries reopen=' + back.reopen.ex + ' revise=' + back.revise.ex + ' rowTop=' + rowTop + ' rowBottom=' + rowBottom + ' b1Y=' + b1Y + ' b2Y=' + b2Y + ' railTop=' + railTop)
+  if (!(back.revise.ex > back.reopen.ex)) throw new Error('overview chart: the REVISE entry must lie to the right of the reopen entry, or their shelves cross')
+
+  /* ---- BAND 1: the title — ONE line, and it says what the picture is ----- */
+  textEl(GUTTER, titleTop, CLS.a,
+    `THE WORKFLOW AS A GRAPH — ${PHASES.length} phase artifacts, ${EDGES.length} directed edges, all of them drawn here`)
+
+  /* ---- BAND 2: the human-decision markers, above the nodes they belong to - */
+  const humanCol = (file) => (file === '05-manual-qa.md' ? 'qa-signoff' : file === '03-implementation-summary.md' ? 'tdd-mode' : 'run-start')
+  PHASES.forEach((p, i) => {
+    if (!p.human) return
+    const gate = humanCol(p.file)
+    /* The marker is 17 + the label + 5: 3 units of air, a 10-unit diamond, 4 units of air,
+       the label, and 2 units of margin — all of it derived from the measurement rather than
+       chosen, because the engine reserves ink and a marker one unit too narrow is a build
+       failure rather than a slightly tight label. */
+    const w = Math.ceil(17 + tw(gate, FS[CLS.s]) + 5)
+    const x = round(nodeX(i) + (NODE_W - w) / 2)
+    const m = card(x, MARK_TOP, w, MARK_H, 'dg-box-human', 'human decision marker ' + p.file)
+    head([[x + 4, MARK_TOP + MARK_H / 2], [x + 9, MARK_TOP + 2], [x + 14, MARK_TOP + MARK_H / 2], [x + 9, MARK_TOP + MARK_H - 2]], 'dg-mark', 'decision diamond ' + p.file, m)
+    textEl(x + 17, round(MARK_TOP + 1), CLS.s, gate, m)
+  })
+
+  /* ---- the nodes --------------------------------------------------------- */
+  const refusalOf = (file) => REFUSAL_MARKS.filter((r) => r.nodes.includes(file))
+  PHASES.forEach((p, i) => {
+    const x = nodeX(i)
+    const multi = sourcesOf(p.file) > 1
+    const node = card(x, rowTop, NODE_W, NODE_H, multi ? 'dg-box dg-box-fan' : 'dg-box', 'node ' + p.file)
+    textEl(x + PAD, round(rowTop + 7), CLS.t, short(p.file), node)
+    textEl(x + PAD, round(rowTop + 7 + lh(FS[CLS.t]) + 1), CLS.s, 'phase ' + p.phaseN + ' — ' + PURPOSES[p.file].label, node)
+    textEl(x + PAD, round(rowTop + 7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1), CLS.s, fanInText(p.file), node)
+    /* THE REFUSAL BAND — the second shape, and it means "a guard rule can stop a call at this
+       phase". Its text names the NARROWEST rule that bites here, which is why the picture reads as
+       a refusal surface rather than as twelve identical hatched strips: the three built-in rules
+       that fire on a tool pattern alone bite everywhere, and the named baselines bite where the
+       phase number selects them. */
+    const marks = refusalOf(p.file)
+    const names = marks.filter((r) => r.nodes.length < PHASES.length).map((r) => r.short).join(' · ')
+    const bandLabel = names === '' ? 'any lock or write' : names
+    const band = card(x, refusalTop, NODE_W, refusalH, 'dg-box-refuse', 'refusal band ' + p.file)
+    textEl(x + PAD, round(refusalTop + 3), CLS.s, bandLabel, band)
+    void marks
+  })
+
+  /* ---- the dotted SEQUENCE-ORDER links ----------------------------------
+     THE ONE MARK THAT IS NOT AN EDGE. Two adjacent pairs — 08→09 and 09→10 — carry no
+     artifact input: the linter's own map does not connect them. Drawing a solid arrow
+     there would have claimed an edge that does not exist, and omitting it would have left
+     a gap in the row that reads as a missing phase. So the order gets its own, weaker,
+     dotted mark, and the legend says so in one clause. */
+  const seqRuns = []
+  for (const i of seqOnly) {
+    const cxm = round(rowTop + NODE_H / 2)
+    const start = round(nodeX(i) + NODE_W + 2)
+    const tip = round(nodeX(i + 1) - 2)
+    const run = ruleH(start, cxm, round(tip - HEAD_L - start), 'dg-line-seq', 'sequence link ' + PHASES[i].file + ' -> ' + PHASES[i + 1].file)
+    head([[tip, cxm], [tip - HEAD_L, cxm - SEQ_HALF], [tip - HEAD_L, cxm + SEQ_HALF]], 'dg-head-seq', 'sequence head ' + PHASES[i + 1].file, run)
+    seqRuns.push([i, start, tip])
+  }
+
+  /* ---- the edges: spine joins, lanes, and the wildcard rail -------------- */
+  const runLabels = []
+  const attach = (file, side, list, step) => {
+    // THE TWO SIDES RULE IN OPPOSITE DIRECTIONS, and the asymmetry is forced: a lane
+    // farther from the node row has the longer stub, and a stub must not be drawn across a
+    // nearer lane's run. SOURCE side: the farther lane attaches LEFTMOST, so its long stub
+    // rises clear of every nearer run. TARGET side: the farther lane attaches RIGHTMOST, so
+    // the nearer edge's run ENDS before that stub comes down. (Both directions were needed:
+    // the first version used "leftmost" on both sides and the engine found the crossing.)
+    const base = side === 'out' ? nodeX(idxOf[file]) + NODE_W - 6 : nodeX(idxOf[file]) + 6
+    const sorted = [...list].sort((a, b) => (side === 'out' ? b.dist - a.dist : a.dist - b.dist))
+
+    sorted.forEach((e, j) => { e[side] = round(side === 'out' ? base - (sorted.length - 1 - j) * step : base + j * step) })
+  }
+  upper.forEach((e, k) => { e.band = 'upper'; e.k = k; e.dist = k })
+  lower.forEach((e, k) => { e.band = 'lower'; e.k = k; e.dist = k })
+  const outGroups = new Map(), inGroups = new Map()
   for (const e of lanes) {
     if (!outGroups.has(e.edge.from)) outGroups.set(e.edge.from, [])
     outGroups.get(e.edge.from).push(e)
@@ -3485,72 +3625,280 @@ function drawGraph(api) {
   for (const [file, group] of outGroups) attach(file, 'out', group, 12)
   for (const [file, group] of inGroups) attach(file, 'in', group, 12)
 
+
+  /* LANE EDGE — stub across the gap, a run in its own lane, a stub down into the target.
+     ⚠ WHERE A RUN ENDS, AND WHY IT IS NOT AT THE TARGET STUB. The last HEAD_L units before
+     the target stub are covered by the arrowhead, whose reserved box is a RECTANGLE around a
+     triangle and therefore overlaps the run's own box by a few units — the engine refused
+     the first version of this for exactly that, with a 4x0.5-unit intersection, which is the
+     collision check doing its job on a shape no reader would ever have seen. So a run STOPS
+     one arrowhead-length short of its target stub and the arrowhead covers the join: the
+     drawn line is unbroken and the two reserved boxes merely touch. The head is declared as
+     the target stub's own ink, which is the one relation the engine exempts and the checker
+     re-derives.
+
+     ⚠ AND IT STOPS SHORT OF EVERY *OTHER* LANE'S ARROWHEAD TOO. Two edges that leave the
+     SAME node and land on different ones — 00-requirements.md does it twice — put their
+     stubs at the same x wherever they attach to that shared source, so the shorter edge's
+     arrowhead sits INSIDE the longer edge's run and the engine refused that as well (a
+     4x0.5-unit intersection, again on ink no reader would see). So every run is truncated at
+     the first foreign arrowhead it would otherwise reach. `endBy` is that list, computed
+     before anything is drawn; the truncation is invisible because an arrowhead is drawn over
+     the join in every remaining case. */
+  const laneHeads = lanes.map((e) => ({ x: e.in, lo: round(e.in - SEQ_HALF), hi: round(e.in + SEQ_HALF) }))
+  const placedLabels = []
   for (const e of lanes) {
-    const band = e.band
-    const yy = band === 'upper' ? round(rowTop + laneY('upper', e.k)) : round(rowTop + laneY('lower', e.k))
-    const xs = e.out
-    const xt = e.in
+    const yy = laneY(e.band, e.k)
+    const xs = e.out, xt = e.in
     const dash = e.edge.kind === 'conditional'
     const line = dash ? 'dg-line-cond' : 'dg-line'
     const headCls = dash ? 'dg-head-cond' : 'dg-head'
-    const label = e.edge.from + ' -> ' + e.edge.to
-    // The run: from the source stub to the target stub, in this lane and no other.
-    const run = ruleH(xs, yy, round(xt - xs), line, 'lane ' + e.edge.from + ' -> ' + e.edge.to)
-    // The label sits INSIDE the run's own x-range, one row clear of it. A label wider
-    // than its run would reach a stub that crosses this lane, so the fit is CHECKED
-    // here rather than hoped for — the arithmetic is the same one the engine uses.
-    const labelW = tw(label, FS[CLS.s])
-    if (labelW > xt - xs - 8) {
-      throw new Error('phase graph: lane label "' + label + '" does not fit its run (' + labelW + ' > ' + (xt - xs - 8) + ')')
-    }
-    // Two stubs, one arrowhead: the source end is a plain join, the target end carries
-    // the arrow. The TARGET stub stops one arrowhead-length short of the node edge so
-    // the head starts exactly where it ends — the two boxes TOUCH, which needs no
-    // exemption at all, and a manifest with fewer declared exceptions is a manifest with
-    // fewer places for a real overlap to hide.
-    const HEAD_L = 8
-    const stubS = ruleV(xs, band === 'upper' ? yy : rowBottom,
-      band === 'upper' ? round(rowTop - yy) : round(yy - rowBottom), line, 'stub ' + band + ' ' + e.edge.from, run)
-    const stubT = ruleV(xt, band === 'upper' ? yy : round(rowBottom + HEAD_L),
-      band === 'upper' ? round(rowTop - HEAD_L - yy) : round(yy - rowBottom - HEAD_L), line, 'stub ' + band + ' ' + e.edge.to, run)
-    if (band === 'upper') {
-      head([[xt, rowTop], [xt - 4, rowTop - HEAD_L], [xt + 4, rowTop - HEAD_L]], headCls, 'lane arrow ' + e.edge.to)
-      textEl(round(xs + 4), round(yy - LINE_PAD * 2 - LABEL_H), CLS.s, label)
-    } else {
-      head([[xt, rowBottom], [xt - 4, rowBottom + HEAD_L], [xt + 4, rowBottom + HEAD_L]], headCls, 'lane arrow ' + e.edge.to)
-      textEl(round(xs + 4), round(yy + LINE_PAD * 2 + 2), CLS.s, label)
-    }
+    const up = e.band === 'upper'
+    /* WHICH ARROWHEADS CONSTRAIN THIS RUN. An arrowhead sits at the node row's edge and this
+       lane's run sits OUTSIDE the node band — the lane bands are measured from the row's
+       outer edges, so no run crosses a node — but the head's reserved box reaches one
+       arrowhead-length INTO the lane band, which is exactly where a run in the opposite band
+       travels. So a foreign head constrains a run whenever the run would reach its column. */
+    const foreign = laneHeads.filter((h) => h.x !== xt && h.lo > xs).map((h) => h.lo)
+    const ownStub = round(xs + LINE_PAD + 1)
+    const runEnd = round(Math.max(ownStub, Math.min(round(xt - HEAD_L), ...(foreign.length ? foreign : [Infinity])) - 1))
+    const run = ruleH(xs, yy, round(runEnd - xs), line, 'lane ' + e.edge.from + ' -> ' + e.edge.to)
+    const stubS = ruleV(xs, up ? yy : rowBottom, up ? round(rowTop - yy) : round(yy - rowBottom), line, 'stub ' + e.band + ' ' + e.edge.from, run)
+    const stubT = ruleV(xt, up ? yy : round(rowBottom + HEAD_L), up ? round(rowTop - HEAD_L - yy) : round(yy - rowBottom - HEAD_L), line, 'stub ' + e.band + ' ' + e.edge.to, run)
+    if (up) head([[xt, rowTop], [xt - SEQ_HALF, rowTop - HEAD_L], [xt + SEQ_HALF, rowTop - HEAD_L]], headCls, 'lane arrow ' + e.edge.to, stubT)
+    else head([[xt, rowBottom], [xt - SEQ_HALF, rowBottom + HEAD_L], [xt + SEQ_HALF, rowBottom + HEAD_L]], headCls, 'lane arrow ' + e.edge.to, stubT)
     void stubS
-    void stubT
+    /* THE EDGE LABEL, in the node's own short name — anchored at the run's SOURCE end rather
+       than centred on the run, because a centred label on the longest lane lands exactly
+       where another lane's stub crosses. A label is drawn when it FITS, and where it goes is
+       SOLVED rather than guessed:
+
+         · it is laid on the row BELOW its run, which is the side away from the nearer lane —
+           placing it on the far side would paint it across that lane's line;
+         · it slides right until it clears every node it overlaps VERTICALLY. A lane label sits
+           a few units outside the node row, so it clears the row by construction — but its own
+           run starts 6 units INSIDE its source node, and the run's first stretch therefore lies
+           under that node and the next one. The label takes the first x where the node band
+           leaves it alone, which in practice is the 48-unit COLUMN GAP between two nodes;
+         · it must end before the run ends, and it must not overlap a label already placed.
+
+       A lane that reads an ADJACENT phase and loses its label loses nothing: the spine arrow in
+       the gap already states that input. The structural read — that these arrows join
+       NON-adjacent nodes — is what the lane is for. */
+    const label = short(e.edge.from) + (dash ? ' · when present' : '')
+    const labelW = tw(label, FS[CLS.s])
+    const labelY = round(yy + LINE_PAD + 1)
+    const labelBot = round(labelY + LABEL_H)
+    const blocksNode = labelBot > rowTop && labelY < rowBottom
+    const underNode = (x) => blocksNode && PHASES.some((_, i) => x < nodeX(i) + NODE_W + 3 && nodeX(i) - 3 < x + labelW)
+    const freeOf = (x) => !underNode(x)
+      && !placedLabels.some((p) => Math.abs(p.y - labelY) < LABEL_H && p.x < x + labelW && x < p.x + p.w)
+    const first = Math.max(xs, round(nodeX(idxOf[e.edge.from]) + NODE_W + 3))
+    let lblX = null
+    for (let x = first; x + labelW <= runEnd - 8; x = round(x + 2)) {
+      if (freeOf(x)) { lblX = x; break }
+    }
+    if (lblX !== null) {
+      textEl(lblX, labelY, CLS.s, label)
+      placedLabels.push({ x: lblX, y: labelY, w: labelW })
+      runLabels.push(label)
+    } else {
+      runLabels.push(null)
+    }
   }
 
-  /* ---- the wildcard rail: one edge, eleven sources ------------------------ */
-  const railX = nodeX(0)
-  const rail = card(railX, railTop, rowW, railH, 'dg-box dg-box-rail', 'the wildcard input rail')
-  textEl(railX + PAD, railTop + 7, CLS.t,
-    'EVERY PRESENT ARTIFACT EXCEPT ITSELF — the wildcard input, declared by 2 phases', rail)
-  textEl(railX + PAD, railTop + 7 + lh(FS[CLS.t]) + 1, CLS.s,
-    'RUN_ARTIFACT_SEQUENCE.filter(a => present.has(a) && a !== thisFile) — ' + WILDCARD_SOURCES + ' possible sources, and NO single one of them is required', rail)
-  textEl(railX + PAD, railTop + 7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1, CLS.s,
-    'Drawn as a rail rather than as ' + WILDCARD_SOURCES + ' arrows each: the fan-in is the fact, and a bundle of eleven lines into one node is the picture that stops being readable.', rail)
-  wild.forEach((edge) => {
-    const x = nodeX(idxOf[edge.to]) + NODE_W / 2
-    const stub = ruleV(x, rowBottom + 8, railTop - rowBottom - 8, 'dg-line-wide', 'wildcard stub ' + edge.to)
-    head([[x, rowBottom], [x - 4, rowBottom + 8], [x + 4, rowBottom + 8]], 'dg-head-wide', 'wildcard head ' + edge.to, stub)
+
+  /* ---- the CROSS-RUN band: the loop that no single run can close ---------
+     THE ONE EDGE THAT LEAVES THIS RUN. Everything above is a dependency inside a single
+     run; this band is the cycle the plugin exists for, and it is drawn as an ARC that
+     lands back at a phase ENTRY — the arrow arrives at the top-left of the NEXT run, not
+     at a later phase of this one. Its three nodes are the mechanism in three words each:
+     the run writes the plane and registers it, `training/` is one of the five kinds the
+     reader reads, and `recursive_phase` at the next run's phase entry returns it. */
+  const crossCardW = Math.ceil(Math.max(
+    tw('writes the plane, then REGISTERS it', FS[CLS.s]),
+    tw('memory/training/<task-type>.md  +  MEMORY.md', FS[CLS.s]),
+    tw('MEMORY PLANE — .recursive/memory/', FS[CLS.s]),
+    tw('training/ is ONE of the 5 kinds read', FS[CLS.s]),
+  ) + 2 * PAD + 4)
+  const crossCardW2 = Math.ceil(Math.max(
+    tw('RUN N+1 — recursive_phase at phase entry', FS[CLS.t]),
+    tw('...returns the shards that match this run', FS[CLS.s]),
+  ) + 2 * PAD + 4)
+  /* ⚠ THREE CARDS, EDGE TO EDGE, AND ONE ARROW BACK. The cross-run cycle is the reason this plugin
+     exists, so it is drawn as a cycle rather than as a row with a caption: the run's write and the
+     memory plane it writes to are joined by a shared border, and the return arc leaves the gutter and
+     lands INSIDE the next run's entry card — on its left edge, which is the point the loop actually
+     re-enters the workflow at. Edge-to-edge means the join is a fact of the geometry rather than a
+     short arrow between two boxes that a reader has to infer. */
+  const crossCards = [
+    { w: crossCardW, klass: 'dg-box', t: 'writes the plane, then REGISTERS it', rows: ['memory/training/<task-type>.md  +  MEMORY.md'] },
+    { w: crossCardW, klass: 'dg-box-rail', t: 'MEMORY PLANE — .recursive/memory/', rows: ['training/ is ONE of the 5 kinds read'] },
+    { w: crossCardW2, klass: 'dg-box', t: 'RUN N+1 — recursive_phase at phase entry', rows: ['...returns the shards that match this run'] },
+  ]
+  const crossRowH = Math.round(2 * PAD + lh(FS[CLS.s]) + 1 + lh(FS[CLS.s]))
+  const crossRowH3 = Math.round(2 * PAD + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]))
+  const crossBoxH = Math.max(crossRowH, crossRowH3)
+  let ccx = GUTTER
+  const crossBoxes = crossCards.map((c) => {
+    const b = block(ccx, crossTop, c.w, c.klass, [{ cls: c.w === crossCardW2 ? CLS.t : CLS.s, s: c.t }].concat(c.rows.map((s) => ({ cls: CLS.s, s }))),
+      { label: 'cross-run card: ' + c.t.slice(0, 28), pad: PAD, gap: 1, boxH: crossBoxH })
+    ccx = round(ccx + c.w)
+    return b
   })
+  const crossFirst = crossBoxes[0], crossLast = crossBoxes[crossBoxes.length - 1]
+  const retRiser = round(GUTTER - 22)
+  const retY = round(crossTop + PAD + lh(FS[CLS.s]) / 2)
+  /* The return: DOWN beside the last card, along the gutter, and back UP into the first — five boxes
+     and every corner declared against the rule it turns out of. ⚠ THE ARROWHEAD IS THE RETURN RUN'S
+     OWN INK, and the run is reserved WIDE ENOUGH TO HOLD IT: a head is 2*SEQ_HALF across and HEAD_L
+     tall, so the run is drawn at exactly that height with the drawn stroke on the same centre line.
+     Reserved geometry and drawn geometry are two different questions, and this is the case where
+     saying so is the honest answer — the alternative was a head overlapping the rule it terminates,
+     which is the defect the engine exists to refuse. The tip lands inside the card's left edge, which
+     is the point the loop actually re-enters the workflow at. */
+  /* ⚠ THE RETURN'S CORNERS ARE MADE NESTED RATHER THAN DECLARED. A corner where two strokes meet
+     needs an exemption, an exemption names exactly ONE neighbour, and a corner has two — so the
+     engine refused this shape three times in a row (2.5x2.5, then 5x2.5, then 5x4) while a corner
+     was declared against one neighbour and overlapped the other. The layout that needs no exemption
+     at all is COLLINEAR NESTING: the drop shares the riser's exact centre x, so the riser's own box
+     CONTAINS it and the engine files the pair as a containment; the run is reserved wide enough to
+     hold the arrowhead, so the head is the run's own ink; and the line that draws the stroke is
+     contained by the run. Every pair is one box inside another, which is the one overlap the engine
+     allows and the checker re-derives without a special case. */
+  const retFootY = round(crossTop + crossBoxH + 40)
+  const retDrop = ruleV(retRiser, retY, round(retFootY - retY), 'dg-line-loop', 'cross-run return drop')
+  ruleH(round(retRiser + LINE_PAD + 1), retFootY, round(GUTTER - retRiser - LINE_PAD - 1), 'dg-line-loop', 'cross-run return foot', retDrop)
+  const retRun = ruleH(retRiser, round(retY - 2 * LINE_PAD), round(GUTTER - retRiser), 'dg-line-loop', 'cross-run return run', retDrop)
+  /* ⚠ THE ARROWHEAD IS THE RUN'S OWN INK, AND THE RUN IS RESERVED WIDE ENOUGH TO HOLD IT. A head's
+     reserved box is a RECTANGLE around a triangle — 2*LINE_PAD across and HEAD_L along — so an
+     arrowhead can only be declared inside a rule whose box is at least that big. Here that is
+     arithmetic: the run's band is HEAD_L tall and the head is nested in it, and the DRAWN stroke runs
+     down the band's centre so the arrow sits on the line rather than beside it. Reserved geometry and
+     drawn geometry are two questions, and this is the case where saying so is the honest answer. */
+  head([[GUTTER, retY + LINE_PAD], [GUTTER - HEAD_L, retY - LINE_PAD], [GUTTER - HEAD_L, retY + LINE_PAD]],
+    'dg-head-loop', 'cross-run return head', retRun)
+  void crossLast
+  textEl(round(retRiser + 2), round(retFootY + 8), CLS.s, 'ACROSS RUNS — the arrow leaves the run and lands at the NEXT one\'s phase entry')
 
-  /* ---- the legend and the reading notes ---------------------------------- */
-  let ly = legendTop
-  textEl(GUTTER, ly, CLS.s, 'SOLID ARROW = required input (12 edges)   ·   DASHED ARROW = conditional: pushed only when the source artifact is present (2 edges)')
+  /* ---- the LEGEND: ONE line for the shapes, ONE for the connections ------
+     The predecessor drew no legend at all and explained the marks in the three paragraphs
+     above the picture. A legend is the honest form: it is the picture's own key, it is
+     scanned rather than read, and it costs two lines instead of twenty. */
+  let ly = round(retFootY + 40)
+  const legendRow = (title, items, yy) => {
+    textEl(GUTTER, yy, CLS.h, title)
+    let lx = round(GUTTER + tw(title, FS[CLS.h]) + 26)
+    const swW = 20, swH = 11
+    for (const [klass, label] of items) {
+      const sw = card(lx, round(yy - 1), swW, swH, klass, 'legend swatch: ' + label)
+      textEl(round(lx + swW + 6), yy, CLS.s, label, sw)
+      lx = round(lx + swW + 6 + tw(label, FS[CLS.s]) + 24)
+    }
+    return round(lx)
+  }
+  const l1 = legendRow('NODES', [
+    ['dg-legend', 'the phase, in PHASE_SEQUENCE order'],
+    ['dg-legend-rail', 'may be absent (OPTIONAL_PHASES)'],
+    ['dg-legend-refuse', 'a guard rule can refuse here'],
+    ['dg-box-human', 'a person must answer'],
+  ], ly)
+  ly = round(ly + lh(FS[CLS.h]) + 10)
+  /* ⚠ THE LEGEND IS CLIPPED BY THE CHART'S OWN BOX IF IT RUNS PAST THE FRAME, and the frame is the
+     node row: 2854 units. The first version's last item ran 150 units past it and the final word was
+     cut off in the rendered page — a legend that hides its own last line. Every label here is short
+     because the total is checked against the frame at generate time, not hoped for. */
+  const l2 = legendRow('EDGES', [
+    ['dg-legend', 'required input'],
+    ['dg-legend-cond', 'conditional — source present'],
+    ['dg-legend-wide', 'wildcard — every present artifact'],
+    ['dg-legend-seq', 'sequence order only: no input edge'],
+    ['dg-legend-rail', 'reads MORE THAN ONE upstream artifact'],
+  ], ly)
+  ly = round(ly + lh(FS[CLS.s]) + 8)
+  textEl(GUTTER, ly, CLS.s, 'Violet arcs run BACKWARDS: reopen and REVISE re-enter a node to the LEFT of their source, and the same arc closes the CROSS-RUN loop below the row.')
   ly = round(ly + lh(FS[CLS.s]) + 4)
-  textEl(GUTTER, ly, CLS.s, 'THICK ARROW from the rail = the wildcard input (2 edges, ' + WILDCARD_SOURCES + ' sources each)   ·   DASHED NODE = reads more than one upstream artifact (' + multiSource.length + ' nodes)')
-  ly = round(ly + lh(FS[CLS.s]) + 4)
-  textEl(GUTTER, ly, CLS.s, 'Shape, word and count carry every distinction here; colour carries none of them. Each arrow is the linter\'s own expected-input map, not a reading of the prose.')
+  textEl(GUTTER, ly, CLS.s, 'Shape, word and count carry every distinction here; colour carries none of them. Every arrow is an entry in the linter\'s own expected-input map.')
+  /* ⚠ NOTHING MAY RUN PAST THE FRAME, AND THE FRAME IS THE NODE ROW. The chart is a fixed-width
+     picture in a horizontally scrolling wrapper: anything wider than the row is clipped by the
+     wrapper's own edge, and the legend's last word was — measured in the rendered page, not guessed.
+     So the width is the row, and any row of text that does not fit is a BUILD FAILURE here rather
+     than a clipped word on the page. */
+  for (const [what, text, cls] of [
+    ['the legend row', l2, CLS.s], ['the backward-edge note', 'Violet arcs run BACKWARDS: reopen and REVISE re-enter a node to the LEFT of their source, and the same arc closes the CROSS-RUN loop below the row.', CLS.s],
+    ['the footer note', 'Shape, word and count carry every distinction here; colour carries none of them. Every arrow is an entry in the linter\'s own expected-input map.', CLS.s],
+    ['the title', `THE WORKFLOW AS A GRAPH — ${PHASES.length} phase artifacts, ${EDGES.length} directed edges, all of them drawn here`, CLS.a],
+  ]) {
+    const wide = round(GUTTER + tw(text, FS[cls]))
+    if (wide > railX + rowW) throw new Error('overview chart: ' + what + ' is ' + round(wide - (railX + rowW)) + ' units wider than the frame')
+  }
 
-  return { width: Math.ceil(Math.max(railX + rowW + 24, GUTTER + tw('SOLID ARROW = required input (12 edges)   ·   DASHED ARROW = conditional: pushed only when the source artifact is present (2 edges)', FS[CLS.s]) + 24)), height: Math.ceil(y + 16) }
+  const W = Math.ceil(railX + rowW + 24)
+  /* The frame ends BELOW the last line of text, not at its top: the height is derived from the last
+     row the chart drew plus its own line height, so the last line cannot fall off the bottom edge —
+     which the frame assertion in `chart()` caught it doing by 6 units. */
+  const H = Math.ceil(ly + LABEL_H + 2 * LINE_PAD) - titleTop
+  return { x: 0, y: titleTop, width: W, height: H }
 }
 
-/* ---- CHART 3: the training loop — the cross-run cycle -------------------- */
+/* ---- ORDERING THE LANES — no arrow crosses another ------------------------ */
+
+/**
+ * ORDER THE LANE EDGES SO THAT NO ARROW CROSSES ANOTHER.
+ *
+ * An edge routed in a lane is drawn as: a stub from its source node's edge, a horizontal
+ * run in its own lane, and a stub into its target node. Two such edges CROSS exactly when
+ * one edge's stub lands inside the other's run, and that happens precisely when one edge's
+ * [source, target] interval interleaves the other's. So the sufficient condition used here
+ * is:
+ *
+ *     U may sit above L  ⟺  U starts at or after L ends (to the right of it)
+ *                          OR  U contains L (starts at or before it and ends at or after it)
+ *
+ * — and this SEARCHES for an order that satisfies it for every pair, at two depths: lanes
+ * above the node row and lanes below it (an interleaving that cannot be ordered inside one
+ * band is moved to the other, and the two bands never meet). If three bands were ever
+ * needed the generator THROWS rather than drawing a crossing; and the engine's own
+ * intersection check is the backstop, so a mistake here fails the build instead of
+ * shipping a tangle.
+ */
+function graphBands(edges) {
+  const above = (u, l) => (u.s >= l.t) || (u.s <= l.s && u.t >= l.t)
+  const comparable = (a, b) => above(a, b) || above(b, a)
+  // 1. greedy band assignment: the first band in which this edge is COMPARABLE with
+  //    every edge already there. Two bands exist (above and below the row).
+  const bands = [[], []]
+  for (const e of edges) {
+    const fit = bands.findIndex((band) => band.every((o) => comparable(o, e)))
+    if (fit < 0) throw new Error('overview chart: the edge set needs a third routing band, which is not drawn')
+    bands[fit].push(e)
+  }
+  // 2. inside a band, order bottom → top by repeatedly taking an edge that every
+  //    remaining edge may sit above.
+  return bands.map((band) => {
+    const left = [...band]
+    const order = []
+    while (left.length > 0) {
+      const at = left.findIndex((x) => left.every((u) => u === x || above(u, x)))
+      if (at < 0) throw new Error('overview chart: a routing band could not be ordered without a crossing')
+      order.push(left[at])
+      left.splice(at, 1)
+    }
+    // Guard against the case the greedy cannot see: the bottom-first rule is necessary
+    // but not sufficient on its own, so every pair is checked once more, in the order
+    // the lanes will be drawn.
+    for (let i = 0; i < order.length; i++) {
+      for (let j = i + 1; j < order.length; j++) {
+        if (!above(order[j], order[i])) {
+          throw new Error('overview chart: lane order would cross — ' + order[i].edge.from + ' and ' + order[j].edge.from)
+        }
+      }
+    }
+    return order
+  })
+}
+
+/* ---- CHART 2: the training loop — the cross-run cycle -------------------- */
 
 function drawTraining(api) {
   const { GUTTER, PAD, LINE_PAD, CLS, FS, tw, lh, round, textEl, card, rule, ruleH, ruleV, head, para, block, blockPara } = api
@@ -3768,8 +4116,18 @@ function verify(html) {
   }
   check('every may-be-absent badge on the page is accounted for: phase-attributed + prose',
     badgeOf.length + badgeProse.length, badgeAll.length)
-  check('exactly ONE may-be-absent badge is prose — the one the explanatory callout draws',
-    badgeProse.length, 1)
+  /* ⚠ TWO PROSE BADGES NOW, AND THEY ARE EXACTLY TWO BECAUSE THE PROSE MOVED. The badge used to be
+     explained in a callout ON the overview, where the chart had to sit underneath it; the
+     explanation is now in the Notes view, and the overview keeps a ONE-LINE signpost to it that also
+     draws the badge so a reader meets the mark beside its name. So the count is asserted as one per
+     view rather than as a single badge anywhere, which is the version of this check that a future
+     round cannot satisfy by moving the essay back over the picture. */
+  check('exactly TWO may-be-absent badges are prose — one signpost on the overview, one explanation in Notes',
+    badgeProse.length, 2)
+  check('the overview\'s prose badge sits in the panel that also renders the chart',
+    html.slice(0, badgeProse[0]).lastIndexOf('id="panel-overview"') > html.slice(0, badgeProse[0]).lastIndexOf('id="panel-notes"'), true)
+  check('the explanation\'s prose badge sits in the Notes view',
+    html.slice(0, badgeProse[1]).lastIndexOf('id="panel-notes"') > html.slice(0, badgeProse[1]).lastIndexOf('id="panel-tools"'), true)
   check('the set the may-be-absent badge DESCRIBES is exactly the set the code declares',
     [...new Set(badgeOf)].sort(), PHASES.filter((p) => p.optional).map((p) => p.file).sort())
   check('every may-be-absent phase carries the badge at BOTH render sites (overview row + detail view)',
@@ -3967,9 +4325,12 @@ function verify(html) {
   check('the group shards land under the memory plane the reader looks in',
     /writes\.push\(options\.write\('memory\/domains\//.test(trainingSrc), true)
 
-  /* 3e. THE THREE CHARTS — the manifests the page ships, re-read from the markup.
-     A fact about the DRAWING is still a fact: if the graph lost an arrow, or the loop
-     lost a step, these counts would move. */
+  /* 3e. THE CHARTS — the manifests the page ships, re-read from the markup.
+     A fact about the DRAWING is still a fact: if the merged overview lost an arrow, or the loop lost
+     a step, these counts would move. ⚠ THE MERGE IS ITSELF ASSERTED: `phase-graph` must NOT be a
+     chart any more. The whole brief was that the sixteen edges stop living on a second tab, and the
+     cheapest way for that to regress is for someone to add the tab back "for reference" while the
+     overview quietly keeps its own picture. */
   const dec = (s) => s.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'")
   const layoutOf = (view) => {
     const at = html.indexOf('data-diagram="' + view + '"')
@@ -3978,29 +4339,113 @@ function verify(html) {
     const raw = html.slice(open + 'data-layout="'.length, html.indexOf('"', open + 'data-layout="'.length))
     return JSON.parse(dec(raw))
   }
-  check('three charts are rendered, each with its own manifest',
-    [...html.matchAll(/data-diagram="([a-z-]+)"/g)].map((m) => m[1]), ['overview', 'phase-graph', 'learning-loop'])
-  const graphLayout = layoutOf('phase-graph')
-  const drawnRuns = graphLayout.boxes
-    .filter(([, , , , , label]) => /^(lane|spine) .+ -> .+$/.test(label) || /^wildcard stub /.test(label))
-    .map((b) => b[5])
+  check('two charts are rendered, each with its own manifest — the overview and the learning loop',
+    [...html.matchAll(/data-diagram="([a-z-]+)"/g)].map((m) => m[1]), ['overview', 'learning-loop'])
+  check('there is NO separate phase-graph chart any more: the edges live on the overview',
+    /data-diagram="phase-graph"/.test(html), false)
+  check('there is no Phase graph TAB either — the merge removed the view, not just its chart',
+    /id="tab-graph"/.test(html), false)
+  check('every phase still has its own detail view, so the merge removed no reference material',
+    PHASES.map((p) => 'phase-' + p.file.replace(/[^a-z0-9]+/gi, '-')).filter((id) => !html.includes('id="panel-' + id + '"')), [])
+  const overviewLayout = layoutOf('overview')
+  const labels = overviewLayout.boxes.map((b) => b[5])
   const expectedRuns = EDGES.map((e) => {
     if (e.kind === 'wildcard') return 'wildcard stub ' + e.to
     const i = PHASES.findIndex((p) => p.file === e.from)
     const j = PHASES.findIndex((p) => p.file === e.to)
     return (j - i === 1 ? 'spine ' : 'lane ') + e.from + ' -> ' + e.to
   })
-  check('the phase graph draws exactly one run per edge, and every edge is drawn',
+  const drawnRuns = labels.filter((l) => /^(lane|spine) .+ -> .+$/.test(l) || /^wildcard stub /.test(l))
+  check('THE OVERVIEW DRAWS EXACTLY ONE RUN PER DERIVED EDGE, AND EVERY EDGE IS DRAWN',
     drawnRuns.slice().sort(), expectedRuns.slice().sort())
-  check('the phase graph draws one node per phase',
-    graphLayout.boxes.filter(([, , , , , label]) => /^node /.test(label)).length, PHASES.length)
+  check('the overview draws one node per phase',
+    labels.filter((l) => /^node /.test(l)).length, PHASES.length)
+  /* The interaction types, each asserted as the SHAPE that carries it — this is the check that
+     would fail if the picture went back to being twelve boxes in a row. */
+  check('MULTI-INPUT is a shape: one dashed-border node per phase that reads more than one artifact',
+    PHASES.filter((p) => sourcesOf(p.file) > 1).length, 5)
+  check('every multi-input node carries the fan-in rail label', PHASES.filter((p) => sourcesOf(p.file) > 1)
+    .filter((p) => !Number.isFinite(overviewLayout.boxes.find((b) => b[5] === 'node ' + p.file)?.[2])), [])
+  check('HUMAN DECISION is a shape: one amber marker box per phase a person must answer',
+    labels.filter((l) => /^human decision marker /.test(l)).length, PHASES.filter((p) => p.human).length)
+  check('every human marker carries its own diamond', PHASES.filter((p) => p.human)
+    .filter((p) => !labels.includes('decision diamond ' + p.file)), [])
+  /* The rendered refusal bands: one per PHASE, and each one names the narrowest rule that bites
+     there. The count is over phases, not over (rule, phase) pairs — a band is one box with one
+     label, and the label lists every rule that selects that phase. */
+  check('REFUSAL is a shape: one band under every phase, and the rules the page names are the ones it draws',
+    [labels.filter((l) => /^refusal band /.test(l)).length, REFUSAL_MARKS.filter((r) => r.nodes.length > 0).length],
+    [PHASES.length, 8])
+  check('CONDITIONAL edges are dashed: one lane run per FORWARD, NON-ADJACENT input edge',
+    labels.filter((l) => /^lane .+ -> .+$/.test(l)).length,
+    EDGES.filter((e) => e.kind !== 'wildcard'
+      && PHASES.findIndex((p) => p.file === e.to) - PHASES.findIndex((p) => p.file === e.from) !== 1).length)
+  check('WILDCARD is a shape: a rail, one thick stub per wildcard phase, and the rail is as wide as the row',
+    labels.filter((l) => /^wildcard stub /.test(l)).length, EDGES.filter((e) => e.kind === 'wildcard').length)
+  check('SEQUENCE-ORDER links are their own shape, and there is one per adjacent pair with no edge',
+    labels.filter((l) => /^sequence link /.test(l)).length, 4)
+  /* ⚠ THE SEQUENCE LINKS ARE CHECKED AGAINST THE EDGE SET IN BOTH DIRECTIONS, because the whole
+     point of that shape is the pairs it is NOT drawn on: a dotted link over a pair that has an input
+     edge would claim the order and the dependency are the same thing, which is the mistake the
+     shape exists to prevent. */
+  {
+    const adjacentWithEdge = ['00-requirements.md->00-worktree.md', '01-as-is.md->01.5-root-cause.md',
+      '01.5-root-cause.md->02-to-be-plan.md', '02-to-be-plan.md->03-implementation-summary.md',
+      '03-implementation-summary.md->03.5-code-review.md', '03.5-code-review.md->04-test-summary.md',
+      '06-decisions-update.md->07-state-update.md']
+    const adjacentPairs = PHASES.slice(0, -1).map((p, i) => p.file + '->' + PHASES[i + 1].file)
+    check('a dotted SEQUENCE-ORDER link is drawn on every adjacent pair, and a spine arrow on the rest',
+      [labels.filter((l) => /^sequence link /.test(l)).length, labels.filter((l) => /^spine .+ -> .+$/.test(l)).length],
+      [adjacentPairs.length - adjacentWithEdge.length, adjacentWithEdge.length])
+  }
+  check('REFUSAL BANDS: one per phase, and each names a rule that is declared to bite there',
+    labels.filter((l) => /^refusal band /.test(l)).length, PHASES.length)
+  /* ⚠ EVERY RULE THE BANDS NAME IS RE-DERIVED FROM THE SOURCE THAT DECLARES IT. The refusal marks
+     are a transcription, and a transcription is exactly what this generator exists to keep honest:
+     the four built-in rules are read off `builtInToolPolicyRules` (whose `label:` literals are
+     already checked above), and the phase baselines off `phaseBaselineRules` — so a rule that is
+     renamed in the source fails here instead of leaving a band naming a rule that no longer exists. */
+  check('every rule the refusal bands name is a label the code actually declares',
+    [...globsSrc.matchAll(/label: '([a-z-]+)'/g)].map((m) => m[1]).concat(
+      /label: 'tdd-evidence'/.test(rulesSrc) ? ['tdd-evidence'] : [],
+      /phaseBaselineRules/.test(rulesSrc) ? ['phase 1/2 baseline', 'phase 6/7 baseline', 'phase 6/7/8 baseline'] : [],
+    ), ['lock-order', 'locked-write', 'phase-order', 'memory-read', 'tdd-evidence',
+      'phase 1/2 baseline', 'phase 6/7 baseline', 'phase 6/7/8 baseline'])
+  check('the refusal bands name only rules that are in that list',
+    REFUSAL_MARKS.filter((r) => !['lock-order', 'locked-write', 'phase-order', 'memory-read', 'tdd-evidence',
+      'phase 1/2 baseline', 'phase 6/7 baseline', 'phase 6/7/8 baseline'].includes(r.rule)).map((r) => r.rule), [])
+  /* AND THE ONE RULE WHOSE NAME DIFFERS BETWEEN THE TWO: the guards table splits the late-phase
+     baseline in two predicates, while the bands name the phases each one bites on. That is a fact
+     about the guards table, so it is asserted rather than smoothed over. */
+  check('the guards table declares the late-phase baseline as TWO rules, which is why the bands name phases',
+    GUARDS.filter((g) => /baseline/.test(g.k)).map((g) => g.k),
+    ['phase 6/7/8 baseline', 'phase 6/7 baseline', 'phase 1/2 baseline'])
+  check('BACK-EDGE is a shape: a shelf, a riser and an entry arrowhead per back edge',
+    [labels.filter((l) => /^reopen (shelf|riser|drop)/.test(l)).length,
+      labels.filter((l) => /^revise (shelf|riser|drop)/.test(l)).length], [3, 3])
+  check('the two back-edge arrowheads point at nodes EARLIER in the sequence than their sources',
+    labels.filter((l) => /^(reopen|revise) head /.test(l)).length, 2)
+  check('CROSS-RUN is a shape: a return run, a return drop, a return foot and an arrowhead that lands on the next run',
+    ['cross-run return run', 'cross-run return drop', 'cross-run return foot', 'cross-run return head']
+      .filter((l) => !labels.includes(l)), [])
+  check('the cross-run band draws the three steps of the cycle, edge to edge',
+    labels.filter((l) => /^cross-run card: /.test(l)).length, 3)
   const loopLayout = layoutOf('learning-loop')
   check('the learning loop draws every step and every gate that can stop one',
     [loopLayout.boxes.filter(([, , , , , l]) => /^step \d+: /.test(l)).length,
       loopLayout.boxes.filter(([, , , , , l]) => /^gate for step /.test(l)).length],
     [TRAINING.steps.length, TRAINING.steps.filter((s) => s.gate).length])
   check('each chart carries a distinct wrapper width (no chart is scaled by another)',
-    new Set([layoutOf('overview').viewBox[2], graphLayout.viewBox[2], loopLayout.viewBox[2]]).size, 3)
+    new Set([overviewLayout.viewBox[2], loopLayout.viewBox[2]]).size, 2)
+  /* ⚠ THE FRAME IS THE LAST THING THAT CAN CLIP A CHART SILENTLY. Every reserved box has to sit
+     inside the viewBox, including a lane or a legend row that ran past the end of the drawing. */
+  check('NOTHING IN ANY CHART FALLS OUTSIDE ITS FRAME (a clipped mark is an invisible one)',
+    [...html.matchAll(/data-layout="([^"]*)"/g)].map((m) => JSON.parse(dec(m[1]))).flatMap((L) => {
+      const [ox, oy, w, h] = L.viewBox
+      return L.boxes
+        .filter((b) => b[1] < ox - 3 || b[2] < oy - 3 || b[1] + b[3] > ox + w + 3 || b[2] + b[4] > oy + h + 3)
+        .map((b) => b[5] + ' ' + JSON.stringify([b[1], b[2], b[3], b[4]]))
+    }), [])
 
   // 4. tools
   const toolFiles = ['recursive_status', 'recursive_init', 'recursive_lock', 'recursive_lint', 'recursive_closeout', 'recursive_scratch', 'recursive_worktree', 'recursive_phase', 'recursive_review', 'recursive_delegate', 'recursive_ask', 'recursive_preview', 'recursive_audit_team']

@@ -68,18 +68,20 @@ check('<script> and </script> balance', (html.match(/<script>/g) || []).length =
 check('the script block contains no nested closing script tag', !scriptBlock.includes('</script'))
 
 /* 4. the SVGs are well formed enough to render ---------------------------
-   ⚠ EVERY CHART, NOT THE FIRST ONE. The page now carries three charts (the overview,
-   the phase graph and the learning loop), so "exactly one <svg>" stopped being the
-   right invariant the moment the second one was added: what matters is that EVERY svg
-   is well formed, labelled, and self-closed, and that the count is the count the page
-   claims. A check pinned to one svg would have covered one chart and ignored two. */
+   ⚠ EVERY CHART, NOT THE FIRST ONE. The page carries the overview and the learning loop, so
+   "exactly one <svg>" stopped being the right invariant the moment the second one was added: what
+   matters is that EVERY svg is well formed, labelled, and self-closed, and that the count is the
+   count the page claims. A check pinned to one svg would have covered one chart and ignored the
+   other. ⚠ AND THE COUNT IS TWO, NOT THREE: the phase graph used to be a chart of its own, and the
+   merge that moved its sixteen edges onto the overview is asserted here in the negative — a page
+   that grew a third svg back would fail this line rather than quietly reintroduce the second tab. */
 const svgs = [...html.matchAll(/<svg[\s\S]*?<\/svg>/g)].map((m) => m[0])
-check('there are three inline <svg> charts (found ' + svgs.length + ')', svgs.length === 3,
-  'the page draws the overview, the phase graph and the learning loop')
+check('there are two inline <svg> charts (found ' + svgs.length + ')', svgs.length === 2,
+  'the page draws the overview — which IS the graph — and the learning loop')
 check('every svg has a viewBox and integer dimensions',
   svgs.every((s) => /viewBox="[^"]+"/.test(s) && /\bwidth="\d+"/.test(s) && /\bheight="\d+"/.test(s)))
 check('every svg is labelled for assistive technology',
-  [...html.matchAll(/data-diagram="[a-z-]+" role="img" aria-label="([^"]*)"/g)].length === 3
+  [...html.matchAll(/data-diagram="[a-z-]+" role="img" aria-label="([^"]*)"/g)].length === 2
   && [...html.matchAll(/data-diagram="[a-z-]+" role="img" aria-label="([^"]*)"/g)].every((m) => m[1].length > 60))
 check('every svg <text> balances', svgs.every((s) => (s.match(/<text/g) || []).length === (s.match(/<\/text>/g) || []).length))
 check('every svg <rect> is self-closed', svgs.every((s) => (s.match(/<rect[^>]*\/>/g) || []).length === (s.match(/<rect/g) || []).length))

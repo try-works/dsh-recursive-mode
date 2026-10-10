@@ -41,6 +41,7 @@
   --ok-dim:#1c4632;
   --violet:#b9a7ff;
   --violet-dim:#3a3468;
+  --seq-dim:#5b6e88;
   --warn-ink:#1b1409;
   --danger-ink:#3a1310;
 
@@ -354,12 +355,28 @@ td .cite{ margin-left:var(--sp-1); }
 .dg-line-cond{ stroke:var(--n-300); stroke-width:1; fill:none; stroke-dasharray:5 4; }
 /* WILDCARD edge: twice as thick as every other edge. */
 .dg-line-wide{ stroke:var(--n-400); stroke-width:2; fill:none; }
+/* SEQUENCE ORDER, NOT AN INPUT: the dotted link between two adjacent nodes that the
+   linter's input map does NOT connect. It is the only mark in the chart that says
+   "adjacent" rather than "depends on", so it is the quietest stroke here and it is
+   dotted rather than dashed — a third pattern, not a variant of the conditional one. */
+.dg-line-seq{ stroke:var(--seq-dim); stroke-width:1; fill:none; stroke-dasharray:1 3; }
 .dg-head{ fill:var(--n-500); }
 .dg-head-acc{ fill:var(--accent); }
 .dg-head-warn{ fill:var(--warn); }
 .dg-head-loop{ fill:var(--violet); }
 .dg-head-cond{ fill:var(--n-300); }
 .dg-head-wide{ fill:var(--n-400); }
+.dg-head-seq{ fill:var(--seq-dim); }
+/* The human-decision marker above a node: an amber diamond, the same rotated square the
+   overview rail uses for a human step, so "a person decides here" is ONE shape page-wide. */
+.dg-mark{ fill:var(--warn); }
+/* A legend swatch: a region, not a signal — its meaning is the label drawn beside it. */
+.dg-legend{ fill:var(--n-850); stroke:var(--n-400); stroke-width:1; }
+.dg-legend-cond{ fill:none; stroke:var(--n-300); stroke-width:1; stroke-dasharray:5 4; }
+.dg-legend-seq{ fill:none; stroke:var(--seq-dim); stroke-width:1; stroke-dasharray:1 3; }
+.dg-legend-rail{ fill:var(--n-800); stroke:var(--n-400); stroke-width:1; stroke-dasharray:1 3; }
+.dg-legend-wide{ fill:none; stroke:var(--n-400); stroke-width:2; }
+.dg-legend-refuse{ fill:var(--danger-ink); stroke:var(--danger); stroke-width:1; }
 
 /* ---- misc --------------------------------------------------------------- */
 footer.colophon{ border-top:1px solid var(--line-strong); margin-top:var(--sp-8); padding-top:var(--sp-5); font-size:var(--fs-3xs); color:var(--fg-faint); }
@@ -423,8 +440,7 @@ footer.colophon p{ margin-bottom:var(--sp-2); max-width:100ch; }
 <nav class="tabstrip" aria-label="Workflow views">
   <p class="tabstrip-label" id="tabstrip-hint">Views — use ← → Home End to move between tabs</p>
   <div role="tablist" aria-labelledby="tabstrip-hint">
-    <button role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" tabindex="0"><span class="tlabel">Overview</span><span class="tsub">whole flow</span></button>
-    <button role="tab" id="tab-graph" aria-controls="panel-graph" aria-selected="false" tabindex="-1"><span class="tlabel">Phase graph</span><span class="tsub">who reads whom</span></button>
+    <button role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" tabindex="0"><span class="tlabel">Overview</span><span class="tsub">the graph</span></button>
     <button role="tab" id="tab-start" aria-controls="panel-start" aria-selected="false" tabindex="-1"><span class="tlabel">Phase 0</span><span class="tsub">the human gate</span></button>
     <button role="tab" id="tab-phase-00-requirements-md" aria-controls="panel-phase-00-requirements-md" aria-selected="false" tabindex="-1"><span class="tlabel">00-requirements</span><span class="tsub">phase 0</span></button>
     <button role="tab" id="tab-phase-00-worktree-md" aria-controls="panel-phase-00-worktree-md" aria-selected="false" tabindex="-1"><span class="tlabel">00-worktree</span><span class="tsub">phase 0</span></button>
@@ -443,6 +459,7 @@ footer.colophon p{ margin-bottom:var(--sp-2); max-width:100ch; }
     <button role="tab" id="tab-loops" aria-controls="panel-loops" aria-selected="false" tabindex="-1"><span class="tlabel">Backward loops</span><span class="tsub">REVISE / repair</span></button>
     <button role="tab" id="tab-training" aria-controls="panel-training" aria-selected="false" tabindex="-1"><span class="tlabel">Learning loop</span><span class="tsub">cross-run memory</span></button>
     <button role="tab" id="tab-closeout" aria-controls="panel-closeout" aria-selected="false" tabindex="-1"><span class="tlabel">Closeout &amp; receipts</span><span class="tsub">the chain</span></button>
+    <button role="tab" id="tab-notes" aria-controls="panel-notes" aria-selected="false" tabindex="-1"><span class="tlabel">Notes &amp; caveats</span><span class="tsub">the prose, moved</span></button>
     <button role="tab" id="tab-tools" aria-controls="panel-tools" aria-selected="false" tabindex="-1"><span class="tlabel">Tools</span><span class="tsub">13 definitions</span></button>
     <button role="tab" id="tab-codes" aria-controls="panel-codes" aria-selected="false" tabindex="-1"><span class="tlabel">Error codes</span><span class="tsub">RM####</span></button>
     <button role="tab" id="tab-verify" aria-controls="panel-verify" aria-selected="false" tabindex="-1"><span class="tlabel">Verification</span><span class="tsub">what is checked</span></button>
@@ -451,148 +468,204 @@ footer.colophon p{ margin-bottom:var(--sp-2); max-width:100ch; }
 
 <main id="main">
 
-<!-- ===================== OVERVIEW ===================== -->
+<!-- ===================== OVERVIEW — THE GRAPH ===================== -->
 <section class="panel is-active" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
   <div class="panel-head">
-    <h2>The flow, end to end</h2>
-    <p class="lede">Read top to bottom. Each card is one artifact on disk; the left rail is the sequence; the <span style="color:var(--violet)">violet</span> links are the places the flow legitimately runs BACKWARDS. <span class="cite">src/lock.ts:21</span></p>
-  </div>
-
-  <div class="legend">
-    <div><span class="swatch sw-auto"></span> automatic step</div>
-    <div><span class="swatch sw-human"></span> DECISION — a human must answer</div>
-    <div><span class="swatch sw-refuse"></span> REFUSAL — the call is stopped</div>
-    <div><span class="swatch sw-loop"></span> backward edge</div>
-    <div><span class="swatch sw-late"></span> member of <code>LATE_PHASE_ARTIFACTS</code></div>
-    <div><span class="swatch sw-absent"></span> dashed border = the phase <b>may be absent</b></div>
-  </div>
-
-  <div class="callout">
-    <strong>Reading the shapes, not the colours.</strong> Every gate below carries a word — <b>DECISION</b>, <b>REFUSAL</b> or <b>AUTO</b> — and a border treatment, so nothing here depends on colour alone. The human steps are also the only cards with a filled amber rail dot. Layout follows the workflow, not a hardware pipeline: this is a gated process with decision points, so the diagram is a vertical sequence with side rails, not a data bus.
-  </div>
-
-  <div class="callout">
-    <strong>All twelve artifacts are MANDATORY work. Nothing here is an optional phase.</strong>
-    Every phase row below carries a <span class="tag tag-may-be-absent">may be absent</span> badge, and it is worth stating plainly what that badge does <em>not</em> mean: it does not mean the phase is optional. It is the property of one SET — <code>lock.ts</code> <code>OPTIONAL_PHASES</code>, whose only use in the plugin is <code>nextLegalPhase(graph, { optional: OPTIONAL_PHASES })</code>, i.e. "a member that is ABSENT does not stop the legal-phase selector". That is a statement about a fallback query, not about the work.
-    <br><br>
-    <b>The positive fact, which the plugin enforces end to end:</b> <code>recursive_init</code> scaffolds <b>all twelve</b> artifacts in one call — the two Phase 0 templates and then every later phase — so a scaffolded run has no missing phase to skip. <span class="cite">src/runtime.ts:1570</span> All twelve then lock <b>in sequence</b>: <code>PHASE_SEQUENCE</code> is the canonical order and the lock chain refuses out of order. <span class="cite">src/lock.ts:21, src/runtime.ts:1656</span> And a normal run produces twelve: the seven <em>may-be-absent</em> phases are written and locked exactly like the other five, because the scaffold writes them and the sequence locks them — being able to be ABSENT is not the same as being permitted to be absent.
-    <br><br>
-    <span class="unv">⚠ Stated precisely, because this is the whole point of the badge change:</span> the seven <em>may-be-absent</em> phases are the seven members of <code>OPTIONAL_PHASES</code>, and their badge means only that an <b>absent</b> one will not block the chain. Whether a phase's WORK is optional is not a property any code in this repo declares, and this page no longer implies one.
-    <br><br>
-    <span class="unv">⚠ AND THIS IS A REAL INCONSISTENCY IN THE REPOSITORY, reported rather than smoothed over.</span> There are <b>two independent optionality declarations</b> and they disagree. <code>lock.ts</code> <code>OPTIONAL_PHASES</code> has seven members, and it is what the legal-phase selector uses; <code>status.ts</code> carries its own <code>optional:</code> flag on the twelve-row status table and marks only <b>two</b> — <code>01.5-root-cause.md</code> and <code>03.5-code-review.md</code>. That second flag is load-bearing in two places: a missing phase is reported <code>SKIPPED</code> from it, and <code>snapshot.ts</code> computes a run's <code>complete</code> state by requiring every phase where <code>!p.optional</code>. So five of these seven phases are treated as <b>required</b> by the run-completion calculation while the selector treats them as skippable. Both readings are honest; they are just not the same reading, and a reader deserves to know which one is speaking. <span class="cite">src/status.ts:46, src/status.ts:371, src/snapshot.ts:118, src/lock.ts:36</span>
-  </div>
-
-  <div class="callout">
-    <strong>Three things this overview does NOT try to be, and the views that are.</strong>
-    It is the readable SPINE, so it states what each phase is FOR and how many upstream artifacts it reads — the fan-in on every node. It does not draw the arrows: <a href="#graph-edges">the <b>Phase graph</b> view draws every one of the 16 directed edges</a>, with the 2 conditional ones dashed and the 2 wildcard ones as a rail, because 5 phases read more than one upstream artifact and a chain of boxes cannot show that.
-    And no view here showed the CROSS-RUN cycle at all until <a href="#training-steps">the <b>Learning loop</b> view</a>: a run reads the memory plane at phase entry, must write memory before phase 8 can lock, and — only on a re-run, only with two locked runs and a configured extractor — writes training shards that the NEXT run reads.
+    <h2>The workflow, as a graph</h2>
+    <p class="lede">Twelve phase artifacts in <code>PHASE_SEQUENCE</code> order, and every one of the 16 directed input edges between them, drawn. The chart scrolls sideways; its own legend is at the bottom of the picture. <span class="cite">src/lock.ts:21, src/ts-lint.ts:670</span></p>
+    <p class="note">The facts this view used to carry as prose — what the <span class="tag tag-may-be-absent">may be absent</span> badge means, the two optionality declarations, what the drawing deliberately leaves out — are in <a href="#tab-notes">Notes &amp; caveats</a>, and the per-phase detail is on the <a href="#tab-overview">twelve phase views</a>.</p>
   </div>
 
   
-  <div class="diagram" id="dg-overview" data-diagram="overview" role="img" aria-label="Overview diagram: the Phase 0 human gate, the twelve-artifact sequence as one horizontally scrollable strip carrying the fan-in of each phase, the two gating hooks in their own column, the lock chain, the backward edge, and the phases that read more than one upstream artifact. The same information is given as text in the sequence below." style="--dg-w:2922px" data-layout="{&quot;v&quot;:1,&quot;charW&quot;:0.602,&quot;lineHeight&quot;:1.4,&quot;viewBox&quot;:[0,0,2922,574],&quot;fit&quot;:[[&quot;THE WORKFLOW, CHARTED — every band below reserves its space before it is drawn&quot;,48,0,516.52,15.4],[&quot;recursive_ask gate=run-start&quot;,56,34.4,168.56,14],[&quot;labels:  Start run  |  Hold&quot;,56,50.4,154.41,13.3],[&quot;refuses to ASK until&quot;,48,81.4,114.38,13.3],[&quot;00-requirements.md is filled&quot;,48,94.7,160.13,13.3],[&quot;(RM4404). No approval means&quot;,48,108,154.41,13.3],[&quot;syncRunGoal creates no goal, so&quot;,48,121.3,177.29,13.3],[&quot;nothing runs.&quot;,48,134.6,74.35,13.3],[&quot;THE TWELVE PHASE ARTIFACTS — PHASE_SEQUENCE, index 0 → 11&quot;,291,35.4,377.45,15.4],[&quot;00-requirements&quot;,299,77.8,99.33,15.4],[&quot;phase 0&quot;,299,94.2,40.03,13.3],[&quot;no upstream artifact&quot;,299,108.5,114.38,13.3],[&quot;00-worktree&quot;,491,77.8,72.84,15.4],[&quot;phase 0&quot;,491,94.2,40.03,13.3],[&quot;fan-in 1&quot;,491,108.5,45.75,13.3],[&quot;01-as-is&quot;,683,77.8,52.98,15.4],[&quot;phase 1&quot;,683,94.2,40.03,13.3],[&quot;fan-in 1&quot;,683,108.5,45.75,13.3],[&quot;01.5-root-cause&quot;,875,77.8,99.33,15.4],[&quot;phase 1&quot;,875,94.2,40.03,13.3],[&quot;fan-in 1&quot;,875,108.5,45.75,13.3],[&quot;02-to-be-plan&quot;,1067,77.8,86.09,15.4],[&quot;phase 2&quot;,1067,94.2,40.03,13.3],[&quot;fan-in 3 · 1 when-present&quot;,1067,108.5,142.98,13.3],[&quot;03-implementation-summary&quot;,1259,77.8,165.55,15.4],[&quot;phase 3&quot;,1259,94.2,40.03,13.3],[&quot;fan-in 1&quot;,1259,108.5,45.75,13.3],[&quot;03.5-code-review&quot;,1451,77.8,105.95,15.4],[&quot;phase 3&quot;,1451,94.2,40.03,13.3],[&quot;fan-in 2&quot;,1451,108.5,45.75,13.3],[&quot;04-test-summary&quot;,1643,77.8,99.33,15.4],[&quot;phase 4&quot;,1643,94.2,40.03,13.3],[&quot;fan-in 3 · 1 when-present&quot;,1643,108.5,142.98,13.3],[&quot;05-manual-qa&quot;,1835,77.8,79.46,15.4],[&quot;phase 5&quot;,1835,94.2,40.03,13.3],[&quot;fan-in 1&quot;,1835,108.5,45.75,13.3],[&quot;06-decisions-update&quot;,2027,77.8,125.82,15.4],[&quot;phase 6&quot;,2027,94.2,40.03,13.3],[&quot;fan-in 11 · all present&quot;,2027,108.5,131.54,13.3],[&quot;07-state-update&quot;,2219,77.8,99.33,15.4],[&quot;phase 7&quot;,2219,94.2,40.03,13.3],[&quot;fan-in 1&quot;,2219,108.5,45.75,13.3],[&quot;08-memory-impact&quot;,2411,77.8,105.95,15.4],[&quot;phase 8&quot;,2411,94.2,40.03,13.3],[&quot;fan-in 11 · all present&quot;,2411,108.5,131.54,13.3],[&quot;HOOK CHANNEL — pre_trigger (gating)&quot;,2643,27.4,231.77,15.4],[&quot;exit-plan-mode-gate   prio 5&quot;,2651,55.8,185.42,15.4],[&quot;denies exit_plan_mode while a phase waits&quot;,2651,72.2,234.48,13.3],[&quot;builtin-tool-guard   prio 0&quot;,2651,107.8,178.79,15.4],[&quot;phase-order | locked | lock-order | tdd&quot;,2651,124.2,223.04,13.3],[&quot;The first decisive hook short-circuits.&quot;,2643,154.8,223.04,13.3],[&quot;Observe-only points are downgraded, not&quot;,2643,168.1,223.04,13.3],[&quot;obeyed.&quot;,2643,181.4,40.03,13.3],[&quot;recursive_lock — the chain, in checks order&quot;,48,216.7,284.75,15.4],[&quot;1 lock order&quot;,56,249.1,68.63,13.3],[&quot;2 quiescence&quot;,192,249.1,68.63,13.3],[&quot;3 phase-8 memory&quot;,328,249.1,91.5,13.3],[&quot;4 lint standard&quot;,464,249.1,85.79,13.3],[&quot;5 hash + receipt&quot;,600,249.1,91.5,13.3],[&quot;Ordering is FIRST and the linter is LAST: a run that is both out of order and&quot;,48,282.1,440.36,13.3],[&quot;below standard reports ORDERING.&quot;,48,295.4,183.01,13.3],[&quot;BACKWARD EDGE — a REVISE verdict or a reopen sends work BACK, not forward&quot;,48,330.7,417.49,13.3],[&quot;A REVISE verdict or a reopen sends work back to repair: REVISE returns the follow-up to the SAME&quot;,48,350,549.02,13.3],[&quot;child, and a reopen invalidates the downstream receipts.&quot;,48,363.3,320.26,13.3],[&quot;nextLegalPhase returns null — NOT the next node — when the first unlocked node has an unlocked&quot;,48,376.6,537.59,13.3],[&quot;prerequisite. With a back-edge, \&quot;continue\&quot; and \&quot;blocked\&quot; are different answers, and only null is&quot;,48,389.9,549.02,13.3],[&quot;correct.&quot;,48,403.2,45.75,13.3],[&quot;WHERE IT STOPS BEING A CHAIN — the phases that read more than one upstream artifact&quot;,48,438.5,549.63,15.4],[&quot;02-to-be-plan ← 3 · 03.5-code-review ← 2 · 04-test-summary ← 3 · 06-decisions-update ← 11 · 08-memory-impact ← 11 — 16 directed&quot;,48,459.9,726.31,13.3],[&quot;edges in all: 12 required, 2 conditional (\&quot;when present\&quot;), 2 wildcard.&quot;,48,473.2,400.33,13.3],[&quot;Arrow by arrow, with the conditional edges drawn dashed, on the PHASE GRAPH view. The cross-run memory cycle is its own view: THE&quot;,48,486.5,737.75,13.3],[&quot;LEARNING LOOP.&quot;,48,499.8,80.07,13.3],[&quot;DECISION = amber box, filled rail dot  ·  REFUSAL = hatched  ·  everything else: AUTO&quot;,48,525.1,486.12,13.3],[&quot;Every element above reserved its box first: the generator REFUSES to emit the chart when two of them intersect.&quot;,48,544.4,634.81,13.3]],&quot;boxes&quot;:[[&quot;text&quot;,48,0,516.52,15.4,&quot;THE WORKFLOW, CHARTED — every band below reserves its space before it is drawn&quot;],[&quot;box&quot;,48,27.4,189,46,&quot;phase-0 gate card&quot;],[&quot;text&quot;,56,34.4,168.56,14,&quot;recursive_ask gate=run-start&quot;],[&quot;text&quot;,56,50.4,154.41,13.3,&quot;labels:  Start run  |  Hold&quot;],[&quot;text&quot;,48,81.4,114.38,13.3,&quot;refuses to ASK until&quot;],[&quot;text&quot;,48,94.7,160.13,13.3,&quot;00-requirements.md is filled&quot;],[&quot;text&quot;,48,108,154.41,13.3,&quot;(RM4404). No approval means&quot;],[&quot;text&quot;,48,121.3,177.29,13.3,&quot;syncRunGoal creates no goal, so&quot;],[&quot;text&quot;,48,134.6,74.35,13.3,&quot;nothing runs.&quot;],[&quot;box&quot;,281,27.4,2318,101.4,&quot;the twelve-artifact strip&quot;],[&quot;text&quot;,291,35.4,377.45,15.4,&quot;THE TWELVE PHASE ARTIFACTS — PHASE_SEQUENCE, index 0 → 11&quot;],[&quot;box&quot;,291,70.8,186,58,&quot;node 00-requirements.md&quot;],[&quot;text&quot;,299,77.8,99.33,15.4,&quot;00-requirements&quot;],[&quot;text&quot;,299,94.2,40.03,13.3,&quot;phase 0&quot;],[&quot;text&quot;,299,108.5,114.38,13.3,&quot;no upstream artifact&quot;],[&quot;box&quot;,483,70.8,186,58,&quot;node 00-worktree.md&quot;],[&quot;text&quot;,491,77.8,72.84,15.4,&quot;00-worktree&quot;],[&quot;text&quot;,491,94.2,40.03,13.3,&quot;phase 0&quot;],[&quot;text&quot;,491,108.5,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,675,70.8,186,58,&quot;node 01-as-is.md&quot;],[&quot;text&quot;,683,77.8,52.98,15.4,&quot;01-as-is&quot;],[&quot;text&quot;,683,94.2,40.03,13.3,&quot;phase 1&quot;],[&quot;text&quot;,683,108.5,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,867,70.8,186,58,&quot;node 01.5-root-cause.md&quot;],[&quot;text&quot;,875,77.8,99.33,15.4,&quot;01.5-root-cause&quot;],[&quot;text&quot;,875,94.2,40.03,13.3,&quot;phase 1&quot;],[&quot;text&quot;,875,108.5,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,1059,70.8,186,58,&quot;node 02-to-be-plan.md&quot;],[&quot;text&quot;,1067,77.8,86.09,15.4,&quot;02-to-be-plan&quot;],[&quot;text&quot;,1067,94.2,40.03,13.3,&quot;phase 2&quot;],[&quot;text&quot;,1067,108.5,142.98,13.3,&quot;fan-in 3 · 1 when-present&quot;],[&quot;box&quot;,1251,70.8,186,58,&quot;node 03-implementation-summary.md&quot;],[&quot;text&quot;,1259,77.8,165.55,15.4,&quot;03-implementation-summary&quot;],[&quot;text&quot;,1259,94.2,40.03,13.3,&quot;phase 3&quot;],[&quot;text&quot;,1259,108.5,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,1443,70.8,186,58,&quot;node 03.5-code-review.md&quot;],[&quot;text&quot;,1451,77.8,105.95,15.4,&quot;03.5-code-review&quot;],[&quot;text&quot;,1451,94.2,40.03,13.3,&quot;phase 3&quot;],[&quot;text&quot;,1451,108.5,45.75,13.3,&quot;fan-in 2&quot;],[&quot;box&quot;,1635,70.8,186,58,&quot;node 04-test-summary.md&quot;],[&quot;text&quot;,1643,77.8,99.33,15.4,&quot;04-test-summary&quot;],[&quot;text&quot;,1643,94.2,40.03,13.3,&quot;phase 4&quot;],[&quot;text&quot;,1643,108.5,142.98,13.3,&quot;fan-in 3 · 1 when-present&quot;],[&quot;box&quot;,1827,70.8,186,58,&quot;node 05-manual-qa.md&quot;],[&quot;text&quot;,1835,77.8,79.46,15.4,&quot;05-manual-qa&quot;],[&quot;text&quot;,1835,94.2,40.03,13.3,&quot;phase 5&quot;],[&quot;text&quot;,1835,108.5,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,2019,70.8,186,58,&quot;node 06-decisions-update.md&quot;],[&quot;text&quot;,2027,77.8,125.82,15.4,&quot;06-decisions-update&quot;],[&quot;text&quot;,2027,94.2,40.03,13.3,&quot;phase 6&quot;],[&quot;text&quot;,2027,108.5,131.54,13.3,&quot;fan-in 11 · all present&quot;],[&quot;box&quot;,2211,70.8,186,58,&quot;node 07-state-update.md&quot;],[&quot;text&quot;,2219,77.8,99.33,15.4,&quot;07-state-update&quot;],[&quot;text&quot;,2219,94.2,40.03,13.3,&quot;phase 7&quot;],[&quot;text&quot;,2219,108.5,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,2403,70.8,186,58,&quot;node 08-memory-impact.md&quot;],[&quot;text&quot;,2411,77.8,105.95,15.4,&quot;08-memory-impact&quot;],[&quot;text&quot;,2411,94.2,40.03,13.3,&quot;phase 8&quot;],[&quot;text&quot;,2411,108.5,131.54,13.3,&quot;fan-in 11 · all present&quot;],[&quot;text&quot;,2643,27.4,231.77,15.4,&quot;HOOK CHANNEL — pre_trigger (gating)&quot;],[&quot;box&quot;,2643,48.8,255,44,&quot;hook: exit-plan-mode-gate&quot;],[&quot;text&quot;,2651,55.8,185.42,15.4,&quot;exit-plan-mode-gate   prio 5&quot;],[&quot;text&quot;,2651,72.2,234.48,13.3,&quot;denies exit_plan_mode while a phase waits&quot;],[&quot;box&quot;,2643,100.8,255,44,&quot;hook: builtin-tool-guard&quot;],[&quot;text&quot;,2651,107.8,178.79,15.4,&quot;builtin-tool-guard   prio 0&quot;],[&quot;text&quot;,2651,124.2,223.04,13.3,&quot;phase-order | locked | lock-order | tdd&quot;],[&quot;text&quot;,2643,154.8,223.04,13.3,&quot;The first decisive hook short-circuits.&quot;],[&quot;text&quot;,2643,168.1,223.04,13.3,&quot;Observe-only points are downgraded, not&quot;],[&quot;text&quot;,2643,181.4,40.03,13.3,&quot;obeyed.&quot;],[&quot;text&quot;,48,216.7,284.75,15.4,&quot;recursive_lock — the chain, in checks order&quot;],[&quot;box&quot;,48,240.1,128,32,&quot;lock step 1 lock order&quot;],[&quot;text&quot;,56,249.1,68.63,13.3,&quot;1 lock order&quot;],[&quot;box&quot;,184,240.1,128,32,&quot;lock step 2 quiescence&quot;],[&quot;text&quot;,192,249.1,68.63,13.3,&quot;2 quiescence&quot;],[&quot;rule&quot;,176,253.6,8,5,&quot;lock link 1&quot;],[&quot;box&quot;,320,240.1,128,32,&quot;lock step 3 phase-8 memory&quot;],[&quot;text&quot;,328,249.1,91.5,13.3,&quot;3 phase-8 memory&quot;],[&quot;rule&quot;,312,253.6,8,5,&quot;lock link 2&quot;],[&quot;box&quot;,456,240.1,128,32,&quot;lock step 4 lint standard&quot;],[&quot;text&quot;,464,249.1,85.79,13.3,&quot;4 lint standard&quot;],[&quot;rule&quot;,448,253.6,8,5,&quot;lock link 3&quot;],[&quot;box&quot;,592,240.1,128,32,&quot;lock step 5 hash + receipt&quot;],[&quot;text&quot;,600,249.1,91.5,13.3,&quot;5 hash + receipt&quot;],[&quot;rule&quot;,584,253.6,8,5,&quot;lock link 4&quot;],[&quot;text&quot;,48,282.1,440.36,13.3,&quot;Ordering is FIRST and the linter is LAST: a run that is both out of order and&quot;],[&quot;text&quot;,48,295.4,183.01,13.3,&quot;below standard reports ORDERING.&quot;],[&quot;text&quot;,48,330.7,417.49,13.3,&quot;BACKWARD EDGE — a REVISE verdict or a reopen sends work BACK, not forward&quot;],[&quot;text&quot;,48,350,549.02,13.3,&quot;A REVISE verdict or a reopen sends work back to repair: REVISE returns the follow-up to the SAME&quot;],[&quot;text&quot;,48,363.3,320.26,13.3,&quot;child, and a reopen invalidates the downstream receipts.&quot;],[&quot;text&quot;,48,376.6,537.59,13.3,&quot;nextLegalPhase returns null — NOT the next node — when the first unlocked node has an unlocked&quot;],[&quot;text&quot;,48,389.9,549.02,13.3,&quot;prerequisite. With a back-edge, \&quot;continue\&quot; and \&quot;blocked\&quot; are different answers, and only null is&quot;],[&quot;text&quot;,48,403.2,45.75,13.3,&quot;correct.&quot;],[&quot;rule&quot;,11.5,342.7,5,67.8,&quot;backward-edge riser&quot;],[&quot;rule&quot;,14,408,28,5,&quot;backward-edge run&quot;],[&quot;ink&quot;,10,334.7,8,8,&quot;backward-edge arrowhead&quot;],[&quot;text&quot;,48,438.5,549.63,15.4,&quot;WHERE IT STOPS BEING A CHAIN — the phases that read more than one upstream artifact&quot;],[&quot;text&quot;,48,459.9,726.31,13.3,&quot;02-to-be-plan ← 3 · 03.5-code-review ← 2 · 04-test-summary ← 3 · 06-decisions-update ← 11 · 08-memory-impact ← 11 — 16 directed&quot;],[&quot;text&quot;,48,473.2,400.33,13.3,&quot;edges in all: 12 required, 2 conditional (\&quot;when present\&quot;), 2 wildcard.&quot;],[&quot;text&quot;,48,486.5,737.75,13.3,&quot;Arrow by arrow, with the conditional edges drawn dashed, on the PHASE GRAPH view. The cross-run memory cycle is its own view: THE&quot;],[&quot;text&quot;,48,499.8,80.07,13.3,&quot;LEARNING LOOP.&quot;],[&quot;text&quot;,48,525.1,486.12,13.3,&quot;DECISION = amber box, filled rail dot  ·  REFUSAL = hatched  ·  everything else: AUTO&quot;],[&quot;text&quot;,48,544.4,634.81,13.3,&quot;Every element above reserved its box first: the generator REFUSES to emit the chart when two of them intersect.&quot;]],&quot;contains&quot;:[[2,1],[3,1],[10,9],[11,9],[12,9],[12,11],[13,9],[13,11],[14,9],[14,11],[15,9],[16,9],[16,15],[17,9],[17,15],[18,9],[18,15],[19,9],[20,9],[20,19],[21,9],[21,19],[22,9],[22,19],[23,9],[24,9],[24,23],[25,9],[25,23],[26,9],[26,23],[27,9],[28,9],[28,27],[29,9],[29,27],[30,9],[30,27],[31,9],[32,9],[32,31],[33,9],[33,31],[34,9],[34,31],[35,9],[36,9],[36,35],[37,9],[37,35],[38,9],[38,35],[39,9],[40,9],[40,39],[41,9],[41,39],[42,9],[42,39],[43,9],[44,9],[44,43],[45,9],[45,43],[46,9],[46,43],[47,9],[48,9],[48,47],[49,9],[49,47],[50,9],[50,47],[51,9],[52,9],[52,51],[53,9],[53,51],[54,9],[54,51],[55,9],[56,9],[56,55],[57,9],[57,55],[58,9],[58,55],[61,60],[62,60],[64,63],[65,63],[71,70],[73,72],[76,75],[79,78],[82,81],[93,92]]}">
-    <svg viewBox="0 0 2922 574" width="2922" height="574" preserveAspectRatio="xMinYMin meet">
-      <text class="dg-t-a" x="48" y="12.1">THE WORKFLOW, CHARTED — every band below reserves its space before it is drawn</text>
-      <rect class="dg-box dg-box-human" x="48" y="27.4" width="189" height="46" rx="1"/>
-      <text class="dg-t-h" x="56" y="45.4">recursive_ask gate=run-start</text>
-      <text class="dg-t-sm" x="56" y="60.85">labels:  Start run  |  Hold</text>
-      <text class="dg-t-sm" x="48" y="91.85">refuses to ASK until</text>
-      <text class="dg-t-sm" x="48" y="105.15">00-requirements.md is filled</text>
-      <text class="dg-t-sm" x="48" y="118.45">(RM4404). No approval means</text>
-      <text class="dg-t-sm" x="48" y="131.75">syncRunGoal creates no goal, so</text>
-      <text class="dg-t-sm" x="48" y="145.05">nothing runs.</text>
-      <rect class="dg-box-strip" x="281" y="27.4" width="2318" height="101.4" rx="1"/>
-      <text class="dg-t-a" x="291" y="47.5">THE TWELVE PHASE ARTIFACTS — PHASE_SEQUENCE, index 0 → 11</text>
-      <rect class="dg-box dg-box-human" x="291" y="70.8" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="299" y="89.9">00-requirements</text>
-      <text class="dg-t-sm" x="299" y="104.65">phase 0</text>
-      <text class="dg-t-sm" x="299" y="118.95">no upstream artifact</text>
-      <rect class="dg-box" x="483" y="70.8" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="491" y="89.9">00-worktree</text>
-      <text class="dg-t-sm" x="491" y="104.65">phase 0</text>
-      <text class="dg-t-sm" x="491" y="118.95">fan-in 1</text>
-      <rect class="dg-box" x="675" y="70.8" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="683" y="89.9">01-as-is</text>
-      <text class="dg-t-sm" x="683" y="104.65">phase 1</text>
-      <text class="dg-t-sm" x="683" y="118.95">fan-in 1</text>
-      <rect class="dg-box" x="867" y="70.8" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="875" y="89.9">01.5-root-cause</text>
-      <text class="dg-t-sm" x="875" y="104.65">phase 1</text>
-      <text class="dg-t-sm" x="875" y="118.95">fan-in 1</text>
-      <rect class="dg-box" x="1059" y="70.8" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="1067" y="89.9">02-to-be-plan</text>
-      <text class="dg-t-sm" x="1067" y="104.65">phase 2</text>
-      <text class="dg-t-sm" x="1067" y="118.95">fan-in 3 · 1 when-present</text>
-      <rect class="dg-box" x="1251" y="70.8" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="1259" y="89.9">03-implementation-summary</text>
-      <text class="dg-t-sm" x="1259" y="104.65">phase 3</text>
-      <text class="dg-t-sm" x="1259" y="118.95">fan-in 1</text>
-      <rect class="dg-box" x="1443" y="70.8" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="1451" y="89.9">03.5-code-review</text>
-      <text class="dg-t-sm" x="1451" y="104.65">phase 3</text>
-      <text class="dg-t-sm" x="1451" y="118.95">fan-in 2</text>
-      <rect class="dg-box" x="1635" y="70.8" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="1643" y="89.9">04-test-summary</text>
-      <text class="dg-t-sm" x="1643" y="104.65">phase 4</text>
-      <text class="dg-t-sm" x="1643" y="118.95">fan-in 3 · 1 when-present</text>
-      <rect class="dg-box dg-box-human" x="1827" y="70.8" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="1835" y="89.9">05-manual-qa</text>
-      <text class="dg-t-sm" x="1835" y="104.65">phase 5</text>
-      <text class="dg-t-sm" x="1835" y="118.95">fan-in 1</text>
-      <rect class="dg-box" x="2019" y="70.8" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="2027" y="89.9">06-decisions-update</text>
-      <text class="dg-t-sm" x="2027" y="104.65">phase 6</text>
-      <text class="dg-t-sm" x="2027" y="118.95">fan-in 11 · all present</text>
-      <rect class="dg-box" x="2211" y="70.8" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="2219" y="89.9">07-state-update</text>
-      <text class="dg-t-sm" x="2219" y="104.65">phase 7</text>
-      <text class="dg-t-sm" x="2219" y="118.95">fan-in 1</text>
-      <rect class="dg-box" x="2403" y="70.8" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="2411" y="89.9">08-memory-impact</text>
-      <text class="dg-t-sm" x="2411" y="104.65">phase 8</text>
-      <text class="dg-t-sm" x="2411" y="118.95">fan-in 11 · all present</text>
-      <text class="dg-t-a" x="2643" y="39.5">HOOK CHANNEL — pre_trigger (gating)</text>
-      <rect class="dg-box" x="2643" y="48.8" width="255" height="44" rx="1"/>
-      <text class="dg-t" x="2651" y="67.9">exit-plan-mode-gate   prio 5</text>
-      <text class="dg-t-sm" x="2651" y="82.65">denies exit_plan_mode while a phase waits</text>
-      <rect class="dg-box" x="2643" y="100.8" width="255" height="44" rx="1"/>
-      <text class="dg-t" x="2651" y="119.9">builtin-tool-guard   prio 0</text>
-      <text class="dg-t-sm" x="2651" y="134.65">phase-order | locked | lock-order | tdd</text>
-      <text class="dg-t-sm" x="2643" y="165.25">The first decisive hook short-circuits.</text>
-      <text class="dg-t-sm" x="2643" y="178.55">Observe-only points are downgraded, not</text>
-      <text class="dg-t-sm" x="2643" y="191.85">obeyed.</text>
-      <text class="dg-t-a" x="48" y="228.8">recursive_lock — the chain, in checks order</text>
-      <rect class="dg-box" x="48" y="240.1" width="128" height="32" rx="1"/>
-      <text class="dg-t-sm" x="56" y="259.55">1 lock order</text>
-      <rect class="dg-box" x="184" y="240.1" width="128" height="32" rx="1"/>
-      <text class="dg-t-sm" x="192" y="259.55">2 quiescence</text>
-      <path class="dg-line-acc" d="M176 253.6 L184 258.6"/>
-      <rect class="dg-box dg-box-refuse" x="320" y="240.1" width="128" height="32" rx="1"/>
-      <text class="dg-t-sm" x="328" y="259.55">3 phase-8 memory</text>
-      <path class="dg-line-acc" d="M312 253.6 L320 258.6"/>
-      <rect class="dg-box" x="456" y="240.1" width="128" height="32" rx="1"/>
-      <text class="dg-t-sm" x="464" y="259.55">4 lint standard</text>
-      <path class="dg-line-acc" d="M448 253.6 L456 258.6"/>
-      <rect class="dg-box" x="592" y="240.1" width="128" height="32" rx="1"/>
-      <text class="dg-t-sm" x="600" y="259.55">5 hash + receipt</text>
-      <path class="dg-line-acc" d="M584 253.6 L592 258.6"/>
-      <text class="dg-t-sm" x="48" y="292.55">Ordering is FIRST and the linter is LAST: a run that is both out of order and</text>
-      <text class="dg-t-sm" x="48" y="305.85">below standard reports ORDERING.</text>
-      <text class="dg-t-sm" x="48" y="341.15">BACKWARD EDGE — a REVISE verdict or a reopen sends work BACK, not forward</text>
-      <text class="dg-t-sm" x="48" y="360.45">A REVISE verdict or a reopen sends work back to repair: REVISE returns the follow-up to the SAME</text>
-      <text class="dg-t-sm" x="48" y="373.75">child, and a reopen invalidates the downstream receipts.</text>
-      <text class="dg-t-sm" x="48" y="387.05">nextLegalPhase returns null — NOT the next node — when the first unlocked node has an unlocked</text>
-      <text class="dg-t-sm" x="48" y="400.35">prerequisite. With a back-edge, &quot;continue&quot; and &quot;blocked&quot; are different answers, and only null is</text>
-      <text class="dg-t-sm" x="48" y="413.65">correct.</text>
-      <path class="dg-line-loop" d="M11.5 342.7 L16.5 410.5"/>
-      <path class="dg-line-loop" d="M14 408 L42 413"/>
-      <polygon class="dg-head-loop" points="14,334.7 10,342.7 18,342.7"/>
-      <text class="dg-t-a" x="48" y="450.6">WHERE IT STOPS BEING A CHAIN — the phases that read more than one upstream artifact</text>
-      <text class="dg-t-sm" x="48" y="470.35">02-to-be-plan ← 3 · 03.5-code-review ← 2 · 04-test-summary ← 3 · 06-decisions-update ← 11 · 08-memory-impact ← 11 — 16 directed</text>
-      <text class="dg-t-sm" x="48" y="483.65">edges in all: 12 required, 2 conditional (&quot;when present&quot;), 2 wildcard.</text>
-      <text class="dg-t-sm" x="48" y="496.95">Arrow by arrow, with the conditional edges drawn dashed, on the PHASE GRAPH view. The cross-run memory cycle is its own view: THE</text>
-      <text class="dg-t-sm" x="48" y="510.25">LEARNING LOOP.</text>
-      <text class="dg-t-sm" x="48" y="535.55">DECISION = amber box, filled rail dot  ·  REFUSAL = hatched  ·  everything else: AUTO</text>
-      <text class="dg-t-sm" x="48" y="554.85">Every element above reserved its box first: the generator REFUSES to emit the chart when two of them intersect.</text>
+  <div class="diagram" id="dg-overview" data-diagram="overview" role="img" aria-label="The workflow as a graph: the twelve phase artifacts of PHASE_SEQUENCE in order, with all 16 directed input edges drawn between them. A solid arrow is a required input the linter expects; a dashed arrow is one of the 2 conditional inputs, pushed only when the source artifact is present; a dotted link carries no input edge at all, so two adjacent pairs are marked as sequence order only and the difference between the order and a real dependency is visible. A thick arrow comes off the rail under the row: that is the wildcard input, every present artifact except itself, which phases 06 and 08 read. A dashed node border and its own fan-in line mark the 5 phases that read more than one upstream artifact. Amber diamonds above a node mark the 2 places a person must answer, and a hatched band under a node marks a place a guard rule can refuse. Violet arcs run BACKWARDS: a reopen and a REVISE verdict re-enter a node to the LEFT of their source, and the same arc closes the cross-run loop below the row, where the memory this run writes is read by the NEXT run's phase entry. The same information is given as tables in the views below." style="--dg-w:2854px" data-layout="{&quot;v&quot;:1,&quot;charW&quot;:0.602,&quot;lineHeight&quot;:1.4,&quot;viewBox&quot;:[0,-196.7,2854,905.7],&quot;fit&quot;:[[&quot;EVERY PRESENT ARTIFACT EXCEPT ITSELF — the wildcard input, declared by 2 phases&quot;,1992.75,327.5,523.14,15.4],[&quot;RUN_ARTIFACT_SEQUENCE.filter(a =&gt; present.has(a) &amp;&amp; a !== thisFile) — 11 possible sources, and NO single one of them is required&quot;,1992.75,343.9,732.03,13.3],[&quot;Drawn as ONE rail with 2 thick arrows rather than as 22 lines, because a bundle of eleven into one node is the picture that stops being readable.&quot;,1992.75,358.2,829.25,13.3],[&quot;reopen → back to DRAFT, downstream receipts invalidated&quot;,72,450.5,314.55,13.3],[&quot;REVISE → repair, then re-submit&quot;,72,476.8,177.29,13.3],[&quot;THE WORKFLOW AS A GRAPH — 12 phase artifacts, 16 directed edges, all of them drawn here&quot;,70,-196.7,576.11,15.4],[&quot;run-start&quot;,143,-32,51.47,13.3],[&quot;qa-signoff&quot;,2012,-32,57.19,13.3],[&quot;00-requirements&quot;,78,203.7,99.33,15.4],[&quot;phase 0 — Requirements&quot;,78,220.1,125.82,13.3],[&quot;no upstream artifact&quot;,78,234.4,114.38,13.3],[&quot;memory read&quot;,78,391.5,62.91,13.3],[&quot;00-worktree&quot;,312,203.7,72.84,15.4],[&quot;phase 0 — Worktree&quot;,312,220.1,102.94,13.3],[&quot;fan-in 1&quot;,312,234.4,45.75,13.3],[&quot;any lock or write&quot;,312,391.5,97.22,13.3],[&quot;01-as-is&quot;,546,203.7,52.98,15.4],[&quot;phase 1 — AS-IS&quot;,546,220.1,85.79,13.3],[&quot;fan-in 1&quot;,546,234.4,45.75,13.3],[&quot;no memory plane&quot;,546,391.5,85.79,13.3],[&quot;01.5-root-cause&quot;,780,203.7,99.33,15.4],[&quot;phase 1 — Root Cause&quot;,780,220.1,114.38,13.3],[&quot;fan-in 1&quot;,780,234.4,45.75,13.3],[&quot;no memory plane&quot;,780,391.5,85.79,13.3],[&quot;02-to-be-plan&quot;,1014,203.7,86.09,15.4],[&quot;phase 2 — TO-BE Plan&quot;,1014,220.1,114.38,13.3],[&quot;fan-in 3 · 1 when-present&quot;,1014,234.4,142.98,13.3],[&quot;no memory plane&quot;,1014,391.5,85.79,13.3],[&quot;03-implementation-summary&quot;,1248,203.7,165.55,15.4],[&quot;phase 3 — Implementation&quot;,1248,220.1,137.26,13.3],[&quot;fan-in 1&quot;,1248,234.4,45.75,13.3],[&quot;tdd-evidence&quot;,1248,391.5,68.63,13.3],[&quot;03.5-code-review&quot;,1482,203.7,105.95,15.4],[&quot;phase 3 — Code Review&quot;,1482,220.1,120.1,13.3],[&quot;fan-in 2&quot;,1482,234.4,45.75,13.3],[&quot;any lock or write&quot;,1482,391.5,97.22,13.3],[&quot;04-test-summary&quot;,1716,203.7,99.33,15.4],[&quot;phase 4 — Test Summary&quot;,1716,220.1,125.82,13.3],[&quot;fan-in 3 · 1 when-present&quot;,1716,234.4,142.98,13.3],[&quot;any lock or write&quot;,1716,391.5,97.22,13.3],[&quot;05-manual-qa&quot;,1950,203.7,79.46,15.4],[&quot;phase 5 — Manual QA&quot;,1950,220.1,108.66,13.3],[&quot;fan-in 1&quot;,1950,234.4,45.75,13.3],[&quot;any lock or write&quot;,1950,391.5,97.22,13.3],[&quot;06-decisions-update&quot;,2184,203.7,125.82,15.4],[&quot;phase 6 — Decisions&quot;,2184,220.1,108.66,13.3],[&quot;fan-in 11 · all present&quot;,2184,234.4,131.54,13.3],[&quot;frozen&quot;,2184,391.5,34.31,13.3],[&quot;07-state-update&quot;,2418,203.7,99.33,15.4],[&quot;phase 7 — State&quot;,2418,220.1,85.79,13.3],[&quot;fan-in 1&quot;,2418,234.4,45.75,13.3],[&quot;frozen&quot;,2418,391.5,34.31,13.3],[&quot;08-memory-impact&quot;,2652,203.7,105.95,15.4],[&quot;phase 8 — Memory&quot;,2652,220.1,91.5,13.3],[&quot;fan-in 11 · all present&quot;,2652,234.4,131.54,13.3],[&quot;frozen + memory&quot;,2652,391.5,85.79,13.3],[&quot;00-requirements&quot;,259,178.2,85.79,13.3],[&quot;00-requirements&quot;,259,134.2,85.79,13.3],[&quot;01-as-is&quot;,727,156.2,45.75,13.3],[&quot;02-to-be-plan&quot;,1195,112.2,74.35,13.3],[&quot;02-to-be-plan&quot;,1195,90.2,74.35,13.3],[&quot;02-to-be-plan&quot;,1195,68.2,74.35,13.3],[&quot;writes the plane, then REGISTERS it&quot;,78,510.1,200.17,13.3],[&quot;memory/training/&lt;task-type&gt;.md  +  MEMORY.md&quot;,78,524.4,251.64,13.3],[&quot;MEMORY PLANE — .recursive/memory/&quot;,350,510.1,188.73,13.3],[&quot;training/ is ONE of the 5 kinds read&quot;,350,524.4,205.88,13.3],[&quot;RUN N+1 — recursive_phase at phase entry&quot;,622,510.1,264.88,15.4],[&quot;...returns the shards that match this run&quot;,622,526.5,234.48,13.3],[&quot;ACROSS RUNS — the arrow leaves the run and lands at the NEXT one's phase entry&quot;,50,596.1,446.08,13.3],[&quot;NODES&quot;,70,628.1,30.1,14],[&quot;the phase, in PHASE_SEQUENCE order&quot;,152.1,628.1,194.45,13.3],[&quot;may be absent (OPTIONAL_PHASES)&quot;,396.55,628.1,177.29,13.3],[&quot;a guard rule can refuse here&quot;,623.84,628.1,160.13,13.3],[&quot;a person must answer&quot;,833.97,628.1,114.38,13.3],[&quot;EDGES&quot;,70,652.1,30.1,14],[&quot;required input&quot;,152.1,652.1,80.07,13.3],[&quot;conditional — source present&quot;,282.17,652.1,160.13,13.3],[&quot;wildcard — every present artifact&quot;,492.3,652.1,188.73,13.3],[&quot;sequence order only: no input edge&quot;,731.03,652.1,194.45,13.3],[&quot;reads MORE THAN ONE upstream artifact&quot;,975.48,652.1,211.6,13.3],[&quot;Violet arcs run BACKWARDS: reopen and REVISE re-enter a node to the LEFT of their source, and the same arc closes the CROSS-RUN loop below the row.&quot;,70,673.4,840.69,13.3],[&quot;Shape, word and count carry every distinction here; colour carries none of them. Every arrow is an entry in the linter's own expected-input map.&quot;,70,690.7,823.54,13.3]],&quot;boxes&quot;:[[&quot;rule&quot;,258,223.2,36,5,&quot;spine 00-requirements.md -&gt; 00-worktree.md&quot;],[&quot;ink&quot;,294,221.7,8,8,&quot;spine head 00-worktree.md&quot;],[&quot;rule&quot;,726,223.2,36,5,&quot;spine 01-as-is.md -&gt; 01.5-root-cause.md&quot;],[&quot;ink&quot;,762,221.7,8,8,&quot;spine head 01.5-root-cause.md&quot;],[&quot;rule&quot;,960,223.2,36,5,&quot;spine 01.5-root-cause.md -&gt; 02-to-be-plan.md&quot;],[&quot;rule&quot;,1194,223.2,36,5,&quot;spine 02-to-be-plan.md -&gt; 03-implementation-summary.md&quot;],[&quot;ink&quot;,1230,221.7,8,8,&quot;spine head 03-implementation-summary.md&quot;],[&quot;rule&quot;,1428,223.2,36,5,&quot;spine 03-implementation-summary.md -&gt; 03.5-code-review.md&quot;],[&quot;rule&quot;,1662,223.2,36,5,&quot;spine 03.5-code-review.md -&gt; 04-test-summary.md&quot;],[&quot;ink&quot;,1698,221.7,8,8,&quot;spine head 04-test-summary.md&quot;],[&quot;rule&quot;,2364,223.2,36,5,&quot;spine 06-decisions-update.md -&gt; 07-state-update.md&quot;],[&quot;ink&quot;,2400,221.7,8,8,&quot;spine head 07-state-update.md&quot;],[&quot;box&quot;,70,320.5,2760,58,&quot;the wildcard input rail&quot;],[&quot;text&quot;,1992.75,327.5,523.14,15.4,&quot;EVERY PRESENT ARTIFACT EXCEPT ITSELF — the wildcard input, declared by 2 phases&quot;],[&quot;text&quot;,1992.75,343.9,732.03,13.3,&quot;RUN_ARTIFACT_SEQUENCE.filter(a =&gt; present.has(a) &amp;&amp; a !== thisFile) — 11 possible sources, and NO single one of them is required&quot;],[&quot;text&quot;,1992.75,358.2,829.25,13.3,&quot;Drawn as ONE rail with 2 thick arrows rather than as 22 lines, because a bundle of eleven into one node is the picture that stops being readable.&quot;],[&quot;ink&quot;,2265,254.7,8,8,&quot;wildcard head 06-decisions-update.md&quot;],[&quot;rule&quot;,2266.5,262.7,5,57.8,&quot;wildcard stub 06-decisions-update.md&quot;],[&quot;ink&quot;,2733,254.7,8,8,&quot;wildcard head 08-memory-impact.md&quot;],[&quot;rule&quot;,2734.5,262.7,5,57.8,&quot;wildcard stub 08-memory-impact.md&quot;],[&quot;rule&quot;,3.5,225.7,5,217.8,&quot;reopen riser 02-to-be-plan.md&quot;],[&quot;rule&quot;,6,441,990,5,&quot;reopen shelf 02-to-be-plan.md&quot;],[&quot;rule&quot;,1669.5,254.7,5,63.3,&quot;reopen drop 02-to-be-plan.md&quot;],[&quot;ink&quot;,992,246.7,8,8,&quot;reopen head 02-to-be-plan.md&quot;],[&quot;text&quot;,72,450.5,314.55,13.3,&quot;reopen → back to DRAFT, downstream receipts invalidated&quot;],[&quot;rule&quot;,21.5,225.7,5,244.1,&quot;revise riser 03.5-code-review.md&quot;],[&quot;rule&quot;,24,467.3,1440,5,&quot;revise shelf 03.5-code-review.md&quot;],[&quot;rule&quot;,2137.5,254.7,5,63.3,&quot;revise drop 03.5-code-review.md&quot;],[&quot;ink&quot;,1460,246.7,8,8,&quot;revise head 03.5-code-review.md&quot;],[&quot;text&quot;,72,476.8,177.29,13.3,&quot;REVISE → repair, then re-submit&quot;],[&quot;text&quot;,70,-196.7,576.11,15.4,&quot;THE WORKFLOW AS A GRAPH — 12 phase artifacts, 16 directed edges, all of them drawn here&quot;],[&quot;box&quot;,126,-33,74,15,&quot;human decision marker 00-requirements.md&quot;],[&quot;ink&quot;,130,-31,10,11,&quot;decision diamond 00-requirements.md&quot;],[&quot;text&quot;,143,-32,51.47,13.3,&quot;run-start&quot;],[&quot;box&quot;,1995,-33,80,15,&quot;human decision marker 05-manual-qa.md&quot;],[&quot;ink&quot;,1999,-31,10,11,&quot;decision diamond 05-manual-qa.md&quot;],[&quot;text&quot;,2012,-32,57.19,13.3,&quot;qa-signoff&quot;],[&quot;box&quot;,70,196.7,186,58,&quot;node 00-requirements.md&quot;],[&quot;text&quot;,78,203.7,99.33,15.4,&quot;00-requirements&quot;],[&quot;text&quot;,78,220.1,125.82,13.3,&quot;phase 0 — Requirements&quot;],[&quot;text&quot;,78,234.4,114.38,13.3,&quot;no upstream artifact&quot;],[&quot;box&quot;,70,388.5,186,29,&quot;refusal band 00-requirements.md&quot;],[&quot;text&quot;,78,391.5,62.91,13.3,&quot;memory read&quot;],[&quot;box&quot;,304,196.7,186,58,&quot;node 00-worktree.md&quot;],[&quot;text&quot;,312,203.7,72.84,15.4,&quot;00-worktree&quot;],[&quot;text&quot;,312,220.1,102.94,13.3,&quot;phase 0 — Worktree&quot;],[&quot;text&quot;,312,234.4,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,304,388.5,186,29,&quot;refusal band 00-worktree.md&quot;],[&quot;text&quot;,312,391.5,97.22,13.3,&quot;any lock or write&quot;],[&quot;box&quot;,538,196.7,186,58,&quot;node 01-as-is.md&quot;],[&quot;text&quot;,546,203.7,52.98,15.4,&quot;01-as-is&quot;],[&quot;text&quot;,546,220.1,85.79,13.3,&quot;phase 1 — AS-IS&quot;],[&quot;text&quot;,546,234.4,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,538,388.5,186,29,&quot;refusal band 01-as-is.md&quot;],[&quot;text&quot;,546,391.5,85.79,13.3,&quot;no memory plane&quot;],[&quot;box&quot;,772,196.7,186,58,&quot;node 01.5-root-cause.md&quot;],[&quot;text&quot;,780,203.7,99.33,15.4,&quot;01.5-root-cause&quot;],[&quot;text&quot;,780,220.1,114.38,13.3,&quot;phase 1 — Root Cause&quot;],[&quot;text&quot;,780,234.4,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,772,388.5,186,29,&quot;refusal band 01.5-root-cause.md&quot;],[&quot;text&quot;,780,391.5,85.79,13.3,&quot;no memory plane&quot;],[&quot;box&quot;,1006,196.7,186,58,&quot;node 02-to-be-plan.md&quot;],[&quot;text&quot;,1014,203.7,86.09,15.4,&quot;02-to-be-plan&quot;],[&quot;text&quot;,1014,220.1,114.38,13.3,&quot;phase 2 — TO-BE Plan&quot;],[&quot;text&quot;,1014,234.4,142.98,13.3,&quot;fan-in 3 · 1 when-present&quot;],[&quot;box&quot;,1006,388.5,186,29,&quot;refusal band 02-to-be-plan.md&quot;],[&quot;text&quot;,1014,391.5,85.79,13.3,&quot;no memory plane&quot;],[&quot;box&quot;,1240,196.7,186,58,&quot;node 03-implementation-summary.md&quot;],[&quot;text&quot;,1248,203.7,165.55,15.4,&quot;03-implementation-summary&quot;],[&quot;text&quot;,1248,220.1,137.26,13.3,&quot;phase 3 — Implementation&quot;],[&quot;text&quot;,1248,234.4,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,1240,388.5,186,29,&quot;refusal band 03-implementation-summary.md&quot;],[&quot;text&quot;,1248,391.5,68.63,13.3,&quot;tdd-evidence&quot;],[&quot;box&quot;,1474,196.7,186,58,&quot;node 03.5-code-review.md&quot;],[&quot;text&quot;,1482,203.7,105.95,15.4,&quot;03.5-code-review&quot;],[&quot;text&quot;,1482,220.1,120.1,13.3,&quot;phase 3 — Code Review&quot;],[&quot;text&quot;,1482,234.4,45.75,13.3,&quot;fan-in 2&quot;],[&quot;box&quot;,1474,388.5,186,29,&quot;refusal band 03.5-code-review.md&quot;],[&quot;text&quot;,1482,391.5,97.22,13.3,&quot;any lock or write&quot;],[&quot;box&quot;,1708,196.7,186,58,&quot;node 04-test-summary.md&quot;],[&quot;text&quot;,1716,203.7,99.33,15.4,&quot;04-test-summary&quot;],[&quot;text&quot;,1716,220.1,125.82,13.3,&quot;phase 4 — Test Summary&quot;],[&quot;text&quot;,1716,234.4,142.98,13.3,&quot;fan-in 3 · 1 when-present&quot;],[&quot;box&quot;,1708,388.5,186,29,&quot;refusal band 04-test-summary.md&quot;],[&quot;text&quot;,1716,391.5,97.22,13.3,&quot;any lock or write&quot;],[&quot;box&quot;,1942,196.7,186,58,&quot;node 05-manual-qa.md&quot;],[&quot;text&quot;,1950,203.7,79.46,15.4,&quot;05-manual-qa&quot;],[&quot;text&quot;,1950,220.1,108.66,13.3,&quot;phase 5 — Manual QA&quot;],[&quot;text&quot;,1950,234.4,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,1942,388.5,186,29,&quot;refusal band 05-manual-qa.md&quot;],[&quot;text&quot;,1950,391.5,97.22,13.3,&quot;any lock or write&quot;],[&quot;box&quot;,2176,196.7,186,58,&quot;node 06-decisions-update.md&quot;],[&quot;text&quot;,2184,203.7,125.82,15.4,&quot;06-decisions-update&quot;],[&quot;text&quot;,2184,220.1,108.66,13.3,&quot;phase 6 — Decisions&quot;],[&quot;text&quot;,2184,234.4,131.54,13.3,&quot;fan-in 11 · all present&quot;],[&quot;box&quot;,2176,388.5,186,29,&quot;refusal band 06-decisions-update.md&quot;],[&quot;text&quot;,2184,391.5,34.31,13.3,&quot;frozen&quot;],[&quot;box&quot;,2410,196.7,186,58,&quot;node 07-state-update.md&quot;],[&quot;text&quot;,2418,203.7,99.33,15.4,&quot;07-state-update&quot;],[&quot;text&quot;,2418,220.1,85.79,13.3,&quot;phase 7 — State&quot;],[&quot;text&quot;,2418,234.4,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,2410,388.5,186,29,&quot;refusal band 07-state-update.md&quot;],[&quot;text&quot;,2418,391.5,34.31,13.3,&quot;frozen&quot;],[&quot;box&quot;,2644,196.7,186,58,&quot;node 08-memory-impact.md&quot;],[&quot;text&quot;,2652,203.7,105.95,15.4,&quot;08-memory-impact&quot;],[&quot;text&quot;,2652,220.1,91.5,13.3,&quot;phase 8 — Memory&quot;],[&quot;text&quot;,2652,234.4,131.54,13.3,&quot;fan-in 11 · all present&quot;],[&quot;box&quot;,2644,388.5,186,29,&quot;refusal band 08-memory-impact.md&quot;],[&quot;text&quot;,2652,391.5,85.79,13.3,&quot;frozen + memory&quot;],[&quot;rule&quot;,492,223.2,36,5,&quot;sequence link 00-worktree.md -&gt; 01-as-is.md&quot;],[&quot;ink&quot;,528,221.7,8,8,&quot;sequence head 01-as-is.md&quot;],[&quot;rule&quot;,1896,223.2,36,5,&quot;sequence link 04-test-summary.md -&gt; 05-manual-qa.md&quot;],[&quot;ink&quot;,1932,221.7,8,8,&quot;sequence head 05-manual-qa.md&quot;],[&quot;rule&quot;,2130,223.2,36,5,&quot;sequence link 05-manual-qa.md -&gt; 06-decisions-update.md&quot;],[&quot;ink&quot;,2166,221.7,8,8,&quot;sequence head 06-decisions-update.md&quot;],[&quot;rule&quot;,2598,223.2,36,5,&quot;sequence link 07-state-update.md -&gt; 08-memory-impact.md&quot;],[&quot;ink&quot;,2634,221.7,8,8,&quot;sequence head 08-memory-impact.md&quot;],[&quot;rule&quot;,250,172.2,285,5,&quot;lane 00-requirements.md -&gt; 01-as-is.md&quot;],[&quot;rule&quot;,247.5,174.7,5,22,&quot;stub upper 00-requirements.md&quot;],[&quot;rule&quot;,541.5,174.7,5,14,&quot;stub upper 01-as-is.md&quot;],[&quot;ink&quot;,540,188.7,8,8,&quot;lane arrow 01-as-is.md&quot;],[&quot;text&quot;,259,178.2,85.79,13.3,&quot;00-requirements&quot;],[&quot;rule&quot;,238,128.2,301,5,&quot;lane 00-requirements.md -&gt; 02-to-be-plan.md&quot;],[&quot;rule&quot;,235.5,130.7,5,66,&quot;stub upper 00-requirements.md&quot;],[&quot;rule&quot;,1021.5,130.7,5,58,&quot;stub upper 02-to-be-plan.md&quot;],[&quot;ink&quot;,1020,188.7,8,8,&quot;lane arrow 02-to-be-plan.md&quot;],[&quot;text&quot;,259,134.2,85.79,13.3,&quot;00-requirements&quot;],[&quot;rule&quot;,718,150.2,285,5,&quot;lane 01-as-is.md -&gt; 02-to-be-plan.md&quot;],[&quot;rule&quot;,715.5,152.7,5,44,&quot;stub upper 01-as-is.md&quot;],[&quot;rule&quot;,1009.5,152.7,5,36,&quot;stub upper 02-to-be-plan.md&quot;],[&quot;ink&quot;,1008,188.7,8,8,&quot;lane arrow 02-to-be-plan.md&quot;],[&quot;text&quot;,727,156.2,45.75,13.3,&quot;01-as-is&quot;],[&quot;rule&quot;,1186,106.2,285,5,&quot;lane 02-to-be-plan.md -&gt; 03.5-code-review.md&quot;],[&quot;rule&quot;,1183.5,108.7,5,88,&quot;stub upper 02-to-be-plan.md&quot;],[&quot;rule&quot;,1477.5,108.7,5,80,&quot;stub upper 03.5-code-review.md&quot;],[&quot;ink&quot;,1476,188.7,8,8,&quot;lane arrow 03.5-code-review.md&quot;],[&quot;text&quot;,1195,112.2,74.35,13.3,&quot;02-to-be-plan&quot;],[&quot;rule&quot;,1174,84.2,301,5,&quot;lane 02-to-be-plan.md -&gt; 04-test-summary.md&quot;],[&quot;rule&quot;,1171.5,86.7,5,110,&quot;stub upper 02-to-be-plan.md&quot;],[&quot;rule&quot;,1723.5,86.7,5,102,&quot;stub upper 04-test-summary.md&quot;],[&quot;ink&quot;,1722,188.7,8,8,&quot;lane arrow 04-test-summary.md&quot;],[&quot;text&quot;,1195,90.2,74.35,13.3,&quot;02-to-be-plan&quot;],[&quot;rule&quot;,1420,274.2,55,5,&quot;lane 03-implementation-summary.md -&gt; 04-test-summary.md&quot;],[&quot;rule&quot;,1417.5,254.7,5,22,&quot;stub lower 03-implementation-summary.md&quot;],[&quot;rule&quot;,1711.5,262.7,5,14,&quot;stub lower 04-test-summary.md&quot;],[&quot;ink&quot;,1710,254.7,8,8,&quot;lane arrow 04-test-summary.md&quot;],[&quot;rule&quot;,1162,62.2,313,5,&quot;lane 02-to-be-plan.md -&gt; 05-manual-qa.md&quot;],[&quot;rule&quot;,1159.5,64.7,5,132,&quot;stub upper 02-to-be-plan.md&quot;],[&quot;rule&quot;,1945.5,64.7,5,124,&quot;stub upper 05-manual-qa.md&quot;],[&quot;ink&quot;,1944,188.7,8,8,&quot;lane arrow 05-manual-qa.md&quot;],[&quot;text&quot;,1195,68.2,74.35,13.3,&quot;02-to-be-plan&quot;],[&quot;box&quot;,70,502.1,272,43.6,&quot;cross-run card: writes the plane, then REGIS&quot;],[&quot;text&quot;,78,510.1,200.17,13.3,&quot;writes the plane, then REGISTERS it&quot;],[&quot;text&quot;,78,524.4,251.64,13.3,&quot;memory/training/&lt;task-type&gt;.md  +  MEMORY.md&quot;],[&quot;box&quot;,342,502.1,272,43.6,&quot;cross-run card: MEMORY PLANE — .recursive/me&quot;],[&quot;text&quot;,350,510.1,188.73,13.3,&quot;MEMORY PLANE — .recursive/memory/&quot;],[&quot;text&quot;,350,524.4,205.88,13.3,&quot;training/ is ONE of the 5 kinds read&quot;],[&quot;box&quot;,614,502.1,285,45.7,&quot;cross-run card: RUN N+1 — recursive_phase at&quot;],[&quot;text&quot;,622,510.1,264.88,15.4,&quot;RUN N+1 — recursive_phase at phase entry&quot;],[&quot;text&quot;,622,526.5,234.48,13.3,&quot;...returns the shards that match this run&quot;],[&quot;rule&quot;,45.5,516.75,5,71.35,&quot;cross-run return drop&quot;],[&quot;rule&quot;,51.5,585.6,18.5,5,&quot;cross-run return foot&quot;],[&quot;rule&quot;,48,509.25,22,5,&quot;cross-run return run&quot;],[&quot;ink&quot;,62,514.25,8,5,&quot;cross-run return head&quot;],[&quot;text&quot;,50,596.1,446.08,13.3,&quot;ACROSS RUNS — the arrow leaves the run and lands at the NEXT one's phase entry&quot;],[&quot;text&quot;,70,628.1,30.1,14,&quot;NODES&quot;],[&quot;box&quot;,126.1,627.1,20,11,&quot;legend swatch: the phase, in PHASE_SEQUENCE order&quot;],[&quot;text&quot;,152.1,628.1,194.45,13.3,&quot;the phase, in PHASE_SEQUENCE order&quot;],[&quot;box&quot;,370.55,627.1,20,11,&quot;legend swatch: may be absent (OPTIONAL_PHASES)&quot;],[&quot;text&quot;,396.55,628.1,177.29,13.3,&quot;may be absent (OPTIONAL_PHASES)&quot;],[&quot;box&quot;,597.84,627.1,20,11,&quot;legend swatch: a guard rule can refuse here&quot;],[&quot;text&quot;,623.84,628.1,160.13,13.3,&quot;a guard rule can refuse here&quot;],[&quot;box&quot;,807.97,627.1,20,11,&quot;legend swatch: a person must answer&quot;],[&quot;text&quot;,833.97,628.1,114.38,13.3,&quot;a person must answer&quot;],[&quot;text&quot;,70,652.1,30.1,14,&quot;EDGES&quot;],[&quot;box&quot;,126.1,651.1,20,11,&quot;legend swatch: required input&quot;],[&quot;text&quot;,152.1,652.1,80.07,13.3,&quot;required input&quot;],[&quot;box&quot;,256.17,651.1,20,11,&quot;legend swatch: conditional — source present&quot;],[&quot;text&quot;,282.17,652.1,160.13,13.3,&quot;conditional — source present&quot;],[&quot;box&quot;,466.3,651.1,20,11,&quot;legend swatch: wildcard — every present artifact&quot;],[&quot;text&quot;,492.3,652.1,188.73,13.3,&quot;wildcard — every present artifact&quot;],[&quot;box&quot;,705.03,651.1,20,11,&quot;legend swatch: sequence order only: no input edge&quot;],[&quot;text&quot;,731.03,652.1,194.45,13.3,&quot;sequence order only: no input edge&quot;],[&quot;box&quot;,949.48,651.1,20,11,&quot;legend swatch: reads MORE THAN ONE upstream artifact&quot;],[&quot;text&quot;,975.48,652.1,211.6,13.3,&quot;reads MORE THAN ONE upstream artifact&quot;],[&quot;text&quot;,70,673.4,840.69,13.3,&quot;Violet arcs run BACKWARDS: reopen and REVISE re-enter a node to the LEFT of their source, and the same arc closes the CROSS-RUN loop below the row.&quot;],[&quot;text&quot;,70,690.7,823.54,13.3,&quot;Shape, word and count carry every distinction here; colour carries none of them. Every arrow is an entry in the linter's own expected-input map.&quot;]],&quot;contains&quot;:[[13,12],[14,12],[15,12],[21,20],[25,21],[26,25],[32,31],[33,31],[35,34],[36,34],[38,37],[39,37],[40,37],[42,41],[44,43],[45,43],[46,43],[48,47],[50,49],[51,49],[52,49],[54,53],[56,55],[57,55],[58,55],[60,59],[62,61],[63,61],[64,61],[66,65],[68,67],[69,67],[70,67],[72,71],[74,73],[75,73],[76,73],[78,77],[80,79],[81,79],[82,79],[84,83],[86,85],[87,85],[88,85],[90,89],[92,91],[93,91],[94,91],[96,95],[98,97],[99,97],[100,97],[102,101],[104,103],[105,103],[106,103],[108,107],[118,117],[123,122],[128,127],[133,132],[138,137],[143,142],[147,146],[152,151],[153,151],[155,154],[156,154],[158,157],[159,157]]}">
+    <svg viewBox="0 -196.7 2854 905.7" width="2854" height="905.7" preserveAspectRatio="xMinYMin meet">
+      <path class="dg-line" d="M258 223.2 L294 228.2"/>
+      <polygon class="dg-head" points="302,225.7 294,221.7 294,229.7"/>
+      <path class="dg-line" d="M726 223.2 L762 228.2"/>
+      <polygon class="dg-head" points="770,225.7 762,221.7 762,229.7"/>
+      <path class="dg-line-cond" d="M960 223.2 L996 228.2"/>
+      <path class="dg-line" d="M1194 223.2 L1230 228.2"/>
+      <polygon class="dg-head" points="1238,225.7 1230,221.7 1230,229.7"/>
+      <path class="dg-line" d="M1428 223.2 L1464 228.2"/>
+      <path class="dg-line-cond" d="M1662 223.2 L1698 228.2"/>
+      <polygon class="dg-head-cond" points="1706,225.7 1698,221.7 1698,229.7"/>
+      <path class="dg-line" d="M2364 223.2 L2400 228.2"/>
+      <polygon class="dg-head" points="2408,225.7 2400,221.7 2400,229.7"/>
+      <rect class="dg-box-rail" x="70" y="320.5" width="2760" height="58" rx="1"/>
+      <text class="dg-t" x="1992.75" y="339.6">EVERY PRESENT ARTIFACT EXCEPT ITSELF — the wildcard input, declared by 2 phases</text>
+      <text class="dg-t-sm" x="1992.75" y="354.35">RUN_ARTIFACT_SEQUENCE.filter(a =&gt; present.has(a) &amp;&amp; a !== thisFile) — 11 possible sources, and NO single one of them is required</text>
+      <text class="dg-t-sm" x="1992.75" y="368.65">Drawn as ONE rail with 2 thick arrows rather than as 22 lines, because a bundle of eleven into one node is the picture that stops being readable.</text>
+      <polygon class="dg-head-wide" points="2269,254.7 2265,262.7 2273,262.7"/>
+      <path class="dg-line-wide" d="M2266.5 262.7 L2271.5 320.5"/>
+      <polygon class="dg-head-wide" points="2737,254.7 2733,262.7 2741,262.7"/>
+      <path class="dg-line-wide" d="M2734.5 262.7 L2739.5 320.5"/>
+      <path class="dg-line-loop" d="M3.5 225.7 L8.5 443.5"/>
+      <path class="dg-line-loop" d="M6 441 L996 446"/>
+      <path class="dg-line-loop" d="M1669.5 254.7 L1674.5 318"/>
+      <polygon class="dg-head-loop" points="996,254.7 992,246.7 1000,246.7"/>
+      <text class="dg-t-sm" x="72" y="460.95">reopen → back to DRAFT, downstream receipts invalidated</text>
+      <path class="dg-line-loop" d="M21.5 225.7 L26.5 469.8"/>
+      <path class="dg-line-loop" d="M24 467.3 L1464 472.3"/>
+      <path class="dg-line-loop" d="M2137.5 254.7 L2142.5 318"/>
+      <polygon class="dg-head-loop" points="1464,254.7 1460,246.7 1468,246.7"/>
+      <text class="dg-t-sm" x="72" y="487.25">REVISE → repair, then re-submit</text>
+      <text class="dg-t-a" x="70" y="-184.6">THE WORKFLOW AS A GRAPH — 12 phase artifacts, 16 directed edges, all of them drawn here</text>
+      <rect class="dg-box-human" x="126" y="-33" width="74" height="15" rx="1"/>
+      <polygon class="dg-mark" points="130,-25.5 135,-31 140,-25.5 135,-20"/>
+      <text class="dg-t-sm" x="143" y="-21.55">run-start</text>
+      <rect class="dg-box-human" x="1995" y="-33" width="80" height="15" rx="1"/>
+      <polygon class="dg-mark" points="1999,-25.5 2004,-31 2009,-25.5 2004,-20"/>
+      <text class="dg-t-sm" x="2012" y="-21.55">qa-signoff</text>
+      <rect class="dg-box" x="70" y="196.7" width="186" height="58" rx="1"/>
+      <text class="dg-t" x="78" y="215.8">00-requirements</text>
+      <text class="dg-t-sm" x="78" y="230.55">phase 0 — Requirements</text>
+      <text class="dg-t-sm" x="78" y="244.85">no upstream artifact</text>
+      <rect class="dg-box-refuse" x="70" y="388.5" width="186" height="29" rx="1"/>
+      <text class="dg-t-sm" x="78" y="401.95">memory read</text>
+      <rect class="dg-box" x="304" y="196.7" width="186" height="58" rx="1"/>
+      <text class="dg-t" x="312" y="215.8">00-worktree</text>
+      <text class="dg-t-sm" x="312" y="230.55">phase 0 — Worktree</text>
+      <text class="dg-t-sm" x="312" y="244.85">fan-in 1</text>
+      <rect class="dg-box-refuse" x="304" y="388.5" width="186" height="29" rx="1"/>
+      <text class="dg-t-sm" x="312" y="401.95">any lock or write</text>
+      <rect class="dg-box" x="538" y="196.7" width="186" height="58" rx="1"/>
+      <text class="dg-t" x="546" y="215.8">01-as-is</text>
+      <text class="dg-t-sm" x="546" y="230.55">phase 1 — AS-IS</text>
+      <text class="dg-t-sm" x="546" y="244.85">fan-in 1</text>
+      <rect class="dg-box-refuse" x="538" y="388.5" width="186" height="29" rx="1"/>
+      <text class="dg-t-sm" x="546" y="401.95">no memory plane</text>
+      <rect class="dg-box" x="772" y="196.7" width="186" height="58" rx="1"/>
+      <text class="dg-t" x="780" y="215.8">01.5-root-cause</text>
+      <text class="dg-t-sm" x="780" y="230.55">phase 1 — Root Cause</text>
+      <text class="dg-t-sm" x="780" y="244.85">fan-in 1</text>
+      <rect class="dg-box-refuse" x="772" y="388.5" width="186" height="29" rx="1"/>
+      <text class="dg-t-sm" x="780" y="401.95">no memory plane</text>
+      <rect class="dg-box dg-box-fan" x="1006" y="196.7" width="186" height="58" rx="1"/>
+      <text class="dg-t" x="1014" y="215.8">02-to-be-plan</text>
+      <text class="dg-t-sm" x="1014" y="230.55">phase 2 — TO-BE Plan</text>
+      <text class="dg-t-sm" x="1014" y="244.85">fan-in 3 · 1 when-present</text>
+      <rect class="dg-box-refuse" x="1006" y="388.5" width="186" height="29" rx="1"/>
+      <text class="dg-t-sm" x="1014" y="401.95">no memory plane</text>
+      <rect class="dg-box" x="1240" y="196.7" width="186" height="58" rx="1"/>
+      <text class="dg-t" x="1248" y="215.8">03-implementation-summary</text>
+      <text class="dg-t-sm" x="1248" y="230.55">phase 3 — Implementation</text>
+      <text class="dg-t-sm" x="1248" y="244.85">fan-in 1</text>
+      <rect class="dg-box-refuse" x="1240" y="388.5" width="186" height="29" rx="1"/>
+      <text class="dg-t-sm" x="1248" y="401.95">tdd-evidence</text>
+      <rect class="dg-box dg-box-fan" x="1474" y="196.7" width="186" height="58" rx="1"/>
+      <text class="dg-t" x="1482" y="215.8">03.5-code-review</text>
+      <text class="dg-t-sm" x="1482" y="230.55">phase 3 — Code Review</text>
+      <text class="dg-t-sm" x="1482" y="244.85">fan-in 2</text>
+      <rect class="dg-box-refuse" x="1474" y="388.5" width="186" height="29" rx="1"/>
+      <text class="dg-t-sm" x="1482" y="401.95">any lock or write</text>
+      <rect class="dg-box dg-box-fan" x="1708" y="196.7" width="186" height="58" rx="1"/>
+      <text class="dg-t" x="1716" y="215.8">04-test-summary</text>
+      <text class="dg-t-sm" x="1716" y="230.55">phase 4 — Test Summary</text>
+      <text class="dg-t-sm" x="1716" y="244.85">fan-in 3 · 1 when-present</text>
+      <rect class="dg-box-refuse" x="1708" y="388.5" width="186" height="29" rx="1"/>
+      <text class="dg-t-sm" x="1716" y="401.95">any lock or write</text>
+      <rect class="dg-box" x="1942" y="196.7" width="186" height="58" rx="1"/>
+      <text class="dg-t" x="1950" y="215.8">05-manual-qa</text>
+      <text class="dg-t-sm" x="1950" y="230.55">phase 5 — Manual QA</text>
+      <text class="dg-t-sm" x="1950" y="244.85">fan-in 1</text>
+      <rect class="dg-box-refuse" x="1942" y="388.5" width="186" height="29" rx="1"/>
+      <text class="dg-t-sm" x="1950" y="401.95">any lock or write</text>
+      <rect class="dg-box dg-box-fan" x="2176" y="196.7" width="186" height="58" rx="1"/>
+      <text class="dg-t" x="2184" y="215.8">06-decisions-update</text>
+      <text class="dg-t-sm" x="2184" y="230.55">phase 6 — Decisions</text>
+      <text class="dg-t-sm" x="2184" y="244.85">fan-in 11 · all present</text>
+      <rect class="dg-box-refuse" x="2176" y="388.5" width="186" height="29" rx="1"/>
+      <text class="dg-t-sm" x="2184" y="401.95">frozen</text>
+      <rect class="dg-box" x="2410" y="196.7" width="186" height="58" rx="1"/>
+      <text class="dg-t" x="2418" y="215.8">07-state-update</text>
+      <text class="dg-t-sm" x="2418" y="230.55">phase 7 — State</text>
+      <text class="dg-t-sm" x="2418" y="244.85">fan-in 1</text>
+      <rect class="dg-box-refuse" x="2410" y="388.5" width="186" height="29" rx="1"/>
+      <text class="dg-t-sm" x="2418" y="401.95">frozen</text>
+      <rect class="dg-box dg-box-fan" x="2644" y="196.7" width="186" height="58" rx="1"/>
+      <text class="dg-t" x="2652" y="215.8">08-memory-impact</text>
+      <text class="dg-t-sm" x="2652" y="230.55">phase 8 — Memory</text>
+      <text class="dg-t-sm" x="2652" y="244.85">fan-in 11 · all present</text>
+      <rect class="dg-box-refuse" x="2644" y="388.5" width="186" height="29" rx="1"/>
+      <text class="dg-t-sm" x="2652" y="401.95">frozen + memory</text>
+      <path class="dg-line-seq" d="M492 223.2 L528 228.2"/>
+      <polygon class="dg-head-seq" points="536,225.7 528,221.7 528,229.7"/>
+      <path class="dg-line-seq" d="M1896 223.2 L1932 228.2"/>
+      <polygon class="dg-head-seq" points="1940,225.7 1932,221.7 1932,229.7"/>
+      <path class="dg-line-seq" d="M2130 223.2 L2166 228.2"/>
+      <polygon class="dg-head-seq" points="2174,225.7 2166,221.7 2166,229.7"/>
+      <path class="dg-line-seq" d="M2598 223.2 L2634 228.2"/>
+      <polygon class="dg-head-seq" points="2642,225.7 2634,221.7 2634,229.7"/>
+      <path class="dg-line" d="M250 172.2 L535 177.2"/>
+      <path class="dg-line" d="M247.5 174.7 L252.5 196.7"/>
+      <path class="dg-line" d="M541.5 174.7 L546.5 188.7"/>
+      <polygon class="dg-head" points="544,196.7 540,188.7 548,188.7"/>
+      <text class="dg-t-sm" x="259" y="188.65">00-requirements</text>
+      <path class="dg-line" d="M238 128.2 L539 133.2"/>
+      <path class="dg-line" d="M235.5 130.7 L240.5 196.7"/>
+      <path class="dg-line" d="M1021.5 130.7 L1026.5 188.7"/>
+      <polygon class="dg-head" points="1024,196.7 1020,188.7 1028,188.7"/>
+      <text class="dg-t-sm" x="259" y="144.65">00-requirements</text>
+      <path class="dg-line" d="M718 150.2 L1003 155.2"/>
+      <path class="dg-line" d="M715.5 152.7 L720.5 196.7"/>
+      <path class="dg-line" d="M1009.5 152.7 L1014.5 188.7"/>
+      <polygon class="dg-head" points="1012,196.7 1008,188.7 1016,188.7"/>
+      <text class="dg-t-sm" x="727" y="166.65">01-as-is</text>
+      <path class="dg-line" d="M1186 106.2 L1471 111.2"/>
+      <path class="dg-line" d="M1183.5 108.7 L1188.5 196.7"/>
+      <path class="dg-line" d="M1477.5 108.7 L1482.5 188.7"/>
+      <polygon class="dg-head" points="1480,196.7 1476,188.7 1484,188.7"/>
+      <text class="dg-t-sm" x="1195" y="122.65">02-to-be-plan</text>
+      <path class="dg-line" d="M1174 84.2 L1475 89.2"/>
+      <path class="dg-line" d="M1171.5 86.7 L1176.5 196.7"/>
+      <path class="dg-line" d="M1723.5 86.7 L1728.5 188.7"/>
+      <polygon class="dg-head" points="1726,196.7 1722,188.7 1730,188.7"/>
+      <text class="dg-t-sm" x="1195" y="100.65">02-to-be-plan</text>
+      <path class="dg-line" d="M1420 274.2 L1475 279.2"/>
+      <path class="dg-line" d="M1417.5 254.7 L1422.5 276.7"/>
+      <path class="dg-line" d="M1711.5 262.7 L1716.5 276.7"/>
+      <polygon class="dg-head" points="1714,254.7 1710,262.7 1718,262.7"/>
+      <path class="dg-line" d="M1162 62.2 L1475 67.2"/>
+      <path class="dg-line" d="M1159.5 64.7 L1164.5 196.7"/>
+      <path class="dg-line" d="M1945.5 64.7 L1950.5 188.7"/>
+      <polygon class="dg-head" points="1948,196.7 1944,188.7 1952,188.7"/>
+      <text class="dg-t-sm" x="1195" y="78.65">02-to-be-plan</text>
+      <rect class="dg-box" x="70" y="502.1" width="272" height="43.6" rx="1"/>
+      <text class="dg-t-sm" x="78" y="520.55">writes the plane, then REGISTERS it</text>
+      <text class="dg-t-sm" x="78" y="534.85">memory/training/&lt;task-type&gt;.md  +  MEMORY.md</text>
+      <rect class="dg-box-rail" x="342" y="502.1" width="272" height="43.6" rx="1"/>
+      <text class="dg-t-sm" x="350" y="520.55">MEMORY PLANE — .recursive/memory/</text>
+      <text class="dg-t-sm" x="350" y="534.85">training/ is ONE of the 5 kinds read</text>
+      <rect class="dg-box" x="614" y="502.1" width="285" height="45.7" rx="1"/>
+      <text class="dg-t" x="622" y="522.2">RUN N+1 — recursive_phase at phase entry</text>
+      <text class="dg-t-sm" x="622" y="536.95">...returns the shards that match this run</text>
+      <path class="dg-line-loop" d="M45.5 516.75 L50.5 588.1"/>
+      <path class="dg-line-loop" d="M51.5 585.6 L70 590.6"/>
+      <path class="dg-line-loop" d="M48 509.25 L70 514.25"/>
+      <polygon class="dg-head-loop" points="70,519.25 62,514.25 62,519.25"/>
+      <text class="dg-t-sm" x="50" y="606.55">ACROSS RUNS — the arrow leaves the run and lands at the NEXT one's phase entry</text>
+      <text class="dg-t-h" x="70" y="639.1">NODES</text>
+      <rect class="dg-legend" x="126.1" y="627.1" width="20" height="11" rx="1"/>
+      <text class="dg-t-sm" x="152.1" y="638.55">the phase, in PHASE_SEQUENCE order</text>
+      <rect class="dg-legend-rail" x="370.55" y="627.1" width="20" height="11" rx="1"/>
+      <text class="dg-t-sm" x="396.55" y="638.55">may be absent (OPTIONAL_PHASES)</text>
+      <rect class="dg-legend-refuse" x="597.84" y="627.1" width="20" height="11" rx="1"/>
+      <text class="dg-t-sm" x="623.84" y="638.55">a guard rule can refuse here</text>
+      <rect class="dg-box-human" x="807.97" y="627.1" width="20" height="11" rx="1"/>
+      <text class="dg-t-sm" x="833.97" y="638.55">a person must answer</text>
+      <text class="dg-t-h" x="70" y="663.1">EDGES</text>
+      <rect class="dg-legend" x="126.1" y="651.1" width="20" height="11" rx="1"/>
+      <text class="dg-t-sm" x="152.1" y="662.55">required input</text>
+      <rect class="dg-legend-cond" x="256.17" y="651.1" width="20" height="11" rx="1"/>
+      <text class="dg-t-sm" x="282.17" y="662.55">conditional — source present</text>
+      <rect class="dg-legend-wide" x="466.3" y="651.1" width="20" height="11" rx="1"/>
+      <text class="dg-t-sm" x="492.3" y="662.55">wildcard — every present artifact</text>
+      <rect class="dg-legend-seq" x="705.03" y="651.1" width="20" height="11" rx="1"/>
+      <text class="dg-t-sm" x="731.03" y="662.55">sequence order only: no input edge</text>
+      <rect class="dg-legend-rail" x="949.48" y="651.1" width="20" height="11" rx="1"/>
+      <text class="dg-t-sm" x="975.48" y="662.55">reads MORE THAN ONE upstream artifact</text>
+      <text class="dg-t-sm" x="70" y="683.85">Violet arcs run BACKWARDS: reopen and REVISE re-enter a node to the LEFT of their source, and the same arc closes the CROSS-RUN loop below the row.</text>
+      <text class="dg-t-sm" x="70" y="701.15">Shape, word and count carry every distinction here; colour carries none of them. Every arrow is an entry in the linter's own expected-input map.</text>
     </svg>
   </div>
 
@@ -1113,136 +1186,43 @@ footer.colophon p{ margin-bottom:var(--sp-2); max-width:100ch; }
   </div>
 </section>
 
-<!-- ===================== PHASE GRAPH ===================== -->
-<section class="panel" id="panel-graph" role="tabpanel" aria-labelledby="tab-graph" tabindex="0" hidden>
+<!-- ===================== NOTES &amp; CAVEATS ===================== -->
+<section class="panel" id="panel-notes" role="tabpanel" aria-labelledby="tab-notes" tabindex="0" hidden>
   <div class="panel-head">
-    <h2>Who reads whom — the 16 edges, drawn</h2>
-    <p class="lede">The overview is a row of boxes; this is the wiring. Every arrow below is an entry in the linter's own input map — <code>getPhaseExpectedInputArtifactNames</code> decides which upstream artifacts a phase must cite in its <code>Inputs:</code> header and its <code>## Effective Inputs Re-read</code> section before it can lock, so the arrows are read off the code rather than drawn from a description of it. <span class="cite">src/ts-lint.ts:670</span></p>
+    <h2>Notes &amp; caveats</h2>
+    <p class="lede">The facts that used to sit ABOVE the overview chart as prose, moved here on purpose: the chart is the overview now, and a sentence that explains what a picture should show is a sign the picture was wrong. Nothing was dropped — each block below landed here, or in a phase view, or nowhere it was needed. <span class="cite">src/ts-lint.ts:670, src/lock.ts:21</span></p>
   </div>
 
   <div class="callout">
-    <strong>How to read it.</strong> A <b>solid</b> arrow is a REQUIRED input. A <b>dashed</b> arrow is CONDITIONAL: the linter pushes that artifact only when it exists on disk (<code>present.has(…)</code>), so the edge is real but optional. A <b>thick</b> arrow comes off the rail under the row: that input is <em>every present artifact in the run except itself</em>, which is why phases 06 and 08 have eleven possible sources and no single required one. A node with a <b>dashed border</b> reads more than one upstream artifact, and every node states its own fan-in in words — the shapes, the words and the counts all carry the distinction, so none of it rests on colour. <span class="cite">src/ts-lint.ts:670, src/ts-lint.ts:688, src/ts-lint.ts:685, src/ts-lint.ts:687</span>
-    <br><br><b>The drawing is wider than the column, and it scrolls — deliberately.</b> Twelve artifact names cannot be abbreviated without losing the names the rest of this page cites, so, like the twelve-node strip on the overview, this chart keeps its own coordinate system and scrolls sideways in one strip rather than squeezing its labels. Every arrow in it is also a row in the table below, and the table is the complete form.
+    <strong>Reading the shapes, not the colours.</strong> Every gate on this page carries a word — <b>DECISION</b>, <b>REFUSAL</b> or <b>AUTO</b> — and a border treatment, and every mark in the overview chart carries a word beside it, so nothing here depends on colour alone. The human steps are also the only cards with a filled amber rail dot, and in the chart they are the only ones with an amber diamond above them. <span class="cite">src/lock.ts:21</span>
   </div>
 
-  
-  <div class="diagram" id="dg-phase-graph" data-diagram="phase-graph" role="img" aria-label="Phase graph: twelve phase nodes in PHASE_SEQUENCE order. Solid arrows are the required inputs the linter expects, dashed arrows are the two conditional inputs pushed only when the source artifact is present, a rail under the row carries the wildcard input that lets phases 06 and 08 read every present artifact, and a dashed node border marks the five phases that read more than one upstream artifact. The same edge set is given as a table below." style="--dg-w:2832px" data-layout="{&quot;v&quot;:1,&quot;charW&quot;:0.602,&quot;lineHeight&quot;:1.4,&quot;viewBox&quot;:[0,0,2832,454],&quot;fit&quot;:[[&quot;00-requirements&quot;,56,186.7,99.33,15.4],[&quot;phase 0 — Requirements&quot;,56,203.1,125.82,13.3],[&quot;no upstream artifact&quot;,56,217.4,114.38,13.3],[&quot;00-worktree&quot;,290,186.7,72.84,15.4],[&quot;phase 0 — Worktree&quot;,290,203.1,102.94,13.3],[&quot;fan-in 1&quot;,290,217.4,45.75,13.3],[&quot;01-as-is&quot;,524,186.7,52.98,15.4],[&quot;phase 1 — AS-IS&quot;,524,203.1,85.79,13.3],[&quot;fan-in 1&quot;,524,217.4,45.75,13.3],[&quot;01.5-root-cause&quot;,758,186.7,99.33,15.4],[&quot;phase 1 — Root Cause&quot;,758,203.1,114.38,13.3],[&quot;fan-in 1&quot;,758,217.4,45.75,13.3],[&quot;02-to-be-plan&quot;,992,186.7,86.09,15.4],[&quot;phase 2 — TO-BE Plan&quot;,992,203.1,114.38,13.3],[&quot;fan-in 3 · 1 when-present&quot;,992,217.4,142.98,13.3],[&quot;03-implementation-summary&quot;,1226,186.7,165.55,15.4],[&quot;phase 3 — Implementation&quot;,1226,203.1,137.26,13.3],[&quot;fan-in 1&quot;,1226,217.4,45.75,13.3],[&quot;03.5-code-review&quot;,1460,186.7,105.95,15.4],[&quot;phase 3 — Code Review&quot;,1460,203.1,120.1,13.3],[&quot;fan-in 2&quot;,1460,217.4,45.75,13.3],[&quot;04-test-summary&quot;,1694,186.7,99.33,15.4],[&quot;phase 4 — Test Summary&quot;,1694,203.1,125.82,13.3],[&quot;fan-in 3 · 1 when-present&quot;,1694,217.4,142.98,13.3],[&quot;05-manual-qa&quot;,1928,186.7,79.46,15.4],[&quot;phase 5 — Manual QA&quot;,1928,203.1,108.66,13.3],[&quot;fan-in 1&quot;,1928,217.4,45.75,13.3],[&quot;06-decisions-update&quot;,2162,186.7,125.82,15.4],[&quot;phase 6 — Decisions&quot;,2162,203.1,108.66,13.3],[&quot;fan-in 11 · all present&quot;,2162,217.4,131.54,13.3],[&quot;07-state-update&quot;,2396,186.7,99.33,15.4],[&quot;phase 7 — State&quot;,2396,203.1,85.79,13.3],[&quot;fan-in 1&quot;,2396,217.4,45.75,13.3],[&quot;08-memory-impact&quot;,2630,186.7,105.95,15.4],[&quot;phase 8 — Memory&quot;,2630,203.1,91.5,13.3],[&quot;fan-in 11 · all present&quot;,2630,217.4,131.54,13.3],[&quot;00-requirements.md -&gt; 01-as-is.md&quot;,232,145.4,188.73,13.3],[&quot;00-requirements.md -&gt; 02-to-be-plan.md&quot;,220,101.4,217.32,13.3],[&quot;01-as-is.md -&gt; 02-to-be-plan.md&quot;,700,123.4,177.29,13.3],[&quot;02-to-be-plan.md -&gt; 03.5-code-review.md&quot;,1168,79.4,223.04,13.3],[&quot;02-to-be-plan.md -&gt; 04-test-summary.md&quot;,1156,57.4,217.32,13.3],[&quot;03-implementation-summary.md -&gt; 04-test-summary.md&quot;,1402,260.7,285.95,13.3],[&quot;02-to-be-plan.md -&gt; 05-manual-qa.md&quot;,1144,35.4,200.17,13.3],[&quot;EVERY PRESENT ARTIFACT EXCEPT ITSELF — the wildcard input, declared by 2 phases&quot;,56,301,523.14,15.4],[&quot;RUN_ARTIFACT_SEQUENCE.filter(a =&gt; present.has(a) &amp;&amp; a !== thisFile) — 11 possible sources, and NO single one of them is required&quot;,56,317.4,732.03,13.3],[&quot;Drawn as a rail rather than as 11 arrows each: the fan-in is the fact, and a bundle of eleven lines into one node is the picture that stops being readable.&quot;,56,331.7,886.45,13.3],[&quot;SOLID ARROW = required input (12 edges)   ·   DASHED ARROW = conditional: pushed only when the source artifact is present (2 edges)&quot;,48,374,749.19,13.3],[&quot;THICK ARROW from the rail = the wildcard input (2 edges, 11 sources each)   ·   DASHED NODE = reads more than one upstream artifact (3 nodes)&quot;,48,391.3,806.38,13.3],[&quot;Shape, word and count carry every distinction here; colour carries none of them. Each arrow is the linter's own expected-input map, not a reading of the prose.&quot;,48,408.6,909.32,13.3]],&quot;boxes&quot;:[[&quot;box&quot;,48,179.7,186,58,&quot;node 00-requirements.md&quot;],[&quot;text&quot;,56,186.7,99.33,15.4,&quot;00-requirements&quot;],[&quot;text&quot;,56,203.1,125.82,13.3,&quot;phase 0 — Requirements&quot;],[&quot;text&quot;,56,217.4,114.38,13.3,&quot;no upstream artifact&quot;],[&quot;box&quot;,282,179.7,186,58,&quot;node 00-worktree.md&quot;],[&quot;text&quot;,290,186.7,72.84,15.4,&quot;00-worktree&quot;],[&quot;text&quot;,290,203.1,102.94,13.3,&quot;phase 0 — Worktree&quot;],[&quot;text&quot;,290,217.4,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,516,179.7,186,58,&quot;node 01-as-is.md&quot;],[&quot;text&quot;,524,186.7,52.98,15.4,&quot;01-as-is&quot;],[&quot;text&quot;,524,203.1,85.79,13.3,&quot;phase 1 — AS-IS&quot;],[&quot;text&quot;,524,217.4,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,750,179.7,186,58,&quot;node 01.5-root-cause.md&quot;],[&quot;text&quot;,758,186.7,99.33,15.4,&quot;01.5-root-cause&quot;],[&quot;text&quot;,758,203.1,114.38,13.3,&quot;phase 1 — Root Cause&quot;],[&quot;text&quot;,758,217.4,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,984,179.7,186,58,&quot;node 02-to-be-plan.md&quot;],[&quot;text&quot;,992,186.7,86.09,15.4,&quot;02-to-be-plan&quot;],[&quot;text&quot;,992,203.1,114.38,13.3,&quot;phase 2 — TO-BE Plan&quot;],[&quot;text&quot;,992,217.4,142.98,13.3,&quot;fan-in 3 · 1 when-present&quot;],[&quot;box&quot;,1218,179.7,186,58,&quot;node 03-implementation-summary.md&quot;],[&quot;text&quot;,1226,186.7,165.55,15.4,&quot;03-implementation-summary&quot;],[&quot;text&quot;,1226,203.1,137.26,13.3,&quot;phase 3 — Implementation&quot;],[&quot;text&quot;,1226,217.4,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,1452,179.7,186,58,&quot;node 03.5-code-review.md&quot;],[&quot;text&quot;,1460,186.7,105.95,15.4,&quot;03.5-code-review&quot;],[&quot;text&quot;,1460,203.1,120.1,13.3,&quot;phase 3 — Code Review&quot;],[&quot;text&quot;,1460,217.4,45.75,13.3,&quot;fan-in 2&quot;],[&quot;box&quot;,1686,179.7,186,58,&quot;node 04-test-summary.md&quot;],[&quot;text&quot;,1694,186.7,99.33,15.4,&quot;04-test-summary&quot;],[&quot;text&quot;,1694,203.1,125.82,13.3,&quot;phase 4 — Test Summary&quot;],[&quot;text&quot;,1694,217.4,142.98,13.3,&quot;fan-in 3 · 1 when-present&quot;],[&quot;box&quot;,1920,179.7,186,58,&quot;node 05-manual-qa.md&quot;],[&quot;text&quot;,1928,186.7,79.46,15.4,&quot;05-manual-qa&quot;],[&quot;text&quot;,1928,203.1,108.66,13.3,&quot;phase 5 — Manual QA&quot;],[&quot;text&quot;,1928,217.4,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,2154,179.7,186,58,&quot;node 06-decisions-update.md&quot;],[&quot;text&quot;,2162,186.7,125.82,15.4,&quot;06-decisions-update&quot;],[&quot;text&quot;,2162,203.1,108.66,13.3,&quot;phase 6 — Decisions&quot;],[&quot;text&quot;,2162,217.4,131.54,13.3,&quot;fan-in 11 · all present&quot;],[&quot;box&quot;,2388,179.7,186,58,&quot;node 07-state-update.md&quot;],[&quot;text&quot;,2396,186.7,99.33,15.4,&quot;07-state-update&quot;],[&quot;text&quot;,2396,203.1,85.79,13.3,&quot;phase 7 — State&quot;],[&quot;text&quot;,2396,217.4,45.75,13.3,&quot;fan-in 1&quot;],[&quot;box&quot;,2622,179.7,186,58,&quot;node 08-memory-impact.md&quot;],[&quot;text&quot;,2630,186.7,105.95,15.4,&quot;08-memory-impact&quot;],[&quot;text&quot;,2630,203.1,91.5,13.3,&quot;phase 8 — Memory&quot;],[&quot;text&quot;,2630,217.4,131.54,13.3,&quot;fan-in 11 · all present&quot;],[&quot;rule&quot;,244.5,206.2,21.5,5,&quot;spine 00-requirements.md -&gt; 00-worktree.md&quot;],[&quot;ink&quot;,266,204.7,8,8,&quot;spine head 00-worktree.md&quot;],[&quot;rule&quot;,712.5,206.2,21.5,5,&quot;spine 01-as-is.md -&gt; 01.5-root-cause.md&quot;],[&quot;ink&quot;,734,204.7,8,8,&quot;spine head 01.5-root-cause.md&quot;],[&quot;rule&quot;,946.5,206.2,21.5,5,&quot;spine 01.5-root-cause.md -&gt; 02-to-be-plan.md&quot;],[&quot;ink&quot;,968,204.7,8,8,&quot;spine head 02-to-be-plan.md&quot;],[&quot;rule&quot;,1180.5,206.2,21.5,5,&quot;spine 02-to-be-plan.md -&gt; 03-implementation-summary.md&quot;],[&quot;ink&quot;,1202,204.7,8,8,&quot;spine head 03-implementation-summary.md&quot;],[&quot;rule&quot;,1414.5,206.2,21.5,5,&quot;spine 03-implementation-summary.md -&gt; 03.5-code-review.md&quot;],[&quot;ink&quot;,1436,204.7,8,8,&quot;spine head 03.5-code-review.md&quot;],[&quot;rule&quot;,1648.5,206.2,21.5,5,&quot;spine 03.5-code-review.md -&gt; 04-test-summary.md&quot;],[&quot;ink&quot;,1670,204.7,8,8,&quot;spine head 04-test-summary.md&quot;],[&quot;rule&quot;,2350.5,206.2,21.5,5,&quot;spine 06-decisions-update.md -&gt; 07-state-update.md&quot;],[&quot;ink&quot;,2372,204.7,8,8,&quot;spine head 07-state-update.md&quot;],[&quot;rule&quot;,228,161.2,294,5,&quot;lane 00-requirements.md -&gt; 01-as-is.md&quot;],[&quot;rule&quot;,225.5,163.7,5,16,&quot;stub upper 00-requirements.md&quot;],[&quot;rule&quot;,519.5,163.7,5,8,&quot;stub upper 01-as-is.md&quot;],[&quot;ink&quot;,518,171.7,8,8,&quot;lane arrow 01-as-is.md&quot;],[&quot;text&quot;,232,145.4,188.73,13.3,&quot;00-requirements.md -&gt; 01-as-is.md&quot;],[&quot;rule&quot;,216,117.2,786,5,&quot;lane 00-requirements.md -&gt; 02-to-be-plan.md&quot;],[&quot;rule&quot;,213.5,119.7,5,60,&quot;stub upper 00-requirements.md&quot;],[&quot;rule&quot;,999.5,119.7,5,52,&quot;stub upper 02-to-be-plan.md&quot;],[&quot;ink&quot;,998,171.7,8,8,&quot;lane arrow 02-to-be-plan.md&quot;],[&quot;text&quot;,220,101.4,217.32,13.3,&quot;00-requirements.md -&gt; 02-to-be-plan.md&quot;],[&quot;rule&quot;,696,139.2,294,5,&quot;lane 01-as-is.md -&gt; 02-to-be-plan.md&quot;],[&quot;rule&quot;,693.5,141.7,5,38,&quot;stub upper 01-as-is.md&quot;],[&quot;rule&quot;,987.5,141.7,5,30,&quot;stub upper 02-to-be-plan.md&quot;],[&quot;ink&quot;,986,171.7,8,8,&quot;lane arrow 02-to-be-plan.md&quot;],[&quot;text&quot;,700,123.4,177.29,13.3,&quot;01-as-is.md -&gt; 02-to-be-plan.md&quot;],[&quot;rule&quot;,1164,95.2,294,5,&quot;lane 02-to-be-plan.md -&gt; 03.5-code-review.md&quot;],[&quot;rule&quot;,1161.5,97.7,5,82,&quot;stub upper 02-to-be-plan.md&quot;],[&quot;rule&quot;,1455.5,97.7,5,74,&quot;stub upper 03.5-code-review.md&quot;],[&quot;ink&quot;,1454,171.7,8,8,&quot;lane arrow 03.5-code-review.md&quot;],[&quot;text&quot;,1168,79.4,223.04,13.3,&quot;02-to-be-plan.md -&gt; 03.5-code-review.md&quot;],[&quot;rule&quot;,1152,73.2,552,5,&quot;lane 02-to-be-plan.md -&gt; 04-test-summary.md&quot;],[&quot;rule&quot;,1149.5,75.7,5,104,&quot;stub upper 02-to-be-plan.md&quot;],[&quot;rule&quot;,1701.5,75.7,5,96,&quot;stub upper 04-test-summary.md&quot;],[&quot;ink&quot;,1700,171.7,8,8,&quot;lane arrow 04-test-summary.md&quot;],[&quot;text&quot;,1156,57.4,217.32,13.3,&quot;02-to-be-plan.md -&gt; 04-test-summary.md&quot;],[&quot;rule&quot;,1398,251.2,294,5,&quot;lane 03-implementation-summary.md -&gt; 04-test-summary.md&quot;],[&quot;rule&quot;,1395.5,237.7,5,16,&quot;stub lower 03-implementation-summary.md&quot;],[&quot;rule&quot;,1689.5,245.7,5,8,&quot;stub lower 04-test-summary.md&quot;],[&quot;ink&quot;,1688,237.7,8,8,&quot;lane arrow 04-test-summary.md&quot;],[&quot;text&quot;,1402,260.7,285.95,13.3,&quot;03-implementation-summary.md -&gt; 04-test-summary.md&quot;],[&quot;rule&quot;,1140,51.2,786,5,&quot;lane 02-to-be-plan.md -&gt; 05-manual-qa.md&quot;],[&quot;rule&quot;,1137.5,53.7,5,126,&quot;stub upper 02-to-be-plan.md&quot;],[&quot;rule&quot;,1923.5,53.7,5,118,&quot;stub upper 05-manual-qa.md&quot;],[&quot;ink&quot;,1922,171.7,8,8,&quot;lane arrow 05-manual-qa.md&quot;],[&quot;text&quot;,1144,35.4,200.17,13.3,&quot;02-to-be-plan.md -&gt; 05-manual-qa.md&quot;],[&quot;box&quot;,48,294,2760,58,&quot;the wildcard input rail&quot;],[&quot;text&quot;,56,301,523.14,15.4,&quot;EVERY PRESENT ARTIFACT EXCEPT ITSELF — the wildcard input, declared by 2 phases&quot;],[&quot;text&quot;,56,317.4,732.03,13.3,&quot;RUN_ARTIFACT_SEQUENCE.filter(a =&gt; present.has(a) &amp;&amp; a !== thisFile) — 11 possible sources, and NO single one of them is required&quot;],[&quot;text&quot;,56,331.7,886.45,13.3,&quot;Drawn as a rail rather than as 11 arrows each: the fan-in is the fact, and a bundle of eleven lines into one node is the picture that stops being readable.&quot;],[&quot;rule&quot;,2244.5,245.7,5,48.3,&quot;wildcard stub 06-decisions-update.md&quot;],[&quot;ink&quot;,2243,237.7,8,8,&quot;wildcard head 06-decisions-update.md&quot;],[&quot;rule&quot;,2712.5,245.7,5,48.3,&quot;wildcard stub 08-memory-impact.md&quot;],[&quot;ink&quot;,2711,237.7,8,8,&quot;wildcard head 08-memory-impact.md&quot;],[&quot;text&quot;,48,374,749.19,13.3,&quot;SOLID ARROW = required input (12 edges)   ·   DASHED ARROW = conditional: pushed only when the source artifact is present (2 edges)&quot;],[&quot;text&quot;,48,391.3,806.38,13.3,&quot;THICK ARROW from the rail = the wildcard input (2 edges, 11 sources each)   ·   DASHED NODE = reads more than one upstream artifact (3 nodes)&quot;],[&quot;text&quot;,48,408.6,909.32,13.3,&quot;Shape, word and count carry every distinction here; colour carries none of them. Each arrow is the linter's own expected-input map, not a reading of the prose.&quot;]],&quot;contains&quot;:[[1,0],[2,0],[3,0],[5,4],[6,4],[7,4],[9,8],[10,8],[11,8],[13,12],[14,12],[15,12],[17,16],[18,16],[19,16],[21,20],[22,20],[23,20],[25,24],[26,24],[27,24],[29,28],[30,28],[31,28],[33,32],[34,32],[35,32],[37,36],[38,36],[39,36],[41,40],[42,40],[43,40],[45,44],[46,44],[47,44],[63,62],[64,62],[68,67],[69,67],[73,72],[74,72],[78,77],[79,77],[83,82],[84,82],[88,87],[89,87],[93,92],[94,92],[98,97],[99,97],[100,97]]}">
-    <svg viewBox="0 0 2832 454" width="2832" height="454" preserveAspectRatio="xMinYMin meet">
-      <rect class="dg-box" x="48" y="179.7" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="56" y="198.8">00-requirements</text>
-      <text class="dg-t-sm" x="56" y="213.55">phase 0 — Requirements</text>
-      <text class="dg-t-sm" x="56" y="227.85">no upstream artifact</text>
-      <rect class="dg-box" x="282" y="179.7" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="290" y="198.8">00-worktree</text>
-      <text class="dg-t-sm" x="290" y="213.55">phase 0 — Worktree</text>
-      <text class="dg-t-sm" x="290" y="227.85">fan-in 1</text>
-      <rect class="dg-box" x="516" y="179.7" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="524" y="198.8">01-as-is</text>
-      <text class="dg-t-sm" x="524" y="213.55">phase 1 — AS-IS</text>
-      <text class="dg-t-sm" x="524" y="227.85">fan-in 1</text>
-      <rect class="dg-box" x="750" y="179.7" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="758" y="198.8">01.5-root-cause</text>
-      <text class="dg-t-sm" x="758" y="213.55">phase 1 — Root Cause</text>
-      <text class="dg-t-sm" x="758" y="227.85">fan-in 1</text>
-      <rect class="dg-box dg-box-fan" x="984" y="179.7" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="992" y="198.8">02-to-be-plan</text>
-      <text class="dg-t-sm" x="992" y="213.55">phase 2 — TO-BE Plan</text>
-      <text class="dg-t-sm" x="992" y="227.85">fan-in 3 · 1 when-present</text>
-      <rect class="dg-box" x="1218" y="179.7" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="1226" y="198.8">03-implementation-summary</text>
-      <text class="dg-t-sm" x="1226" y="213.55">phase 3 — Implementation</text>
-      <text class="dg-t-sm" x="1226" y="227.85">fan-in 1</text>
-      <rect class="dg-box dg-box-fan" x="1452" y="179.7" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="1460" y="198.8">03.5-code-review</text>
-      <text class="dg-t-sm" x="1460" y="213.55">phase 3 — Code Review</text>
-      <text class="dg-t-sm" x="1460" y="227.85">fan-in 2</text>
-      <rect class="dg-box dg-box-fan" x="1686" y="179.7" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="1694" y="198.8">04-test-summary</text>
-      <text class="dg-t-sm" x="1694" y="213.55">phase 4 — Test Summary</text>
-      <text class="dg-t-sm" x="1694" y="227.85">fan-in 3 · 1 when-present</text>
-      <rect class="dg-box" x="1920" y="179.7" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="1928" y="198.8">05-manual-qa</text>
-      <text class="dg-t-sm" x="1928" y="213.55">phase 5 — Manual QA</text>
-      <text class="dg-t-sm" x="1928" y="227.85">fan-in 1</text>
-      <rect class="dg-box" x="2154" y="179.7" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="2162" y="198.8">06-decisions-update</text>
-      <text class="dg-t-sm" x="2162" y="213.55">phase 6 — Decisions</text>
-      <text class="dg-t-sm" x="2162" y="227.85">fan-in 11 · all present</text>
-      <rect class="dg-box" x="2388" y="179.7" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="2396" y="198.8">07-state-update</text>
-      <text class="dg-t-sm" x="2396" y="213.55">phase 7 — State</text>
-      <text class="dg-t-sm" x="2396" y="227.85">fan-in 1</text>
-      <rect class="dg-box" x="2622" y="179.7" width="186" height="58" rx="1"/>
-      <text class="dg-t" x="2630" y="198.8">08-memory-impact</text>
-      <text class="dg-t-sm" x="2630" y="213.55">phase 8 — Memory</text>
-      <text class="dg-t-sm" x="2630" y="227.85">fan-in 11 · all present</text>
-      <path class="dg-line" d="M244.5 206.2 L266 211.2"/>
-      <polygon class="dg-head" points="274,208.7 266,204.7 266,212.7"/>
-      <path class="dg-line" d="M712.5 206.2 L734 211.2"/>
-      <polygon class="dg-head" points="742,208.7 734,204.7 734,212.7"/>
-      <path class="dg-line-cond" d="M946.5 206.2 L968 211.2"/>
-      <polygon class="dg-head-cond" points="976,208.7 968,204.7 968,212.7"/>
-      <path class="dg-line" d="M1180.5 206.2 L1202 211.2"/>
-      <polygon class="dg-head" points="1210,208.7 1202,204.7 1202,212.7"/>
-      <path class="dg-line" d="M1414.5 206.2 L1436 211.2"/>
-      <polygon class="dg-head" points="1444,208.7 1436,204.7 1436,212.7"/>
-      <path class="dg-line-cond" d="M1648.5 206.2 L1670 211.2"/>
-      <polygon class="dg-head-cond" points="1678,208.7 1670,204.7 1670,212.7"/>
-      <path class="dg-line" d="M2350.5 206.2 L2372 211.2"/>
-      <polygon class="dg-head" points="2380,208.7 2372,204.7 2372,212.7"/>
-      <path class="dg-line" d="M228 161.2 L522 166.2"/>
-      <path class="dg-line" d="M225.5 163.7 L230.5 179.7"/>
-      <path class="dg-line" d="M519.5 163.7 L524.5 171.7"/>
-      <polygon class="dg-head" points="522,179.7 518,171.7 526,171.7"/>
-      <text class="dg-t-sm" x="232" y="155.85">00-requirements.md -&gt; 01-as-is.md</text>
-      <path class="dg-line" d="M216 117.2 L1002 122.2"/>
-      <path class="dg-line" d="M213.5 119.7 L218.5 179.7"/>
-      <path class="dg-line" d="M999.5 119.7 L1004.5 171.7"/>
-      <polygon class="dg-head" points="1002,179.7 998,171.7 1006,171.7"/>
-      <text class="dg-t-sm" x="220" y="111.85">00-requirements.md -&gt; 02-to-be-plan.md</text>
-      <path class="dg-line" d="M696 139.2 L990 144.2"/>
-      <path class="dg-line" d="M693.5 141.7 L698.5 179.7"/>
-      <path class="dg-line" d="M987.5 141.7 L992.5 171.7"/>
-      <polygon class="dg-head" points="990,179.7 986,171.7 994,171.7"/>
-      <text class="dg-t-sm" x="700" y="133.85">01-as-is.md -&gt; 02-to-be-plan.md</text>
-      <path class="dg-line" d="M1164 95.2 L1458 100.2"/>
-      <path class="dg-line" d="M1161.5 97.7 L1166.5 179.7"/>
-      <path class="dg-line" d="M1455.5 97.7 L1460.5 171.7"/>
-      <polygon class="dg-head" points="1458,179.7 1454,171.7 1462,171.7"/>
-      <text class="dg-t-sm" x="1168" y="89.85">02-to-be-plan.md -&gt; 03.5-code-review.md</text>
-      <path class="dg-line" d="M1152 73.2 L1704 78.2"/>
-      <path class="dg-line" d="M1149.5 75.7 L1154.5 179.7"/>
-      <path class="dg-line" d="M1701.5 75.7 L1706.5 171.7"/>
-      <polygon class="dg-head" points="1704,179.7 1700,171.7 1708,171.7"/>
-      <text class="dg-t-sm" x="1156" y="67.85">02-to-be-plan.md -&gt; 04-test-summary.md</text>
-      <path class="dg-line" d="M1398 251.2 L1692 256.2"/>
-      <path class="dg-line" d="M1395.5 237.7 L1400.5 253.7"/>
-      <path class="dg-line" d="M1689.5 245.7 L1694.5 253.7"/>
-      <polygon class="dg-head" points="1692,237.7 1688,245.7 1696,245.7"/>
-      <text class="dg-t-sm" x="1402" y="271.15">03-implementation-summary.md -&gt; 04-test-summary.md</text>
-      <path class="dg-line" d="M1140 51.2 L1926 56.2"/>
-      <path class="dg-line" d="M1137.5 53.7 L1142.5 179.7"/>
-      <path class="dg-line" d="M1923.5 53.7 L1928.5 171.7"/>
-      <polygon class="dg-head" points="1926,179.7 1922,171.7 1930,171.7"/>
-      <text class="dg-t-sm" x="1144" y="45.85">02-to-be-plan.md -&gt; 05-manual-qa.md</text>
-      <rect class="dg-box dg-box-rail" x="48" y="294" width="2760" height="58" rx="1"/>
-      <text class="dg-t" x="56" y="313.1">EVERY PRESENT ARTIFACT EXCEPT ITSELF — the wildcard input, declared by 2 phases</text>
-      <text class="dg-t-sm" x="56" y="327.85">RUN_ARTIFACT_SEQUENCE.filter(a =&gt; present.has(a) &amp;&amp; a !== thisFile) — 11 possible sources, and NO single one of them is required</text>
-      <text class="dg-t-sm" x="56" y="342.15">Drawn as a rail rather than as 11 arrows each: the fan-in is the fact, and a bundle of eleven lines into one node is the picture that stops being readable.</text>
-      <path class="dg-line-wide" d="M2244.5 245.7 L2249.5 294"/>
-      <polygon class="dg-head-wide" points="2247,237.7 2243,245.7 2251,245.7"/>
-      <path class="dg-line-wide" d="M2712.5 245.7 L2717.5 294"/>
-      <polygon class="dg-head-wide" points="2715,237.7 2711,245.7 2719,245.7"/>
-      <text class="dg-t-sm" x="48" y="384.45">SOLID ARROW = required input (12 edges)   ·   DASHED ARROW = conditional: pushed only when the source artifact is present (2 edges)</text>
-      <text class="dg-t-sm" x="48" y="401.75">THICK ARROW from the rail = the wildcard input (2 edges, 11 sources each)   ·   DASHED NODE = reads more than one upstream artifact (3 nodes)</text>
-      <text class="dg-t-sm" x="48" y="419.05">Shape, word and count carry every distinction here; colour carries none of them. Each arrow is the linter's own expected-input map, not a reading of the prose.</text>
-    </svg>
+  <div class="callout">
+    <strong>All twelve artifacts are MANDATORY work. Nothing here is an optional phase.</strong>
+    Every phase row carries a <span class="tag tag-may-be-absent">may be absent</span> badge, and it is worth stating plainly what that badge does <em>not</em> mean: it does not mean the phase is optional. It is the property of one SET — <code>lock.ts</code> <code>OPTIONAL_PHASES</code>, whose only use in the plugin is <code>nextLegalPhase(graph, { optional: OPTIONAL_PHASES })</code>, i.e. "a member that is ABSENT does not stop the legal-phase selector". That is a statement about a fallback query, not about the work.
+    <br><br>
+    <b>The positive fact, which the plugin enforces end to end:</b> <code>recursive_init</code> scaffolds <b>all twelve</b> artifacts in one call — the two Phase 0 templates and then every later phase — so a scaffolded run has no missing phase to skip. <span class="cite">src/runtime.ts:1570</span> All twelve then lock <b>in sequence</b>: <code>PHASE_SEQUENCE</code> is the canonical order and the lock chain refuses out of order. <span class="cite">src/lock.ts:21, src/runtime.ts:1656</span> And a normal run produces twelve: the seven <em>may-be-absent</em> phases are written and locked exactly like the other five, because the scaffold writes them and the sequence locks them — being able to be ABSENT is not the same as being permitted to be absent.
+    <br><br>
+    <span class="unv">⚠ Stated precisely, because this is the whole point of the badge change:</span> the seven <em>may-be-absent</em> phases are the seven members of <code>OPTIONAL_PHASES</code>, and their badge means only that an <b>absent</b> one will not block the chain. Whether a phase's WORK is optional is not a property any code in this repo declares, and this page no longer implies one.
+    <br><br>
+    <span class="unv">⚠ AND THIS IS A REAL INCONSISTENCY IN THE REPOSITORY, reported rather than smoothed over.</span> There are <b>two independent optionality declarations</b> and they disagree. <code>lock.ts</code> <code>OPTIONAL_PHASES</code> has seven members, and it is what the legal-phase selector uses; <code>status.ts</code> carries its own <code>optional:</code> flag on the twelve-row status table and marks only <b>two</b> — <code>01.5-root-cause.md</code> and <code>03.5-code-review.md</code>. That second flag is load-bearing in two places: a missing phase is reported <code>SKIPPED</code> from it, and <code>snapshot.ts</code> computes a run's <code>complete</code> state by requiring every phase where <code>!p.optional</code>. So five of these seven phases are treated as <b>required</b> by the run-completion calculation while the selector treats them as skippable. Both readings are honest; they are just not the same reading, and a reader deserves to know which one is speaking. <span class="cite">src/status.ts:46, src/status.ts:371, src/snapshot.ts:118, src/lock.ts:36</span>
   </div>
 
-  <h3 id="graph-edges" style="margin-top:var(--sp-6)">Every edge, in full</h3>
+  <div class="callout">
+    <strong>Why the workflow is a graph and not a chain.</strong> Three queries in the plugin are graph operations being run over a linear array: <code>getStaleDownstreamPhases</code> is a REACHABILITY query, <code>getPrerequisites</code> is an IN-EDGE query, and <code>getNextLegalPhase</code> is a topological walk. An array can answer all three only while the dependency happens to be linear — and the moment an artifact depends on something LATER than itself, the array model answers <em>wrongly</em> rather than not at all. <span class="cite">src/phase-graph.ts:2</span>
+    <br><br>
+    Two of the 16 edges cross a phase boundary the sequence order alone would not suggest: <code>03.5-code-review.md</code> reads <code>03-implementation-summary.md</code> (the SAME phase number 3), and <code>05-manual-qa.md</code> reads <code>02-to-be-plan.md</code> — three nodes back. Neither is a BACKWARD edge in the graph sense: every one of the 16 input edges runs forward in <code>PHASE_SEQUENCE</code>, which the generator ASSERTS before it draws one, because the lane routing cannot represent an edge that runs backwards. The backwards movement in this workflow comes from the two loops, not from an input edge. <span class="cite">src/ts-lint.ts:670, src/lock.ts:21</span>
+  </div>
+
+  <div class="callout">
+    <strong>How to read the chart's own marks.</strong> A <b>solid</b> arrow is a REQUIRED input. A <b>dashed</b> arrow is CONDITIONAL: the linter pushes that artifact only when it exists on disk (<code>present.has(…)</code>), so the edge is real but optional. A <b>thick</b> arrow comes off the rail under the row: that input is <em>every present artifact in the run except itself</em>, which is why phases 06 and 08 have eleven possible sources and no single required one. A <b>dotted</b> link is the SEQUENCE ORDER and carries no input edge at all — two adjacent pairs have none, and drawing them as solid arrows would claim an edge the linter does not declare. A node with a <b>dashed border</b> reads more than one upstream artifact, and every node states its own fan-in in words. <span class="cite">src/ts-lint.ts:670, src/ts-lint.ts:688, src/ts-lint.ts:685, src/ts-lint.ts:687</span>
+    <br><br><b>The chart is wider than the reading column, and it scrolls — deliberately.</b> Twelve artifact names cannot be abbreviated without losing the names the rest of this page cites, so the chart keeps its own coordinate system and scrolls sideways in one strip rather than squeezing its labels. Every arrow in it is also a row in the table below, and the table is the complete form.
+  </div>
+
+  <h3 id="graph-edges">Every edge, in full</h3>
   <div class="tablewrap">
     <table>
-      <caption>All 16 declared input edges, from → to. This table is the accessible equivalent of the drawing above: no edge exists in the picture that is not a row here. <span class="cite">src/ts-lint.ts:670</span></caption>
+      <caption>All 16 declared input edges, from → to. This table is the accessible equivalent of the overview chart: no edge exists in the picture that is not a row here, and no row here is missing from the picture. <span class="cite">src/ts-lint.ts:670</span></caption>
       <thead><tr><th>#</th><th>From</th><th>To</th><th>Kind</th><th>Source</th></tr></thead>
       <tbody>
                 <tr><td><span class="seq">1</span></td><td><code>00-requirements.md</code></td><td><code>00-worktree.md</code></td><td>required</td><td><span class="cite">src/ts-lint.ts:670</span></td></tr>
@@ -1287,12 +1267,10 @@ footer.colophon p{ margin-bottom:var(--sp-2); max-width:100ch; }
     </table>
   </div>
 
-  <h3 style="margin-top:var(--sp-6)">Why this is a graph and not a chain</h3>
-  <p class="note">Three queries in the plugin are graph operations being run over a linear array: <code>getStaleDownstreamPhases</code> is a REACHABILITY query, <code>getPrerequisites</code> is an IN-EDGE query, and <code>getNextLegalPhase</code> is a topological walk. An array can answer all three only while the dependency happens to be linear — and the moment an artifact depends on something LATER than itself, the array model answers <em>wrongly</em> rather than not at all. <span class="cite">src/phase-graph.ts:2</span></p>
-  <p class="note">Two of the edges above cross a phase boundary that the sequence order alone would not suggest: <code>03.5-code-review.md</code> reads <code>03-implementation-summary.md</code> (the SAME phase number 3), and <code>05-manual-qa.md</code> reads <code>02-to-be-plan.md</code> — three nodes back. Neither is a backward edge in the graph sense: every edge here runs forward in <code>PHASE_SEQUENCE</code>, which the generator ASSERTS before it draws one, because the routing cannot represent an edge that runs backwards. <span class="cite">src/ts-lint.ts:670, src/lock.ts:21</span></p>
-
-  <h3 style="margin-top:var(--sp-6)">What could NOT be sourced, and what is therefore not on this page</h3>
+  <h3 style="margin-top:var(--sp-6)">What the chart deliberately does NOT draw, and what could not be sourced</h3>
   <ul class="refuse-list">
+    <li><span class="g-shape g-shape-refuse">NOT DRAWN</span><span><b>The two human gates that are not a node's own decision — <code>tdd-mode</code> and <code>qa-signoff</code> are attached to a phase, not to a separate step, so they are drawn as a marker above the phase they belong to rather than as a box of their own.</b> <code>recursive_ask</code>'s three workflow gates belong to phases 3 (<code>tdd-mode</code>) and 5 (<code>qa-signoff</code>), plus <code>gate-block</code>, which any refused transition can raise. <span class="cite">src/recursive_ask.tool.ts:92, src/recursive_ask.tool.ts:93, src/recursive_ask.tool.ts:103</span></span></li>
+    <li><span class="g-shape g-shape-refuse">NOT DRAWN</span><span><b>The refusal marks are the RULES, not the phases.</b> The hatched band under a node names the guard rule and the tool pattern it fires on; the phase's own refusal list is on its phase view. A phase with no mark can still be refused by the lock chain — <code>lock-order</code> and the linter are not node-local. <span class="cite">src/policy-globs.ts:714, src/runtime.ts:1724</span></span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>A per-phase PROSE description of each phase's job, for phases 01-08.</b> The repository does not contain one. <code>laterPhaseContent</code> writes the same generic Scope note for every later phase — <code>Scaffold generated by the recursive-mode plugin (R5). Fill every required section before lint.</code> — so the purpose lines on this page are built from the phase LABEL and its REQUIRED SECTIONS, which is what the code actually states, plus the two Phase 0 templates' own Scope notes. Nothing was written to fill the gap. <span class="cite">src/init-templates.ts:256</span></span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Whether a real run's artifacts actually CITE the artifacts the map expects.</b> This page draws what the linter DEMANDS. It makes no claim about any particular run's <code>Inputs:</code> header — the check that reads it (<code>lint_effective_input_addenda</code>) reports per run, and no run was examined here. <span class="cite">src/ts-lint.ts:1208</span></span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Addendum edges.</b> <code>src/phase-graph.ts</code> adds edges for addenda attached to a phase, and this drawing does not include them: they are per-run files rather than a fixed part of the workflow, so there is nothing in <code>src/</code> to fix their number. <span class="cite">src/phase-graph.ts:100</span></span></li>
@@ -2653,7 +2631,7 @@ Memory write (phase 8, HARD): &lt;the PHASE8_MEMORY_WRITE_RULE.summary sentence&
         <tr><td>Every conditional input ("only when present") is the one the linter actually pushes</td><td><code>src/ts-lint.ts</code> — <code>candidates.push(…)</code> inside <code>getPhaseExpectedInputArtifactNames</code></td></tr>
         <tr><td><b>Citation coverage.</b> A citation cannot be satisfied by coincidence: each one is resolved from a NAMED ANCHOR searched in its own file, an anchor that is missing, ambiguous, or moved is a hard failure, an undeclared duplicate anchor fails rather than silently citing the first hit, and every rendered citation is re-checked to be inside the file it names and within that file's length.</td><td>the generator's <code>ANCHORS</code> table against <code>src/</code></td></tr>
         <tr><td>Each phase panel carries at least 8 citations, and the page renders a substantial number in total</td><td>the generated HTML</td></tr>
-        <tr><td><b>Every WCAG contrast pair is MEASURED</b>, not asserted: 36 foreground/background pairs read from the palette object that also renders the CSS, each against the threshold it owes (4.5:1 for text, 3:1 for non-text state borders). Purely decorative presentation is listed too, with the exemption STATED — an exemption that is written down can be argued with; a silent one cannot.</td><td>the palette object in the generator</td></tr>
+        <tr><td><b>Every WCAG contrast pair is MEASURED</b>, not asserted: 37 foreground/background pairs read from the palette object that also renders the CSS, each against the threshold it owes (4.5:1 for text, 3:1 for non-text state borders). Purely decorative presentation is listed too, with the exemption STATED — an exemption that is written down can be argued with; a silent one cannot.</td><td>the palette object in the generator</td></tr>
         <tr><td>No hardcoded hex anywhere in the stylesheet — every colour is a declared token value, so the audited palette IS the shipped palette</td><td>the generated HTML</td></tr>
         <tr><td>The radius ladder is strictly increasing (outer &gt; inner), every radius token used is declared and every declared one is used, and no dangling token remains</td><td>the generated HTML</td></tr>
         <tr><td>Accessibility affordances the accessibility skill requires: a <code>:focus-visible</code> style, a skip link, <code>prefers-reduced-motion</code>, ≥44px tab hit areas, <code>text-wrap</code>, tabular numerals, font smoothing, exact transition properties, no <code>transition: all</code> declaration, and a text label on every gate so colour is never the only signal</td><td>the generated HTML</td></tr>
@@ -2662,8 +2640,11 @@ Memory write (phase 8, HARD): &lt;the PHASE8_MEMORY_WRITE_RULE.summary sentence&
         <tr><td><b>The 16 directed edges</b>, re-derived from <code>getPhaseExpectedInputArtifactNames</code> — the required, the conditional (<code>candidates.push</code>) and the two wildcard filters, including that each wildcard excludes its own artifact and that <code>00-requirements.md</code> has no upstream edge at all. The fan-in rendered on every node is checked against the same derivation, so the Phase graph view fails the build if the linter's map moves.</td><td><code>src/ts-lint.ts</code> — the whole function body</td></tr>
         <tr><td><b>Every phase's purpose line.</b> Each one carries the label <code>PHASES</code> gives that artifact, and names at least two required sections that are still in <code>SECTION_MAP</code>; the two Phase 0 lines are checked to quote their template's Scope note verbatim, no line may be a closeout scope note lifted as-is, and the page asserts that the later-phase template carries ONE generic Scope note — which is why 01-08 have no per-phase prose to transcribe.</td><td><code>src/status.ts</code>, <code>src/phase-rules.ts</code>, <code>src/init-templates.ts</code>, <code>src/closeout.ts</code></td></tr>
         <tr><td><b>The learning loop:</b> the five kinds the phase-entry read covers, the two it deliberately does not, the read RECEIPT written on every phase entry, the phase-0 write gate being decided from that receipt, the phase-8 lock gate being called from <code>lockArtifact</code> and matching <code>Source-Runs</code>, the re-run being detected from an existing receipt, the ORDER of the trigger's three gates (evidence → re-run → extractor), the strict-2 comparison, both exit codes, the extractor's environment variable, and the shard path the trigger writes.</td><td><code>src/memory.ts</code>, <code>src/memory-feedback.ts</code>, <code>src/policy-globs.ts</code>, <code>src/training.ts</code>, <code>src/runtime.ts</code></td></tr>
-        <tr><td><b>Every chart's own manifest, re-read from the markup:</b> the phase graph draws exactly one run per derived edge (by label, so a missing arrow is a failure rather than a smaller picture) and one node per phase, and the learning loop draws every step and every gate that can stop one.</td><td>the generated HTML itself</td></tr>
-        <tr><td>The tab count equals 1 overview + 1 graph + 12 phases + 1 learning loop + 8 other views</td><td>the generated HTML itself</td></tr>
+        <tr><td><b>Every chart's own manifest, re-read from the markup:</b> the overview draws exactly one run per derived edge (by label, so a missing arrow is a failure rather than a smaller picture) and one node per phase, and the learning loop draws every step and every gate that can stop one.</td><td>the generated HTML itself</td></tr>
+        <tr><td><b>The merge itself, asserted in the negative:</b> there is NO second <code>phase-graph</code> chart and NO <code>Phase graph</code> tab any more, and all twelve phase detail views still exist — so the sixteen edges cannot drift back onto a tab of their own while the overview keeps a picture of its own, and the merge cannot have removed reference material.</td><td>the generated HTML itself</td></tr>
+        <tr><td><b>The overview IS the graph — one check per interaction type, each counted from the drawing's own manifest:</b> twelve nodes, all sixteen edges as runs, five dashed fan-in nodes, three human-decision markers with their diamonds, twelve refusal bands, the wildcard rail (with the assertion that it spans the twelve-node row) and its two thick stubs, the four dotted sequence-order links AND the seven spine arrows (checked against each other, so a dotted link cannot be drawn over a pair that has a real input edge), the two back-edge arcs with their arrowheads on the earlier node, and the cross-run return.</td><td>the manifest the chart ships, against expectations written out in <code>check-workflow-map.mjs</code> rather than imported from this generator</td></tr>
+        <tr><td><b>The prose is gone and the facts are not.</b> No callout sits above the overview chart, the prologue is a heading plus at most two short paragraphs, the moved caveats are reachable in one line, and the strings the Notes view is supposed to carry are all still on the page.</td><td>the generated HTML itself</td></tr>
+        <tr><td>The tab count equals 1 overview + 12 phases + 1 learning loop + 1 Notes view + 7 other views</td><td>the generated HTML itself</td></tr>
       </tbody>
     </table>
   </div>
@@ -2671,7 +2652,7 @@ Memory write (phase 8, HARD): &lt;the PHASE8_MEMORY_WRITE_RULE.summary sentence&
   <p class="note">Rendered from the same computation <code>--verify</code> runs, so the numbers on this page ARE the audit rather than a summary of it. "Exempt" is a stated decision, not a silent omission: WCAG sets no threshold for purely decorative presentation, and every one of those rows is a region fill, a divider, or a rule border whose meaning is carried by a label beside it.</p>
   <div class="tablewrap">
     <table>
-      <caption>36 foreground/background pairs. Text owes 4.5:1 (WCAG 2.2 AA, 1.4.3); a border that carries STATE owes 3:1 (1.4.11).</caption>
+      <caption>37 foreground/background pairs. Text owes 4.5:1 (WCAG 2.2 AA, 1.4.3); a border that carries STATE owes 3:1 (1.4.11).</caption>
       <thead><tr><th>Pair</th><th>Ratio</th><th>Needed</th><th>What it is</th></tr></thead>
       <tbody>
                 <tr><td><code>n-050</code> on <code>n-950</code></td><td class="tnum">17.29:1 <span class="tag tag-tdd">PASS</span></td><td class="tnum">4.5:1</td><td>body text on the page canvas</td></tr>
@@ -2705,6 +2686,7 @@ Memory write (phase 8, HARD): &lt;the PHASE8_MEMORY_WRITE_RULE.summary sentence&
         <tr><td><code>n-600</code> on <code>n-950</code></td><td class="tnum">3.60:1 <span class="tag tag-tdd">PASS</span></td><td class="tnum">3.0:1</td><td>that same control border on the canvas</td></tr>
         <tr><td><code>n-600</code> on <code>n-850</code></td><td class="tnum">3.23:1 <span class="tag tag-tdd">PASS</span></td><td class="tnum">3.0:1</td><td>that same control border on a card</td></tr>
         <tr><td><code>n-500</code> on <code>n-900</code></td><td class="tnum">3.11:1 <span class="tag tag-tdd">PASS</span></td><td class="tnum">3.0:1</td><td>the sequence rail dot — a state mark, not a hairline</td></tr>
+        <tr><td><code>seq-dim</code> on <code>n-950</code></td><td class="tnum">3.81:1 <span class="tag tag-tdd">PASS</span></td><td class="tnum">3.0:1</td><td>the dotted SEQUENCE-ORDER link in the overview chart — a state mark (this pair is adjacent in the order, and carries no input edge)</td></tr>
         <tr><td><code>n-700</code> on <code>n-950</code></td><td class="tnum">1.35:1 <span class="tag">exempt</span></td><td class="tnum">1.0:1</td><td>the background grid line — DECORATIVE, no threshold owed</td></tr>
         <tr><td><code>warn-dim</code> on <code>n-950</code></td><td class="tnum">2.04:1 <span class="tag">exempt</span></td><td class="tnum">1.0:1</td><td>the amber rule border — decorative; the label beside it is the signal</td></tr>
         <tr><td><code>danger-dim</code> on <code>n-950</code></td><td class="tnum">1.68:1 <span class="tag">exempt</span></td><td class="tnum">1.0:1</td><td>the refusal rule border — decorative, same reasoning</td></tr>
@@ -2717,7 +2699,8 @@ Memory write (phase 8, HARD): &lt;the PHASE8_MEMORY_WRITE_RULE.summary sentence&
 
   <h3 style="margin-top:var(--sp-6)">NOT verified — stated rather than filled in</h3>
   <ul class="refuse-list">
-    <li><span class="g-shape g-shape-refuse">MEASURED ELSEWHERE</span><span><b>The rendered pixels — measured in a separate headless pass, NOT by this generator.</b> Three charts now ship, and each one was rendered in headless Chromium (the Playwright build on this machine) at <b>eight viewport widths</b> — 360, 480, 600, 768, 820, 1024, 1440 and 1920 px — with every panel un-hidden, and the glyph boxes were compared pairwise: <b>0 text-on-text overlaps</b> in all three charts and <b>0</b> across the whole page at every width (text-NODE rects via a DOM Range, so a <code>&lt;code&gt;</code> inside a paragraph is not miscounted as an overlap with its own parent), <b>0</b> labels crossing a card they do not belong to, every chart rendering at <b>scale 1.0000</b> (never rescaled by its box), and no horizontal page overflow at any width. The worst measured label overhang was <b>−2.7 px, −3.2 px and −4.4 px</b> (overview, phase graph, learning loop) — negative, i.e. every label fits its reserved box with that much room, because the real monospace advance is <b>0.560–0.562 em</b> against the declared 0.602. ⚠ THE HARNESS FOR THAT PASS IS NOT PART OF THIS REPOSITORY and <code>--verify</code> does not re-run it, so treat these as a dated measurement rather than a standing check — which is why the generator and the two checkers carry the arithmetic invariants instead.</span></li>
+    <li><span class="g-shape g-shape-refuse">MEASURED ELSEWHERE</span><span><b>The rendered pixels — measured in a separate headless pass, NOT by this generator.</b> Two charts now ship, and both were rendered in headless Chromium (the Playwright build on this machine) at <b>eight viewport widths</b> — 360, 480, 600, 768, 820, 1024, 1440 and 1920 px — with every panel un-hidden, and the glyph boxes were compared pairwise: <b>0 text-on-text overlaps</b> in both charts and across the whole page at every width (text-NODE rects via a DOM Range, so a <code>&lt;code&gt;</code> inside a paragraph is not miscounted as an overlap with its own parent), <b>0</b> labels crossing a card they do not belong to, every chart rendering at <b>scale 1.0000</b> (never rescaled by its box, despite being 2.1x wider than the reading column), and <b>no horizontal page overflow at any width</b> (the page measures 15 px NARROWER than the viewport, from the scrollbar). The worst measured label overhang was <b>+0.04 px and 0.00 px</b> (overview, learning loop) — measured against the reserved box with the real glyph advance of <b>0.5493 em</b> against the declared 0.602. ⚠ THE HARNESS FOR THIS PASS IS NOT PART OF THIS REPOSITORY (it is a throwaway CDP script, kept out of the tree) and <code>--verify</code> does not re-run it, so treat these as a dated measurement rather than a standing check — which is why the generator and the two checkers carry the arithmetic invariants instead.</span></li>
+    <li><span class="g-shape g-shape-refuse">MEASURED, AND NOT WHAT YOU MIGHT EXPECT</span><span><b>The two back-edge arrowheads are 8x5 units, and at the chart's own scale that is 8x5 pixels.</b> They are verified as GEOMETRY — the manifest places each one on its target node's bottom edge, one column gap to the left, and <code>check-workflow-map.mjs</code> fails if either moves — but a reader looking at the whole chart sees the violet arcs and their labels rather than the two arrowheads. That is a fact about the size of an arrowhead on a 2854-unit canvas, not a defect, and it is written down here rather than discovered by the owner.</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Keyboard and screen-reader behaviour.</b> The tablist's roles, <code>aria-selected</code>, roving tabindex and <code>aria-controls</code> targets are asserted against the markup, and the arrow-key handler is present in the source — but no assistive technology ran this page, so "the arrow keys work" and "the tab order reads correctly" are NOT demonstrated here.</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Per-phase "inputs" beyond the artifact list.</b> The scaffold writes a generic <code>- (list upstream artifacts re-read for this phase)</code> placeholder for every later phase, so there is no per-phase PROSE list of inputs in the code to transcribe. What IS in the code is <code>getPhaseExpectedInputArtifactNames</code>, and that is what the input column shows — plus the file-level sources a phase names (git state, DECISIONS.md, STATE.md, the memory plane). <span class="cite">src/init-templates.ts:245, src/ts-lint.ts:670</span></span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Which hooks fire in a given real session.</b> The page states which seam each listener attaches to and what it does; it does not claim a particular live run took a particular path, and it makes no claim about run outcomes.</span></li>

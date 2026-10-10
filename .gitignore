@@ -33,3 +33,8 @@ lib/
 # — a lint run against a fixture left an untracked `jobs/` behind that appeared in every
 # `git status`. Recursive residue is residue wherever it lands.
 **/.recursive/run/
+
+# Editor/agent scratch files inside the generated map tree (never part of the artifact)
+workflow-map/.tmp-*
+workflow-map/*.tmp.mjs
+

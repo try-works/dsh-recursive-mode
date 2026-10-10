@@ -76,8 +76,10 @@ import {
   coerceAskToDecision, currentPhaseArtifact, evaluateToolGuard, resolveToolPolicyForGuard, type ToolGuardDecision,
 } from '../src/enforcement.ts'
 import { phaseNumberForArtifact, resolveFrom, withPhaseBaseline } from '../src/phase-rules.ts'
-import { evaluateToolPolicy, loadToolPolicyFile, toolPolicyPath } from '../src/policy-globs.ts'
+import { evaluateToolPolicy, loadToolPolicyFile, toolPolicyPath, builtInToolPolicyRules, WRITE_TOOL_NAMES } from '../src/policy-globs.ts'
 import { PHASE_SEQUENCE, getLockStatus, lockHashFromContent } from '../src/lock.ts'
+import { INJECTIONS_FILE, MEMORY_READ_SOURCE, readInjections, readMemoryReads } from '../src/memory-feedback.ts'
+import { RecursiveRuntime } from '../src/runtime.ts'
 import { resolveRunDir } from '../src/run.ts'
 import { readGuardDecisions } from '../src/guard-log.ts'
 import { laterPhaseContent, requirementsContent } from '../src/init-templates.ts'
@@ -168,6 +170,33 @@ function phaseEightRun(): Run {
 /** The path form a model actually writes: a repo-relative dotfile path (POSIX separators). */
 function relativeArtifact(run: Run, name: string): string {
   return '.recursive/run/' + run.runId + '/' + name
+}
+
+/**
+ * PHASE ENTRY — THE PRECONDITION A PHASE-0 WRITE NOW HAS, performed through the REAL call.
+ *
+ * ⚠ WHY EVERY PHASE-0 WRITE BELOW GOES THROUGH THIS. `memory-read` (src/policy-globs.ts) refuses a write
+ * to a phase-0 artifact while the run holds no read receipt for phase 0, and the receipt is written by the
+ * phase-entry call — `RecursiveRuntime.phaseRules`, which is what `recursive_phase` invokes and the one
+ * place memory reaches a run. A fixture that writes `00-requirements.md` therefore has to have ENTERED
+ * phase 0 first, exactly as a run does, or it is asserting on a state no run can be in.
+ *
+ * ⚠ AND IT IS THE PRODUCTION FUNCTION, NOT A HAND-BUILT FILE. This calls the runtime's own entry point, so
+ * if `phaseRules` stopped recording the read, the receipt would be absent, every phase-0 write below would
+ * be refused, and this spec would go red — which is the property that keeps these assertions from becoming
+ * a fixture that satisfies the gate for a reason production does not. The receipt's presence is asserted
+ * rather than assumed, for the same reason.
+ */
+async function enterPhaseZero(run: Run): Promise<string> {
+  const ctx = new Context()
+  const runtime = new RecursiveRuntime(ctx, { repoRoot: run.root })
+  const rules = await runtime.phaseRules(run.runId)
+  await ctx.fiber.dispose()
+  if (rules === null) throw new Error('phase entry returned no phase for ' + run.runId)
+  // The file the GATE reads, asserted to exist: without it the phase-0 writes below would be refused and
+  // this helper would be reporting a precondition it did not establish.
+  expect(existsSync(join(run.runDir, INJECTIONS_FILE)), 'the phase entry must have recorded the memory read').toBe(true)
+  return rules.phase
 }
 
 /** The guard's verdict for one `write` call, under STRICT enforcement. */
@@ -427,8 +456,13 @@ describe('(d) PHASE ORDER IS ENFORCED ON WRITES: only the ACTIVE phase may be wr
     'notes.md',
   ]
 
-  it('walks EVERY phase: the active artifact stays writable, every later one is refused', () => {
+  it('walks EVERY phase: the active artifact stays writable, every later one is refused', async () => {
     const run = scaffoldRun()
+    // ⚠ THE PRECONDITION THE FIRST ITERATION OF THIS WALK NEEDS. Phase 0's artifact is refused until the
+    // run has ENTERED phase 0 (the `memory-read` gate), so the walk performs the same entry a run performs
+    // before it asserts that the active artifact is writable. From phase 1 on this is a no-op for the
+    // walk's purposes: those artifacts are never phase 0.
+    expect(await enterPhaseZero(run), 'the walk starts at phase 0').toMatch(/^00-/)
     // The walk visits all twelve artifacts, so it covers every phase the sequence has —
     // including the two phases that own TWO artifacts each. One case would not do: the
     // false-positive class this must not reintroduce (a rule that denies the run's own
@@ -481,8 +515,10 @@ describe('(d) PHASE ORDER IS ENFORCED ON WRITES: only the ACTIVE phase may be wr
     expect(inForce(run)).toBe(PHASE_EIGHT)
   })
 
-  it('treats the artifacts that SHARE a phase number as one phase', () => {
+  it('treats the artifacts that SHARE a phase number as one phase', async () => {
     const run = scaffoldRun()
+    // Phase 0 is entered first: both of its artifacts are then writable, which is the point of the case.
+    expect(await enterPhaseZero(run)).toMatch(/^00-/)
     const active = inForce(run)
     expect(PHASE_ZERO, 'the run starts in phase 0').toContain(active)
     // Phase 0 is two artifacts; both must be writable whichever one the selector reports.
@@ -517,8 +553,11 @@ describe('(d) PHASE ORDER IS ENFORCED ON WRITES: only the ACTIVE phase may be wr
     }
   })
 
-  it('ADVISORY warns and allows where STRICT refuses — the same call, both modes', () => {
+  it('ADVISORY warns and allows where STRICT refuses — the same call, both modes', async () => {
     const run = scaffoldRun()
+    // The mode comparison below has to be made from a state a run can be in, so phase 0 is entered: the
+    // question this case asks is what the TWO MODES do with one call, not whether the run entered at all.
+    await enterPhaseZero(run)
     const target = relativeArtifact(run, PHASE_EIGHT)
 
     const strict = writeGuard(run, target)
@@ -576,13 +615,19 @@ describe('(d) PHASE ORDER IS ENFORCED ON WRITES: only the ACTIVE phase may be wr
     expect(writeGuard(run, target).kind).toBe('deny')
   })
 
-  it('enforces the same rule when the SHIPPED POLICY FILE is the one in force', () => {
+  it('enforces the same rule when the SHIPPED POLICY FILE is the one in force', async () => {
     // The mirror case in `policy-globs.spec.ts` proves the FILE and the built-in LIST declare
     // the same patterns and verdicts. What that cannot prove is that the loader attaches the
-    // PHASE-ORDER CONDITION to the file's rule: two rules share every write-tool pattern, and
-    // a pattern-only selection would give both of them the locked-artifact condition — the
+    // PHASE-ORDER CONDITION to the file's rule: three rules share every write-tool pattern, and
+    // a pattern-only selection would give them all the locked-artifact condition — the
     // shipped-file path (i.e. this repo's own runs) would then never enforce phase order.
+    //
+    // ⚠ AND THE RUN ENTERS PHASE 0 FIRST, so the only question left for the controls below is
+    // which rule decides. The file also carries the `memory-read` rule, and both of its checks —
+    // that the label selects the memory condition, and that an entered phase 0 is allowed — are
+    // asserted below rather than left to the built-in-list case.
     const run = scaffoldRun()
+    await enterPhaseZero(run)
     const source = join(import.meta.dirname, '..', '.recursive', 'config', 'recursive-permissions.json')
     const dest = toolPolicyPath(run.root)
     mkdirSync(dirname(dest), { recursive: true })
@@ -595,6 +640,13 @@ describe('(d) PHASE ORDER IS ENFORCED ON WRITES: only the ACTIVE phase may be wr
     expect(policy.rules.filter((rule) => rule.label === 'phase-order')).toHaveLength(8)
     for (const rule of policy.rules.filter((r) => r.label === 'phase-order')) {
       expect(typeof rule.predicate, 'a phase-order rule must carry a condition, not a bare verdict').toBe('function')
+    }
+    // THE SAME QUESTION FOR THE MEMORY-READ GATE, which shares those patterns a third time: a
+    // pattern-only selection would give it the locked-artifact condition, so the load-time check is
+    // that every labelled rule got a condition of its own — and the ALLOW half below proves which.
+    expect(policy.rules.filter((rule) => rule.label === 'memory-read')).toHaveLength(8)
+    for (const rule of policy.rules.filter((r) => r.label === 'memory-read')) {
+      expect(typeof rule.predicate, 'a memory-read rule must carry a condition, not a bare verdict').toBe('function')
     }
 
     const later = writeGuard(run, relativeArtifact(run, PHASE_EIGHT))
@@ -611,6 +663,310 @@ describe('(d) PHASE ORDER IS ENFORCED ON WRITES: only the ACTIVE phase may be wr
     const lockedEarlier = writeGuard(run, relativeArtifact(run, '00-requirements.md'))
     expect(lockedEarlier.kind).toBe('deny')
     expect(lockedEarlier.rule).toBe('locked-write')
+  })
+})
+
+/**
+ * THE MEMORY-READ GATE — the owner's rule, verbatim: *"the memory must be read before writing requirements.md"*.
+ *
+ * WHAT IT ENFORCES, and why it is a rule rather than a reminder: memory reaches a run at PHASE ENTRY
+ * (`recursive_phase` -> `RecursiveRuntime.phaseRules` -> `selectMemory`), and `recursive_init` reads none, so
+ * before this rule a run could author `00-requirements.md` — the artifact that defines what the whole run
+ * builds — with nothing from `.recursive/memory/` ever having reached it. Nothing refused that.
+ *
+ * ⚠ THE CASE THAT DECIDES THE DESIGN, asserted first below: `recordInjection` records SHARDS, so on an EMPTY
+ * plane it records nothing — the gate therefore reads the READ RECEIPT (`recordMemoryRead`, one per phase
+ * entry, `injected: false` included), because the requirement is that the read HAPPENED, not that it
+ * returned anything. A gate keyed on the shard rows would refuse forever in a fresh workspace.
+ *
+ * ⚠ WHAT IT MUST NOT TOUCH, asserted here rather than assumed: ordinary product files, the run's support
+ * files, later and earlier phases, and a LOCKED phase 0. The rule abstains on all of them, and each case
+ * below names the refusal that still owns it — so this gate cannot have STOLEN a refusal from
+ * `locked-write` or `phase-order`.
+ */
+describe('(e) THE MEMORY-READ GATE — no phase-0 write before the run has read memory', () => {
+  /** A run that has been scaffolded and NOT entered: `recursive_init` and nothing else. */
+  function neverEnteredRun(): Run {
+    return scaffoldRun()
+  }
+
+  /** The guard's verdict for one phase-0 write under STRICT enforcement. */
+  function phaseZeroWrite(run: Run, name: string): ToolGuardDecision {
+    return writeGuard(run, relativeArtifact(run, name))
+  }
+
+  /** The guard's verdict for the same call under ADVISORY enforcement. */
+  function advisoryPhaseZeroWrite(run: Run, name: string): ToolGuardDecision {
+    return evaluateToolGuard({ name: 'write', arguments: { file_path: relativeArtifact(run, name), content: 'x' } }, run.root, run.runId, 'advisory')
+  }
+
+  it('REFUSES both phase-0 artifacts while the run has never entered phase 0', () => {
+    const run = neverEnteredRun()
+    // A precondition stated as an assertion, so the refusals below cannot pass because the fixture was in
+    // some other state: the run is at phase 0, its requirements are the plugin's own scaffold, and no read
+    // has been recorded for it.
+    expect(PHASE_ZERO).toContain(inForce(run))
+    expect(readMemoryReads(run.runDir)).toEqual([])
+    expect(existsSync(join(run.runDir, INJECTIONS_FILE))).toBe(false)
+
+    for (const name of PHASE_ZERO) {
+      const decision = phaseZeroWrite(run, name)
+      expect(decision.kind, name + ' must be refused before memory is read: ' + reasonOf(decision)).toBe('deny')
+      // The RULE LABEL, not only the verdict: a refusal for some other reason would not prove this gate.
+      expect(decision.rule, name).toBe('memory-read')
+      expect(reasonOf(decision)).toContain('memory read gate')
+      // ⚠ AND IT NAMES THE RECOVERY. A refusal a caller cannot act on is the failure mode this rule must
+      // not have; the recovery is one call, and the refusal says which one and why an empty plane is fine.
+      expect(reasonOf(decision), name).toContain('recursive_phase')
+      expect(reasonOf(decision), name).toContain('EMPTY memory plane')
+    }
+  })
+
+  it('ALLOWS the write once the run has ENTERED phase 0 — the receipt comes from the real phase call', async () => {
+    const run = neverEnteredRun()
+    expect(phaseZeroWrite(run, '00-requirements.md').kind, 'precondition: refused before the entry').toBe('deny')
+    // The production path, not a hand-written file: `RecursiveRuntime.phaseRules` is what `recursive_phase`
+    // calls, and the helper asserts the receipt it leaves behind.
+    expect(await enterPhaseZero(run)).toMatch(/^00-/)
+    for (const name of PHASE_ZERO) {
+      const decision = phaseZeroWrite(run, name)
+      expect(decision.kind, name + ' must be writable once phase 0 has been entered: ' + reasonOf(decision)).toBe('allow')
+    }
+  })
+
+  it('THE TRAP: an EMPTY memory plane SATISFIES the gate — the read is what is required, not a match', async () => {
+    // ⚠ THIS IS THE CASE THE WHOLE DESIGN TURNS ON. A repo with no memory is legitimate and expected, and
+    // `selectMemory` answers it with `{ injected: false, reason: 'the memory plane is empty, …' }`. A gate
+    // that required a SHARD would refuse here forever, because `recordInjection` writes nothing when
+    // nothing is selected. Measured below: nothing was injected, and the write is allowed anyway.
+    const run = neverEnteredRun()
+    expect(existsSync(join(run.root, '.recursive', 'memory')), 'precondition: there is no memory plane').toBe(false)
+
+    await enterPhaseZero(run)
+
+    const receipts = readMemoryReads(run.runDir)
+    expect(receipts, 'the empty plane must still leave a receipt').toHaveLength(1)
+    expect(receipts[0].injected, 'nothing was injected — this is the empty-plane case').toBe(false)
+    expect(receipts[0].shards).toBe(0)
+    expect(receipts[0].reason).toContain('empty')
+    // And the shard rows are genuinely EMPTY: if this ever stops being true, the case above stops being
+    // the empty-plane case and would be passing for the wrong reason.
+    expect(readInjections(run.runDir).filter((row) => row.source !== MEMORY_READ_SOURCE)).toEqual([])
+
+    expect(phaseZeroWrite(run, '00-requirements.md').kind, 'an empty plane must ALLOW the phase-0 write').toBe('allow')
+  })
+
+  it('refuses NOTHING but phase 0: a product file, a support file and a later phase are untouched', () => {
+    const run = neverEnteredRun()
+    // An ordinary product file, the run's support files, and a LATER phase — none of them is phase 0, so
+    // the gate abstains on every one. The later phase is still refused, by the rule that already owned it.
+    for (const target of ['src/something.ts', 'README.md', 'evidence/01-as-is.md', 'notes.md']) {
+      const decision = writeGuard(run, target)
+      expect(decision.kind, target + ' is not a phase artifact: ' + reasonOf(decision)).toBe('allow')
+      expect(decision.rule, target).toBe('none')
+    }
+    for (const name of ['01-as-is.md', '02-to-be-plan.md', PHASE_EIGHT]) {
+      const decision = writeGuard(run, relativeArtifact(run, name))
+      expect(decision.kind, name).toBe('deny')
+      expect(decision.rule, name + ' must be refused by the rule that has always owned it').toBe('phase-order')
+      expect(reasonOf(decision), name).not.toContain('memory read gate')
+    }
+  })
+
+  it('a LOCKED phase-0 artifact is untouched: `locked-write` keeps its refusal', () => {
+    // ⚠ THE RESUMED / EXISTING RUN. A run whose phase 0 is already locked must not be re-gated by a rule
+    // written after it: the gate abstains on LOCKED, and the locked-artifact rule — unchanged — refuses an
+    // edit, so a completed run behaves exactly as it did before this change.
+    const run = neverEnteredRun()
+    lockOnDisk(run, '00-requirements.md')
+    lockOnDisk(run, '00-worktree.md')
+    expect(readMemoryReads(run.runDir), 'precondition: no read was recorded for this run').toEqual([])
+    for (const name of PHASE_ZERO) {
+      const decision = phaseZeroWrite(run, name)
+      expect(decision.kind, name + ' is LOCKED and must stay refused').toBe('deny')
+      expect(decision.rule, name).toBe('locked-write')
+      expect(reasonOf(decision), name).not.toContain('memory read gate')
+    }
+  })
+
+  it('the gate a FORGERY cannot satisfy: a receipt for ANOTHER phase does not open phase 0', () => {
+    // ⚠ "THE READ HAPPENED" IS KEYED ON THE PHASE, and this is the assertion that keeps it from being one
+    // global "some read happened somewhere" bit: a run that read memory for phase 3 has read memory, and
+    // its phase 0 stays gated. The file below is the shape a stale, copied or hand-edited record has —
+    // valid receipts, none of them phase 0's — and it is refused, so the receipt must name the phase the
+    // gate is about rather than merely existing.
+    const run = neverEnteredRun()
+    const receipt = {
+      source: MEMORY_READ_SOURCE,
+      title: '03-implementation-summary.md',
+      phase: '03-implementation-summary.md',
+      score: 0,
+      injected: true,
+      shards: 2,
+      reason: 'injected 2 of 4 matching shard(s), capped at maxDocs 3',
+    }
+    writeFileSync(join(run.runDir, INJECTIONS_FILE), JSON.stringify([receipt], null, 2) + '\n', 'utf8')
+    expect(readMemoryReads(run.runDir).map((read) => read.phase), 'precondition: the receipt is not phase 0').toEqual(['03-implementation-summary.md'])
+    expect(phaseZeroWrite(run, '00-requirements.md').kind, 'a receipt for another phase does not open phase 0').toBe('deny')
+    expect(phaseZeroWrite(run, '00-requirements.md').rule).toBe('memory-read')
+    // …and the SAME file with the receipt moved to phase 0 is accepted, so the phase really is the key.
+    writeFileSync(join(run.runDir, INJECTIONS_FILE), JSON.stringify([{ ...receipt, phase: '00-requirements.md', title: '00-requirements.md' }], null, 2) + '\n', 'utf8')
+    expect(phaseZeroWrite(run, '00-requirements.md').kind, 'the phase-0 receipt is what opens it').toBe('allow')
+  })
+
+  it('ADVISORY asks (and the live path allows with a warning); STRICT denies — the same call, both modes', () => {
+    const run = neverEnteredRun()
+    const target = relativeArtifact(run, '00-requirements.md')
+
+    const strict = writeGuard(run, target)
+    expect(strict.kind, 'strict BLOCKS the write').toBe('deny')
+    expect(strict.rule).toBe('memory-read')
+
+    // The documented contract, unchanged by this rule: a policy `deny` becomes `ask` under advisory
+    // (`verdictFor`), and the live path coerces the ask to an ALLOW carrying a WARN — never a silent allow,
+    // and never a block.
+    const advisory = advisoryPhaseZeroWrite(run, '00-requirements.md')
+    expect(advisory.kind, 'advisory does not block; it asks').toBe('ask')
+    expect(advisory.rule).toBe('memory-read')
+    expect((advisory as { reason?: string }).reason ?? '').toContain('memory read gate')
+    const coerced = coerceAskToDecision(advisory, 'advisory')
+    expect(coerced.kind).toBe('allow')
+    expect((coerced as { warn?: string }).warn ?? '').toContain('memory read gate')
+    expect(coerceAskToDecision(advisory, 'strict').kind, 'the same ask under strict is a refusal').toBe('deny')
+  })
+
+  it('runs through the plugin OWN `recursive_phase` tool — the call an agent actually makes', async () => {
+    // ⚠ THE WIRING, PROVEN FROM THE OUTSIDE. Everything above drives the runtime, which is what the tool
+    // calls; this drives the TOOL, through the mounted plugin, so the claim is that the remedy the refusal
+    // names is reachable from the caller's side. A refusal whose stated recovery did not work would be
+    // worse than no gate: it would stop the run and teach the wrong lesson.
+    const run = neverEnteredRun()
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(plugin, { repoRoot: run.root })
+    try {
+      ctx.tools.register(defineTool({
+        name: 'write',
+        description: 'test stub standing in for the host fs write tool',
+        parameters: { file_path: { type: 'string' }, content: { type: 'string' } },
+        output: { schema: { type: 'json' }, render: () => [{ type: 'text', text: 'ok' }] },
+        async execute() { return { wrote: true } as never },
+      }))
+      ctx.recursive.setEnforcementConfig({ toolGuards: 'strict' })
+      const actor = { agent: { session: { header: { cwd: run.root } } } }
+
+      const refused = await ctx.tools.execute({
+        signal, callId: ToolCallId('memory-read-1'), name: 'write',
+        arguments: { file_path: relativeArtifact(run, '00-requirements.md'), content: 'x' }, ...actor,
+      } as never)
+      expect(refused.isError).toBe(true)
+      const refusal = (refused as { error?: { message?: string } }).error?.message ?? ''
+      expect(refusal).toContain('memory read gate')
+      expect(refusal).toContain('recursive_phase')
+
+      // THE REMEDY, EXACTLY AS THE REFUSAL STATES IT.
+      const entry = await ctx.tools.execute({
+        signal, callId: ToolCallId('memory-read-2'), name: 'recursive_phase', arguments: { runId: run.runId }, ...actor,
+      } as never)
+      expect(entry.isError, 'recursive_phase must not fail: ' + JSON.stringify(entry).slice(0, 400)).toBe(false)
+      expect((entry.value as { phase?: string }).phase).toMatch(/^00-/)
+
+      const allowed = await ctx.tools.execute({
+        signal, callId: ToolCallId('memory-read-3'), name: 'write',
+        arguments: { file_path: relativeArtifact(run, '00-requirements.md'), content: 'x' }, ...actor,
+      } as never)
+      expect(allowed.isError, 'the same write must reach the tool after the read: ' + JSON.stringify(allowed).slice(0, 400)).toBe(false)
+      expect((allowed.value as { wrote?: boolean }).wrote).toBe(true)
+      // …and the decision was logged with its rule, so the trace says WHICH refusal fired.
+      const logged = readGuardDecisions(run.root, 20).filter((record) => record.tool === 'write')
+      expect(logged.some((record) => record.kind === 'deny' && record.rule === 'memory-read')).toBe(true)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('is DECLARED the way the other write rules are: one conditional deny per write-tool id, after phase-order', () => {
+    // The list order IS the precedence among equally specific rules, so the position is asserted: a
+    // memory-read rule placed ABOVE phase-order would steal the phase-order label on a write-ahead call.
+    const rules = builtInToolPolicyRules()
+    const memoryRead = rules.filter((rule) => rule.label === 'memory-read')
+    expect(memoryRead).toHaveLength(WRITE_TOOL_NAMES.size)
+    for (const rule of memoryRead) {
+      expect(WRITE_TOOL_NAMES.has(rule.pattern), rule.pattern + ' must be a write-tool id').toBe(true)
+      expect(rule.verdict).toBe('deny')
+      expect(typeof rule.predicate, rule.pattern + ' must carry a condition, not a bare verdict').toBe('function')
+    }
+    const patterns = rules.map((rule) => rule.pattern + ':' + (rule.label ?? 'none'))
+    const lastPhaseOrder = patterns.lastIndexOf('run_code:phase-order')
+    const firstMemoryRead = patterns.indexOf('write:memory-read')
+    expect(lastPhaseOrder, 'phase-order must be declared first').toBeGreaterThan(-1)
+    expect(firstMemoryRead, 'memory-read must be declared after phase-order').toBeGreaterThan(lastPhaseOrder)
+    expect(patterns[patterns.length - 1], 'the catch-all allow stays last').toBe('*:none')
+  })
+
+  it('keeps its OWN label wherever the ordering rule could have taken it — both directions measured', () => {
+    // ⚠ THE ORDERING QUESTION, MEASURED RATHER THAN ASSUMED. `memory-read` is declared AFTER `phase-order`
+    // (asserted above, because file order IS the precedence among equally specific rules), so the gate owns
+    // the answer only where `phase-order` abstains. The two cases below are the ones in which an ordering
+    // rule could have decided a phase-0 write instead, and each assertion names the label the caller SEES.
+    //
+    // (a) PHASE 0 IS PARTLY LOCKED. `currentPhaseArtifact` is the lowest-numbered UNLOCKED artifact, so with
+    // `00-requirements.md` LOCKED and `00-worktree.md` still DRAFT the ACTIVE phase is STILL 0 — the target
+    // shares the active phase number, so `phase-order` abstains; the target is not itself LOCKED, so
+    // `locked-write` abstains too. The gate decides, and this is what keeps its label on a resumed run whose
+    // phase 0 is half locked.
+    const partlyLocked = neverEnteredRun()
+    lockOnDisk(partlyLocked, '00-requirements.md')
+    const sibling = phaseZeroWrite(partlyLocked, '00-worktree.md')
+    expect(sibling.kind, 'the DRAFT sibling of a locked phase-0 artifact: ' + reasonOf(sibling)).toBe('deny')
+    expect(sibling.rule).toBe('memory-read')
+
+    // (b) THE TARGET IS AN EARLIER PHASE THAN THE ACTIVE ONE — the shape that would let `phase-order` fire
+    // first if it denied earlier phases. It does not: `phaseOrderRule` abstains when the target's phase is
+    // `<=` the active phase (an earlier artifact is LOCKED by construction, so the ordering rule has nothing
+    // to say and the locked-artifact rule owns it). Measured here with the phase-0 artifacts ABSENT, which is
+    // the only way a later phase can be active while phase 0 is not locked.
+    const absent = neverEnteredRun()
+    for (const name of PHASE_ZERO) rmSync(join(absent.runDir, name))
+    expect(phaseNumberForArtifact(inForce(absent)), 'precondition: a later phase is active').toBe('1')
+    const earlier = phaseZeroWrite(absent, '00-requirements.md')
+    expect(earlier.kind, 'an earlier phase is not the ordering rule\'s case: ' + reasonOf(earlier)).toBe('deny')
+    expect(earlier.rule).toBe('memory-read')
+  })
+
+  it('NEVER opens on "I could not tell": a run with no tree, and an unreadable receipt file, both refuse', () => {
+    // ⚠ THE PROPERTY, and it is the one a gate like this can lose silently: abstention is allowed only when
+    // the CALLER supplied no run coordinates, never when the rule failed to READ the disk. `hasMemoryRead`
+    // reads the receipt file through `readInjections`, which answers `[]` for a missing file, an unreadable
+    // file and an unshaped value — so every one of those states is REFUSED below rather than read as consent.
+    //
+    // (1) THE RUN HAS NO DIRECTORY AT ALL. The guard resolves a run for every call, so a run id with no tree
+    // on disk is a run whose receipts cannot exist: it must be refused, not abstained on.
+    const run = neverEnteredRun()
+    const orphan = evaluateToolGuard(
+      { name: 'write', arguments: { file_path: '.recursive/run/no-such-run/00-requirements.md', content: 'x' } },
+      run.root,
+      'no-such-run',
+      'strict',
+    )
+    expect(orphan.kind, 'a run with no directory cannot have read memory: ' + reasonOf(orphan)).toBe('deny')
+    expect(orphan.rule).toBe('memory-read')
+
+    // (2) THE RECEIPT FILE IS THERE BUT IS NOT A READ — the three shapes a reader can meet: malformed JSON, a
+    // well-formed value of the WRONG shape, and a row carrying the reserved subject without the fields a
+    // receipt is defined by (`isMemoryReadRecord`). None of them is evidence that the read ran.
+    const unreadable = [
+      '{ this is not json',
+      JSON.stringify({ source: MEMORY_READ_SOURCE, phase: '00-requirements.md' }),
+      JSON.stringify([{ source: MEMORY_READ_SOURCE, phase: '00-requirements.md' }]),
+    ]
+    for (const raw of unreadable) {
+      writeFileSync(join(run.runDir, INJECTIONS_FILE), raw, 'utf8')
+      const decision = phaseZeroWrite(run, '00-requirements.md')
+      expect(decision.kind, 'an unreadable receipt file is not a permit (' + raw + '): ' + reasonOf(decision)).toBe('deny')
+      expect(decision.rule, raw).toBe('memory-read')
+    }
   })
 })
 
@@ -682,6 +1038,11 @@ describe('live path — the same two verdicts through the mounted plugin', () =>
     // A scaffold-only run: all twelve artifacts on disk, none locked, so the active phase is 0
     // and everything after `00-…` is a later phase. This is the state the live run was in.
     const run = scaffoldRun()
+    // ⚠ PHASE 0 IS ENTERED BEFORE THE PLUGIN MOUNTS. The live-path claim is that the active artifact
+    // REACHES THE TOOL under strict enforcement; the memory gate is a different refusal and must not be
+    // what this case measures. The entry goes through the runtime's own phase call, so the receipt the
+    // gate reads exists for the reason it exists in a run.
+    await enterPhaseZero(run)
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)

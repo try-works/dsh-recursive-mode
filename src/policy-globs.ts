@@ -42,6 +42,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { getLockStatus, getPrerequisiteBlockers, type PrerequisiteBlocker } from './lock.ts'
+import { readMemoryReads } from './memory-feedback.ts'
 import { getMdFieldValue } from './status.ts'
 import { phaseNumberForArtifact, policyTargetPath, resolveFrom } from './phase-rules.ts'
 
@@ -603,6 +604,96 @@ function phaseOrderRule(target: string | null, ctx: ToolPolicyContext): ToolPoli
 }
 
 /**
+ * THE MEMORY-READ GATE — the owner's rule, verbatim: *"the memory must be read before writing requirements.md"*.
+ *
+ * ⚠ THE ORDERING WAS INSTRUCTED AND NOT ENFORCED, and that is what this predicate changes. `recursive_phase`
+ * calls `selectMemory` and hands the run what it found (`runtime.ts` `phaseRules`), so memory reaches the
+ * agent at PHASE ENTRY — while `recursive_init` reads no memory at all. A run could therefore author
+ * `00-requirements.md`, the artifact that defines what the whole run builds, BEFORE anything from
+ * `.recursive/memory/` had reached it, and nothing refused that.
+ *
+ * ⚠ AND THE TRAP THAT DECIDES THE WHOLE DESIGN: `recordInjection` records the SHARDS, so when the memory
+ * plane is EMPTY nothing is written — and a gate keyed on "a record exists" would then REFUSE FOREVER in a
+ * fresh workspace. A repo with no memory is a legitimate, expected state (`selectMemory` answers
+ * *"the memory plane is empty, so nothing is injected"*), so this predicate reads the READ RECEIPT rather
+ * than the shards: `recordMemoryRead` writes one on every phase entry, with the selection's own reason and
+ * `injected: false` when nothing matched. An empty plane therefore SATISFIES the gate, a never-entered
+ * phase does not, and the two cases cannot be confused because one of them has a row.
+ *
+ * WHAT IT REFUSES, exactly: a write to a PHASE-0 artifact (`00-requirements.md` / `00-worktree.md` — the two
+ * files `recursive_init` scaffolds, which share phase number 0 and which the phase-order rule already treats
+ * as one phase) when this run holds no read receipt for phase 0, and the target is not already LOCKED.
+ * Everything else abstains, so the rule costs a run nothing it should not pay:
+ *
+ *   - a target that is not a DIRECT CHILD of this run's directory — an ordinary product file, and the run's
+ *     support files (`evidence/`, `scratch/`, `operations/`, a plain `<run>/notes.md`) — ABSTAINS. This is
+ *     what keeps the gate off the write path in general: `tests/strict-run-tree.spec.ts` walks every one of
+ *     those and asserts they stay writable.
+ *   - a target whose phase number is anything but `0` (a LATER phase, and an EARLIER one, which cannot exist
+ *     at phase 0) ABSTAINS: the ordering rules own those verdicts. A later phase in particular must keep
+ *     reporting `phase-order`, which is why this rule is declared LAST of the three that share these
+ *     patterns (file order within a specificity tier: locked-write, then phase-order, then this rule).
+ *   - a LOCKED target ABSTAINS: the locked-artifact rule owns it, and a completed run is not re-gated.
+ *   - a target that does not exist AT ALL does not abstain: `recursive_init` is not the only way to reach
+ *     phase 0, and a run whose requirements were deleted still has to read before it writes them again.
+ *     (In practice the refusal that fires there is the phase-order rule — an absent ACTIVE artifact still
+ *     makes the run phase 0 — so this rule is the second answer, not the first.)
+ *
+ * ⚠ RESUMED AND EXISTING RUNS. The gate is decided from the receipt alone — never from the artifact's text,
+ * which a caller controls and could therefore forge — so the recovery is the same for every run, old or
+ * new: read memory for this phase. `recursive_phase` is that call, it costs one call, and a run whose
+ * `00-requirements.md` was written before this rule existed keeps every other guarantee it had (a completed
+ * or locked phase 0 is untouched above; a run parked at phase 0 simply makes the read it never made). The
+ * refusal SAYS that, because a refusal a caller cannot act on is the failure mode this rule must not have.
+ *
+ * ⚠ MODE SEMANTICS FOLLOW THE EXISTING CONTRACT EXACTLY (`enforcement.ts` `verdictFor`): a policy `deny`
+ * under `strict` blocks, and under `advisory` becomes an `ask` that the live path coerces to an
+ * allow-WITH-WARNING — never a silent allow, never a block. Like the phase-order rule, this is a `deny`
+ * verdict, so the mode decides it and nothing here special-cases the mode.
+ *
+ * WHERE IT LIVES, AND WHY THIS LAYER RATHER THAN `lockArtifact`. The precedent in `lockArtifact` (the
+ * phase-8 memory gate, `runtime.ts`) guards a LOCK: it is a state check on a run whose artifact already
+ * exists, placed after quiescence and before lint. This rule guards a WRITE, and its whole subject is that
+ * the write must not happen — a check at lock time would be too late by exactly the phase it is about, since
+ * the requirements document has by then been authored and every later phase built on it. The repo already
+ * has the write-side layer for ordering (`phase-order`), applied to the same write-tool family through
+ * `attachPolicyPredicate`; a second copy of the check in `lockArtifact` would be the duplicate this repo has
+ * ruled out, so there is exactly one, here.
+ */
+function memoryReadRule(target: string | null, ctx: ToolPolicyContext): ToolPolicyPredicateMatch | null {
+  if (!target || !ctx.runDir || !ctx.worktreeRoot) return null
+  const normalized = target.replace(/\\/g, '/')
+  if (!normalized.endsWith('.md')) return null
+  const abs = resolveFrom(ctx.worktreeRoot, normalized)
+  if (!abs) return null
+  const name = directChildName(abs, ctx.runDir)
+  if (name === null) return null
+  if (phaseNumberForArtifact(name) !== '0') return null
+  if (getLockStatus(abs) === 'LOCKED') return null
+  if (hasMemoryRead(ctx.runDir)) return null
+  return {
+    verdict: 'deny',
+    detail: name + ': no memory read is recorded for phase 0 of this run - call recursive_phase, which reads'
+      + ' the memory plane and records it, then write this artifact (an EMPTY memory plane satisfies this:'
+      + ' the read is what is required, not a match)',
+  }
+}
+
+/**
+ * Read the run's read receipts and answer whether PHASE 0 has been read.
+ *
+ * ⚠ EITHER PHASE-0 ARTIFACT COUNTS, and that is a decision rather than a shortcut: `00-requirements.md` and
+ * `00-worktree.md` share phase number 0, `currentPhaseArtifact` reports whichever of the two the directory
+ * listing yields first, and `runtime.phaseRules` records the receipt under the artifact `getNextLegalPhase`
+ * named — so keying the gate on the ONE name that happened to be active would make the verdict depend on
+ * `readdirSync` order. `tests/strict-run-tree.spec.ts` asserts the two are one phase for the ordering rule;
+ * this makes the gate agree with it. The phase NUMBER is the key, not the name, for exactly that reason.
+ */
+function hasMemoryRead(runDir: string): boolean {
+  return readMemoryReads(runDir).some((receipt) => phaseNumberForArtifact(receipt.phase) === '0')
+}
+
+/**
  * The BUILT-IN default rule list — the pre-T16 guard behaviour expressed as
  * data:
  *
@@ -653,6 +744,19 @@ export function builtInToolPolicyRules(): ToolPolicyRule[] {
       predicate: (id, args, ctx) => (WRITE_TOOL_NAMES.has(id) ? phaseOrderRule(policyTargetPath(args), ctx) : null),
     })
   }
+  // …and a THIRD conditional deny on the same patterns: the memory-read gate. It is LAST of the three
+  // deliberately, because it is the narrowest of them and the other two must keep their labels on the
+  // cases they already own (an out-of-order write is a phase-order refusal, not a memory one). The engine
+  // decides equally specific rules by FILE ORDER, so this position is the precedence.
+  for (const name of WRITE_TOOL_NAMES) {
+    rules.push({
+      pattern: name,
+      verdict: 'deny',
+      reason: 'memory read gate: memory must be read before the requirements artifact that defines the run is written',
+      label: 'memory-read',
+      predicate: (id, args, ctx) => (WRITE_TOOL_NAMES.has(id) ? memoryReadRule(policyTargetPath(args), ctx) : null),
+    })
+  }
   rules.push({
     pattern: '*',
     verdict: 'allow',
@@ -699,6 +803,13 @@ export function attachPolicyPredicate(rule: ToolPolicyRule): ToolPolicyRule {
   // exactly as before.
   if (rule.label === 'phase-order') {
     return { ...rule, predicate: (id, args, ctx) => (WRITE_TOOL_NAMES.has(id) ? phaseOrderRule(policyTargetPath(args), ctx) : null) }
+  }
+  // …and the memory-read gate is attached the same way, by LABEL. Without this branch the file's rule
+  // would take the pattern's condition below (the locked-artifact one) and the gate would exist in the
+  // built-in list but never in a repo that ships the policy file — which is this repo, and every repo
+  // scaffolded from it.
+  if (rule.label === 'memory-read') {
+    return { ...rule, predicate: (id, args, ctx) => (WRITE_TOOL_NAMES.has(id) ? memoryReadRule(policyTargetPath(args), ctx) : null) }
   }
   if (WRITE_TOOL_NAMES.has(rule.pattern)) {
     return { ...rule, predicate: (id, args, ctx) => (WRITE_TOOL_NAMES.has(id) ? lockedWriteRule(policyTargetPath(args), ctx.worktreeRoot) : null) }

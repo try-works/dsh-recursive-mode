@@ -31,7 +31,7 @@ import { closeoutReport, writeCloseoutReceipt } from './closeout-report.ts'
 import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './scratch.ts'
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
 import { readMemoryEntries, retrieveMemory, renderMemorySection, selectMemory } from './memory.ts'
-import { readFeedback, recordInjection, settleInjections } from './memory-feedback.ts'
+import { readFeedback, recordInjection, recordMemoryRead, settleInjections } from './memory-feedback.ts'
 import { runPhase8Trigger, resolveExtractor, spawnExtractorRunner, phase8MemoryLockRefusal } from './training.ts'
 import { buildAskQuestion, GATE_DEFAULT_ARTIFACT, pendingGateFor } from './recursive_ask.tool.ts'
 import { contractDigest } from './policy.ts'
@@ -1447,11 +1447,27 @@ export class RecursiveRuntime extends Service {
       title: shard.entry.title,
       score: shard.score,
     })), phase)
+    // ⚠ AND RECORD THAT THE READ HAPPENED, EVEN WHEN IT RETURNED NOTHING — the fact the phase-0 write gate
+    // (`memory-read` in `policy-globs.ts`) is keyed on. `recordInjection` above can only write a row when a
+    // shard was selected, so on an EMPTY plane it writes nothing at all and a gate reading it would refuse
+    // forever in a fresh workspace. The receipt is written on every phase entry, `injected: false` included:
+    // the requirement is that memory was READ before the run's requirements were authored, not that the
+    // plane had something to say. This is the ONE place a read becomes durable, because this function is the
+    // one place a phase entry reads memory (see the T29 note above).
+    recordMemoryRead(resolved.runDir, phase, {
+      injected: selection.injected,
+      shards: selection.shards.length,
+      reason: selection.reason,
+    })
     return {
       runId: resolved.runId,
       phase,
       ...phaseRulesFor(phase),
-      memory: selection.injected ? renderMemorySection(selection.shards.map((shard) => shard.entry)) : '',
+      // ⚠ `'phase'` IS PASSED BECAUSE THIS IS NOT A REVIEW BUNDLE. The renderer's wording used to be the
+      // reviewer's (*"relevant to this REVIEW"*) and this payload inherited it, so the sentence named a
+      // reader this text never reaches. The context is the ONE thing that differs between the two callers
+      // (see `MemoryRenderContext`), so the renderer stays single.
+      memory: selection.injected ? renderMemorySection(selection.shards.map((shard) => shard.entry), 'phase') : '',
       memoryReason: selection.reason,
       // FU-7 — THE PHASE-ENTRY CALL POINTS. Phase 03 owes a `TDD Mode` decision and phase 05 a
       // `QA Execution Mode` one; both are surfaced HERE, at the entry the tool already makes, so a

@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RecursiveRuntime } from '../src/runtime.ts'
 import { loadMemoryIndex, selectMemory, MAX_MEMORY_DOCS } from '../src/memory.ts'
+import { INJECTIONS_FILE, MEMORY_READ_SOURCE, readMemoryReads } from '../src/memory-feedback.ts'
 
 /** A plane with one shard per kind; `body` is the shard's markdown. */
 function plane(shards: Record<string, string>): string {
@@ -213,6 +214,13 @@ describe('T29 — the injection point is the phase-entry call, and it injects no
       const rules = await m.runtime.phaseRules('r1')
       expect(rules?.memoryReason).toContain('injected 1')
       expect(rules?.memory).toContain('Prior learning from the scaffolded plane')
+      // ⚠ AND IT IS RENDERED FOR A PHASE, NOT FOR A REVIEW. The renderer's heading used to be the
+      // reviewer's — *"relevant to this review"* — and this payload inherited it, so the sentence named a
+      // reader the text never reaches. Asserting the words HERE, on the payload the tool returns, is what
+      // pins the CALLER's argument: the renderer's own spec can pass while `phaseRules` still renders the
+      // review heading, which is precisely the defect being fixed.
+      expect(rules?.memory).toContain('injected for this phase')
+      expect(rules?.memory).not.toContain('this review')
     } finally {
       await m.dispose()
     }
@@ -236,6 +244,49 @@ describe('T29 — the injection point is the phase-entry call, and it injects no
       expect(selection.shards.length).toBe(1)
       expect(selection.shards[0]?.entry.title).toBe('Scaffolded plane')
       expect(selection.shards[0]?.entry.source).toContain('.recursive')
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  /**
+   * ⚠ THE EMPTY PLANE — THE CASE THAT DECIDES WHETHER THE PHASE-0 WRITE GATE IS USABLE AT ALL.
+   *
+   * The gate refuses a write to `00-requirements.md` until the run has READ the memory plane. If "a read
+   * was recorded" were inferred from the SHARDS a read returned, a workspace with no memory plane would
+   * record nothing, and the gate would refuse FOREVER — every fresh repo bricked at phase 0 by the rule
+   * meant to make it learn. `selectMemory` answers *"the memory plane is empty, so nothing is injected"*,
+   * and that is a RESULT: the read ran and had nothing to say.
+   *
+   * So what is asserted here is the READ, not the shards: a runtime with an empty plane still records a
+   * receipt on phase entry, and the receipt says `injected: false` with the reason — which is what lets the
+   * gate tell "read, nothing matched" apart from "never read". The counter-case is asserted first, because
+   * a receipt that already existed would make the positive case vacuous.
+   */
+  it('RECORDS THE READ on an EMPTY plane, so "nothing matched" cannot be mistaken for "never read"', async () => {
+    const m = await mount()
+    try {
+      const runDir = join(m.root, '.recursive', 'run', 'r1')
+      // PRECONDITION, asserted rather than assumed: nothing is recorded yet, so the case below is about the
+      // phase entry and not about a fixture that already satisfied it.
+      expect(readMemoryReads(runDir)).toHaveLength(0)
+
+      const rules = await m.runtime.phaseRules('r1')
+      expect(rules?.memory, 'nothing was injected, which is the point').toBe('')
+      expect(rules?.memoryReason).toContain('empty')
+
+      const receipts = readMemoryReads(runDir)
+      expect(receipts, 'a read that returned nothing left no record of having happened').toHaveLength(1)
+      expect(receipts[0].injected).toBe(false)
+      expect(receipts[0].shards).toBe(0)
+      expect(receipts[0].reason).toContain('empty')
+      // The receipt is IN THE RUN'S OWN FILE — the same one the shard rows live in, so a reader has one
+      // answer to "what did this run read" instead of two files to reconcile.
+      const file = JSON.parse(readFileSync(join(runDir, INJECTIONS_FILE), 'utf8')) as Array<{ source?: string }>
+      expect(file.some((row) => row.source === MEMORY_READ_SOURCE)).toBe(true)
+      // …and a second entry for the SAME phase replaces its receipt rather than growing a log.
+      await m.runtime.phaseRules('r1')
+      expect(readMemoryReads(runDir)).toHaveLength(1)
     } finally {
       await m.dispose()
     }

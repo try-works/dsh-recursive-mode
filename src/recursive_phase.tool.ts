@@ -11,6 +11,22 @@ import type { RecursiveRuntime } from './runtime.ts'
  * reminder, so the agent can re-ask for the rules without re-injecting them on
  * every step. Returns { error } when no active phase is found.
  *
+ * ⚠ AND IT IS WHERE PRIOR-RUN MEMORY ARRIVES — say so in the DESCRIPTION, which is the only surface a
+ * model reads before choosing a tool. The description used to promise rules and instructions only, so
+ * nothing in the tool list gave a caller a reason to expect memory here (the owner's own report: *"the
+ * memory must be read before writing requirements.md"*, and *"recursive_phase should also read memories"*).
+ * The read WAS already happening — `phaseRules` calls `selectMemory` and returns the section plus its
+ * reason — so the defect was that the contract was SILENT about it, not that the mechanism was absent.
+ * Every sentence below is a claim about what this call actually returns: the payload's `memory` and
+ * `memoryReason` fields come from `selectMemory`, `runId`/`phase` from the resolved run, `requiredSections`
+ * / `audited` / `tdd` / `qa` / `memoryWrite` from `phaseRulesFor`, and `ask` from `pendingGateFor`. A
+ * description that advertised a field the payload does not carry would be worse than the silence it fixes.
+ *
+ * ⚠ AND AN EMPTY PLANE IS SAID TO BE NORMAL, because that is the honest reading and the one a model needs:
+ * `selectMemory` answers *"the memory plane is empty, so nothing is injected"*, which is a RESULT — the
+ * plane was read and had nothing to say — not a failure of the call and not a reason to retry it. Without
+ * that sentence an agent seeing an empty section could reasonably conclude the read had not happened.
+ *
  * A RUN ID IS A NAME, NOT A PATH HERE TOO, INCLUDING WHEN IT IS OMITTED. Omitted and path-shaped are
  * different cases and must stay different: omitted means "the latest run by mtime", which `resolveRunDir`
  * answers by DISCOVERY rather than by joining anything, and that case is untouched below. A path-shaped id,
@@ -22,7 +38,14 @@ import type { RecursiveRuntime } from './runtime.ts'
 export function createRecursivePhaseTool(recursive: RecursiveRuntime) {
   return defineTool({
     name: 'recursive_phase',
-    description: 'Return the lint rules + instructions for the current recursive-mode phase (required sections, gates, TDD/QA notes). Call once when entering a new phase; the same rules are also auto-injected once per phase transition.',
+    description: 'Enter the current recursive-mode phase: returns that phase\'s lint rules and instructions'
+      + ' (required sections, gates, TDD/QA notes) AND the prior-run memory selected for this run and phase.'
+      + ' `memory` carries the shards to use, each titled so it can be cited, and `memoryReason` says why'
+      + ' nothing was injected when it is empty — an EMPTY memory plane is a normal result of a read, never'
+      + ' a failure, so do not retry because of it. Nothing from the memory plane reaches a run before this'
+      + ' call, so MAKE IT ONCE WHEN ENTERING A PHASE and before authoring that phase\'s artifact'
+      + ' (`00-requirements.md` included: a write to it is refused until a read is recorded for the run).'
+      + ' The same rules are also auto-injected once per phase transition.',
     parameters: {
       runId: { type: 'string', description: 'Optional run id — the NAME of the run directory under .recursive/run/ (e.g. 03-something), never a path: ' + RUN_ID_RULE + '. Omit it for the latest run by mtime.' },
     },

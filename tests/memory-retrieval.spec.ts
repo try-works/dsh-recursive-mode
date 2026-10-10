@@ -137,6 +137,48 @@ describe('T14 — the bundle section is honest about an empty result', () => {
 })
 
 /**
+ * THE RENDERER SERVES TWO READERS, AND THE WORDING MUST NAME THE ONE HOLDING IT.
+ *
+ * The phase-entry payload (`runtime.phaseRules`) and the delegated review bundle (`buildReviewBundle`) both
+ * receive this section, and until this change both were told they were a REVIEW — so an agent handed
+ * prior-run learning at phase entry was addressed as a reviewer, which is a different reader with a
+ * different job. The fix is a CONTEXT on the one renderer rather than a second renderer, so these cases pin
+ * both halves of that choice: the default is byte-for-byte what every existing caller already read, and the
+ * phase context changes only what must change.
+ */
+describe('T14 — the section names the reader it is rendered for', () => {
+  it('keeps the REVIEW wording as the default, so no existing caller is silently restated', () => {
+    const rendered = renderMemorySection([entry('patterns', 'Lock ordering', 'Lock upstream first.')])
+    expect(rendered).toContain('relevant to this review')
+    expect(rendered).not.toContain('this phase')
+  })
+
+  it('addresses the PHASE when the phase payload is the caller, and asks for the citation', () => {
+    const rendered = renderMemorySection([entry('episodes', 'A prior run hit this', 'It failed because Y.')], 'phase')
+    expect(rendered).toContain('injected for this phase')
+    // The instruction that makes reliance traceable is still there: the whole point of a titled section.
+    expect(rendered).toContain('cite by title')
+    // …and it is the OTHER reader, so the review wording must be gone rather than merely supplemented.
+    expect(rendered).not.toContain('this review')
+    // The content a reader acts on is unchanged by the context: same title, same source line.
+    expect(rendered).toContain('[episodes] A prior run hit this')
+    expect(rendered).toContain('It failed because Y.')
+    expect(rendered).toContain('(source: episodes.md)')
+  })
+
+  it('names the same context in the EMPTY case, which is the one a fresh workspace sees', () => {
+    // An empty result has to read as an answer in BOTH readers — the failure mode is a phase entry that
+    // looks like a failed review.
+    expect(renderMemorySection([], 'phase')).toContain('No prior-run memory matched this phase')
+    expect(renderMemorySection([], 'review')).toContain('No prior-run memory matched this review')
+    // The hedge that keeps an empty plane from reading as "nothing was ever learned" survives both.
+    for (const context of ['review', 'phase'] as const) {
+      expect(renderMemorySection([], context)).toContain('not by recency')
+    }
+  })
+})
+
+/**
  * T14 — THE ACCEPTANCE: a reviewer actually RECEIVES the memory.
  *
  * Asserted by reading the written bundle FILE, because the prompt references the bundle by path —

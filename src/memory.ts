@@ -149,12 +149,38 @@ export function readMemoryEntries(
   return entries
 }
 
-/** Render the retrieved memory for a review bundle: sections a reviewer can cite by title. */
-export function renderMemorySection(entries: readonly MemoryEntry[]): string {  if (entries.length === 0) {
-    return 'No prior-run memory matched this review. Do not assume the absence is conclusive:'
+/**
+ * WHERE A RENDERED SECTION IS GOING TO BE READ — the one thing the section's wording depends on.
+ *
+ * ⚠ WHY THIS IS A PARAMETER AND NOT A SECOND RENDERER. The section is rendered for two readers: a
+ * delegated REVIEW bundle (`runtime.ts` `buildReviewBundle`, context `'review'`) and the PHASE-ENTRY
+ * payload `recursive_phase` returns (`runtime.ts` `phaseRules`, context `'phase'`). The wording used to
+ * be the reviewer's — *"Prior-run memory relevant to this REVIEW"* — and the phase payload inherited it,
+ * so an agent that had just been handed prior-run learning at phase entry was told it was a review: the
+ * reader the text addressed was not the reader holding it. Copying the renderer to change one sentence
+ * would have been two renderers to keep in step, which is how the two answers to one question appear in
+ * this plugin; the sentence is instead selected from this context, so there is still ONE renderer.
+ */
+export type MemoryRenderContext = 'review' | 'phase'
+
+/** Render the retrieved memory: sections a reader can cite by title. See {@link MemoryRenderContext}. */
+export function renderMemorySection(
+  entries: readonly MemoryEntry[],
+  context: MemoryRenderContext = 'review',
+): string {
+  // The default is `'review'` so every existing caller keeps the sentence it has always rendered — a
+  // truthfulness fix must not silently restate what a caller already read (`tests/memory-retrieval.spec.ts`
+  // pins that wording). The phase payload opts IN, which is the change the owner's second point asks for.
+  const where = context === 'phase' ? 'this phase' : 'this review'
+  if (entries.length === 0) {
+    return 'No prior-run memory matched ' + where + '. Do not assume the absence is conclusive:'
       + ' memory is retrieved by relevance to the artifact and phase, not by recency.'
   }
-  const lines: string[] = ['Prior-run memory relevant to this review (cite by title if you rely on it):']
+  const lines: string[] = [context === 'phase'
+    // The phase payload's whole purpose is to put prior-run learning IN FRONT of the work, so the heading
+    // says what to do with it — rely on it, and cite it so the reliance is traceable.
+    ? 'Prior-run memory injected for this phase (rely on it, and cite by title when you use it):'
+    : 'Prior-run memory relevant to this review (cite by title if you rely on it):']
   for (const entry of entries) {
     lines.push('')
     lines.push('### [' + entry.kind + '] ' + entry.title)

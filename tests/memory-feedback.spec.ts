@@ -4,12 +4,17 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
   FEEDBACK_FILE,
+  INJECTIONS_FILE,
   LEGACY_FEEDBACK_FILE,
+  MEMORY_READ_SOURCE,
   type FeedbackBook,
   feedbackBonus,
+  isMemoryReadRecord,
   readFeedback,
   readInjections,
+  readMemoryReads,
   recordInjection,
+  recordMemoryRead,
   settleInjections,
 } from '../src/memory-feedback.ts'
 
@@ -155,5 +160,110 @@ describe('FU-13 P3: memory feedback counters', () => {
     // licence to fall back to the other one, which would be a silent substitution.
     writeFileSync(join(root, FEEDBACK_FILE), '{ not json', 'utf8')
     expect(readFeedback(root)).toEqual({})
+  })
+})
+
+/**
+ * THE READ RECEIPT — the fact "the plane WAS READ", kept separate from "something was injected".
+ *
+ * ⚠ WHY THIS BLOCK EXISTS AT ALL, and it is the trap the phase-0 write gate had to be designed around:
+ * `recordInjection` can only write a row when a SHARD was selected, so on an EMPTY plane it writes nothing
+ * — and a gate keyed on "a row exists" would then refuse forever in a fresh workspace, where an empty
+ * memory plane is a legitimate state rather than a failure. What the gate reads instead is the receipt
+ * below, which `recordMemoryRead` writes on EVERY phase entry, `injected: false` included.
+ *
+ * The assertions here are the two halves of that: the receipt is written when nothing was injected, and the
+ * shard rows and the receipt do not erase each other, whichever order the two writers run in.
+ */
+describe('the memory READ RECEIPT — recorded even when the read returned nothing', () => {
+  let runDir = ''
+  beforeEach(() => {
+    const root = mkdtempSync(join(tmpdir(), 'rm-readreceipt-'))
+    runDir = root
+  })
+  afterEach(() => {
+    rmSync(runDir, { recursive: true, force: true })
+  })
+
+  it('records an EMPTY-plane read, which `recordInjection` alone could not: nothing was injected', () => {
+    const receipts = recordMemoryRead(runDir, '00-requirements.md', {
+      injected: false,
+      shards: 0,
+      reason: 'the memory plane is empty, so nothing is injected',
+    })
+    expect(receipts).toHaveLength(1)
+    expect(receipts[0].injected).toBe(false)
+    expect(receipts[0].phase).toBe('00-requirements.md')
+    // The reason is carried VERBATIM, so the file says why the read answered nothing — an `injected: false`
+    // with no reason would be indistinguishable from a read that was never recorded.
+    expect(receipts[0].reason).toBe('the memory plane is empty, so nothing is injected')
+    // And a receipt is not a ranking: a score would let it move a counter, which is not its job.
+    expect(receipts[0].score).toBe(0)
+
+    const onDisk = JSON.parse(readFileSync(join(runDir, INJECTIONS_FILE), 'utf8')) as unknown[]
+    expect(onDisk).toHaveLength(1)
+    expect(readMemoryReads(runDir)).toEqual(receipts)
+  })
+
+  it('REPLACES one receipt per phase rather than appending, because a phase is re-entered while DRAFT', () => {
+    for (let round = 0; round < 4; round += 1) {
+      recordMemoryRead(runDir, '00-requirements.md', { injected: false, shards: 0, reason: 'empty plane, entry ' + round })
+    }
+    const reads = readMemoryReads(runDir)
+    expect(reads).toHaveLength(1)
+    // The newest read wins: the receipt reports the state the run is in, not a history of every entry.
+    expect(reads[0].reason).toBe('empty plane, entry 3')
+    // …and a SECOND phase gets its own receipt, so the file is one row per phase and not one row per run.
+    recordMemoryRead(runDir, '01-as-is.md', { injected: true, shards: 2, reason: 'injected 2 of 3 matching shard(s), capped at maxDocs 3' })
+    expect(readMemoryReads(runDir).map((read) => read.phase)).toEqual(['00-requirements.md', '01-as-is.md'])
+  })
+
+  it('is BYTE-IDENTICAL when the same read is recorded twice — the determinism the other receipts follow', () => {
+    const read = { injected: true, shards: 1, reason: 'injected 1 of 1 matching shard(s), capped at maxDocs 3' }
+    recordMemoryRead(runDir, '04-test-summary.md', read)
+    const first = readFileSync(join(runDir, INJECTIONS_FILE), 'utf8')
+    recordMemoryRead(runDir, '04-test-summary.md', read)
+    expect(readFileSync(join(runDir, INJECTIONS_FILE), 'utf8')).toBe(first)
+  })
+
+  it('the two writers PRESERVE each other, in either order', () => {
+    // Order 1: the shards are recorded first, then the receipt. The shard row must survive the receipt's
+    // rewrite — a receipt that overwrote the file would delete the evidence the counters settle against.
+    recordInjection(runDir, [{ source: 'memory/domains/locks.md', title: 'Lock chain ordering', score: 5 }], '04')
+    recordMemoryRead(runDir, '04', { injected: true, shards: 1, reason: 'injected 1 of 1' })
+    expect(readInjections(runDir).filter((row) => !isMemoryReadRecord(row))).toEqual([
+      { source: 'memory/domains/locks.md', title: 'Lock chain ordering', phase: '04', score: 5 },
+    ])
+    // Order 2 — the one production uses (`runtime.phaseRules` records the shards, then the receipt): the
+    // receipt must survive a LATER `recordInjection`, or the gate would refuse a write in the very phase
+    // entry that satisfied it.
+    recordInjection(runDir, [{ source: 'memory/patterns/other.md', title: 'Other', score: 3 }], '05')
+    expect(readMemoryReads(runDir)).toHaveLength(1)
+    expect(readInjections(runDir).filter((row) => !isMemoryReadRecord(row))).toHaveLength(2)
+  })
+
+  it('settles NO counter for a receipt, so an empty plane never becomes fake evidence', () => {
+    recordMemoryRead(runDir, '00-requirements.md', { injected: false, shards: 0, reason: 'the memory plane is empty, so nothing is injected' })
+    recordInjection(runDir, [{ source: 'memory/domains/locks.md', title: 'Lock chain ordering', score: 5 }], '04')
+    const book = settleInjections(runDir, runDir, ['00-requirements.md', '04'])
+    // The one entry that WAS injected is settled; the receipt is not an entry, so it appears nowhere.
+    expect(Object.keys(book)).toEqual(['memory/domains/locks.md'])
+    expect(book[MEMORY_READ_SOURCE]).toBeUndefined()
+  })
+
+  it('is a RESERVED subject: no shard the plane can hold carries it', () => {
+    // The gate decides "the read happened" from this row's subject, so a real entry able to hold the same
+    // subject would let a shard satisfy the gate without a read ever running. Memory sources are the
+    // shard's own `.md` path, which is why the reserved name is not a path.
+    expect(MEMORY_READ_SOURCE.startsWith('memory-read:')).toBe(true)
+    expect(MEMORY_READ_SOURCE.endsWith('.md')).toBe(false)
+    // And the discriminator is the SHAPE, not the subject alone: a shard that happens to be titled like a
+    // receipt is still a shard.
+    expect(isMemoryReadRecord({ source: MEMORY_READ_SOURCE, title: 'x', phase: '04', score: 0 })).toBe(false)
+    expect(isMemoryReadRecord({ source: MEMORY_READ_SOURCE, title: 'x', phase: '04', score: 0, injected: false, shards: 0, reason: 'r' })).toBe(true)
+    // …and the shard SHAPE is not a receipt, however complete it looks.
+    expect(isMemoryReadRecord({ source: 'memory/domains/locks.md', title: 'Lock chain ordering', phase: '04', score: 5 })).toBe(false)
+    expect(isMemoryReadRecord(null)).toBe(false)
+    expect(isMemoryReadRecord('memory-read:attempt')).toBe(false)
   })
 })

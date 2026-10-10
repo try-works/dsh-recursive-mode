@@ -114,6 +114,23 @@ export function renderStableContract(config: EnforcementConfig = DEFAULT_ENFORCE
     '- Phase order binds WRITES as well as locks: only the ACTIVE phase (the lowest-numbered artifact not yet LOCKED) may be written; a write to a LATER phase artifact is denied/asked. Run support files (evidence/, scratch/, addenda/, subagents/, operations/) are not phases.',
     '- Phase 3 lock requires TDD evidence (strict) or rationale (pragmatic); Phase 5 requires QA evidence.',
     '- The control-plane root is resolved STRICTLY from this session workspace (never scanned from another).',
+    // ⚠ THE CONTRACT NOW SAYS MEMORY IS READ, AND IT HAS TO SAY IT HERE RATHER THAN IN THE TAIL.
+    //
+    // MEASURED BEFORE THIS LINE EXISTED: `grep -E 'memor|shard|learn' src/policy.ts` returned ZERO hits, so
+    // the model-facing contract — the text the agent reads on every turn — never mentioned that prior-run
+    // memory is read at phase entry, never said what an empty plane means, and never said to cite what it
+    // relies on. The read itself was not missing (`runtime.phaseRules` calls `selectMemory` and returns the
+    // section); it was INVISIBLE, which is the same class of defect that produced three live runs with zero
+    // locks: a mechanism nothing announces is a mechanism the model has no reason to use.
+    //
+    // It belongs in the STABLE prefix, not the per-phase tail, because it is true of every phase — the tail
+    // is precisely what changes between them. It carries NO selection (no shard, no count, no match), so the
+    // prefix stays byte-identical for the whole run, which is the split's only precondition.
+    '- Memory is READ AT PHASE ENTRY by recursive_phase: it returns what the memory plane holds for this run'
+      + ' and phase (the selected shards, or `memoryReason` saying why nothing was injected). Read it when'
+      + ' entering a phase, rely on what it gives you, and cite a shard by title wherever you act on it. An'
+      + ' EMPTY plane is a normal result, not a failure: "the memory plane is empty, so nothing is injected"'
+      + ' is an answer, and the phase proceeds with what the run itself knows.',
   ].join('\n')
 }
 

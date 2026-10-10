@@ -49,6 +49,43 @@ export const LEGACY_FEEDBACK_FILE = 'memory/.feedback.json'
 /** Where a run records what it was shown. */
 export const INJECTIONS_FILE = 'memory-injections.json'
 
+/**
+ * THE SUBJECT A READ-RECEIPT CARRIES, AND WHY IT CANNOT COLLIDE WITH A SHARD.
+ *
+ * ⚠ THE GAP THIS CLOSES, MEASURED. This file used to record only the SHARDS a phase was shown, so a phase
+ * whose selection came back empty — the documented, legitimate state of a workspace with no memory plane —
+ * left NO trace at all. "A record exists" and "the read happened" were therefore the same sentence, and a
+ * gate that required the former would REFUSE FOREVER in a fresh workspace: there would be nothing to
+ * record, so nothing would ever be recorded. `selectMemory` says it plainly (`memory.ts`): *"the memory
+ * plane is empty, so nothing is injected"* is an ANSWER, not a failure.
+ *
+ * So the read is recorded as a FACT OF ITS OWN — a receipt saying "at this phase entry, the plane was read,
+ * and this is what the read said" — instead of being inferred from what the read returned. An empty plane
+ * produces a receipt like any other, which is what makes the gate satisfiable in a new repo.
+ *
+ * ⚠ AND THE SUBJECT IS A RESERVED NAME. A memory entry's `source` is the shard's own PATH
+ * (`selectMemory` -> `loadMemoryIndex` -> `entry.source`), always a `.md` path under the memory plane, so
+ * `memory-read:attempt` is not a name any plane entry can hold. That is the property a collision would
+ * need to break the gate, and it is asserted in `tests/memory-feedback.spec.ts`.
+ */
+export const MEMORY_READ_SOURCE = 'memory-read:attempt'
+
+/** The receipt a phase entry leaves for a read that happened at `phase`. */
+export interface MemoryReadRecord extends InjectionRecord {
+  /** Always {@link MEMORY_READ_SOURCE}. */
+  source: typeof MEMORY_READ_SOURCE
+  /** The phase ENTRY that performed the read — an artifact name (`00-requirements.md`), as shards use. */
+  phase: string
+  /** True when anything was injected; FALSE is a satisfied read, not a missing one. */
+  injected: boolean
+  /** How many shards were injected. `0` on an empty plane, which is the case this whole record exists for. */
+  shards: number
+  /** WHY the read returned what it did — `selectMemory`'s own reason, carried verbatim. */
+  reason: string
+  /** Always `0`: a receipt is not a ranking, so it can never move a counter. */
+  score: 0
+}
+
 /** One entry the agent was shown, as the run recorded it. */
 export interface InjectionRecord {
   /** The entry's source path, which is also its identity in the counters. */
@@ -117,11 +154,94 @@ export function readInjections(runDir: string, readFile: (path: string) => strin
 }
 
 /**
+ * True for the read receipt, false for a shard the phase was shown.
+ *
+ * ⚠ THE DISCRIMINATOR IS THE SUBJECT **AND** THE SHAPE. The reserved subject alone would be enough if no
+ * plane entry could hold it, but a caller can hand-write this file, so a row is a receipt only when it also
+ * carries the receipt's own fields. A hand-edited file therefore cannot make a shard row look like a read,
+ * and `tests/memory-feedback.spec.ts` asserts the negative case.
+ *
+ * Accepts `unknown` rather than `InjectionRecord` because its callers hold JSON off disk (an array of
+ * whatever the file contains), and a type guard that could only be applied to a value already known to be
+ * well-shaped would not be worth having.
+ */
+export function isMemoryReadRecord(record: unknown): record is MemoryReadRecord {
+  if (record === null || typeof record !== 'object') return false
+  const candidate = record as Partial<MemoryReadRecord>
+  return candidate.source === MEMORY_READ_SOURCE
+    && typeof candidate.phase === 'string'
+    && typeof candidate.injected === 'boolean'
+    && typeof candidate.shards === 'number'
+    && typeof candidate.reason === 'string'
+}
+
+/**
+ * The read receipts this run holds, in the file's own deterministic order.
+ *
+ * The reader the gate uses (see `hasMemoryRead` in `policy-globs.ts`): it is a NON-EMPTY answer even when
+ * every receipt says `injected: false`, because a receipt is evidence that the read RAN.
+ */
+export function readMemoryReads(runDir: string, readFile: (path: string) => string | null = defaultRead): MemoryReadRecord[] {
+  return readInjections(runDir, readFile).filter(isMemoryReadRecord)
+}
+
+/**
+ * Record that a phase entry READ the memory plane, whatever the read returned.
+ *
+ * ⚠ THIS IS THE ATTEMPT, NOT THE RESULT, AND THE DIFFERENCE IS THE WHOLE POINT. `recordInjection` can only
+ * write a row when a shard was selected, so it is silent on an empty plane — and an empty plane is a
+ * legitimate state a fresh workspace is in, not a failure to record. A receipt written here says "the plane
+ * was read at this phase entry, and the read answered: <reason>", so `injected: false` is a SATISFIED read.
+ *
+ * ⚠ ONE RECEIPT PER PHASE, REPLACED (not appended). A phase is re-entered while it is still DRAFT — that is
+ * the ordinary path, not an edge case — so appending would turn one read per entry into an unbounded log
+ * and make the file grow with every reminder. The merge key is the phase, the newest read wins, and the
+ * rewrite is byte-identical when the same phase is read twice with the same answer, which is the
+ * determinism the lock receipts and the selection output already follow.
+ *
+ * ⚠ AND IT SHARES THE FILE WITH THE SHARD ROWS rather than living in a second sidecar: `recordInjection`
+ * preserves receipts when it rewrites (below), so the two writers cannot erase each other. A separate file
+ * would be a second answer to "what did this run read", which is the drift this repo keeps paying for.
+ */
+export function recordMemoryRead(
+  runDir: string,
+  phase: string,
+  read: { injected: boolean; shards: number; reason: string },
+  write: (path: string, content: string) => void = defaultWrite,
+  readFile: (path: string) => string | null = defaultRead,
+): MemoryReadRecord[] {
+  const existing = readMemoryReads(runDir, readFile)
+  const byPhase = new Map<string, MemoryReadRecord>()
+  for (const record of existing) byPhase.set(record.phase, record)
+  byPhase.set(phase, {
+    source: MEMORY_READ_SOURCE,
+    // The title is the phase, so the row is readable in the file without decoding the receipt.
+    title: phase,
+    phase,
+    score: 0,
+    injected: read.injected,
+    shards: read.shards,
+    reason: read.reason,
+  })
+  const receipts = [...byPhase.values()].sort(compareRecords)
+  // The shard rows are carried through UNTOUCHED — see the note on `recordInjection` for why each writer
+  // must preserve the other's rows.
+  const shards = readInjections(runDir, readFile).filter((record) => !isMemoryReadRecord(record))
+  write(join(runDir, INJECTIONS_FILE), JSON.stringify(sortRecords([...shards, ...receipts]), null, 2) + '\n')
+  return receipts
+}
+
+/**
  * Record what the run was shown, MERGED by (source, title, phase).
  *
  * ⚠ MERGED RATHER THAN APPENDED, because a phase can be re-entered while it is still DRAFT and the same
  * entries are selected again. Appending would count one decision as four, and the counters exist to be
  * evidence. The highest score seen wins, since that is what the agent was most recently shown.
+ *
+ * ⚠ AND THE READ RECEIPTS SURVIVE THE REWRITE. This function owns the file, so a version of it that wrote
+ * only `merged` would delete the receipt `recordMemoryRead` had just written — the gate would then refuse a
+ * write in the same phase entry that satisfied it. The two kinds of row are therefore written together,
+ * sorted by the same key, and a receipt is never a candidate for the score merge (it carries no shard).
  */
 export function recordInjection(
   runDir: string,
@@ -132,16 +252,19 @@ export function recordInjection(
 ): InjectionRecord[] {
   const existing = readInjections(runDir, readFile)
   const byKey = new Map<string, InjectionRecord>()
-  for (const record of existing) byKey.set(keyOf(record), record)
+  for (const record of existing) {
+    if (isMemoryReadRecord(record)) continue
+    byKey.set(keyOf(record), record)
+  }
   for (const entry of entries) {
     const candidate: InjectionRecord = { source: entry.source, title: entry.title, phase, score: entry.score }
     const key = keyOf(candidate)
     const prior = byKey.get(key)
     byKey.set(key, prior === undefined || candidate.score > prior.score ? candidate : prior)
   }
+  const receipts = existing.filter(isMemoryReadRecord)
   // Deterministic order, so the file is comparable between runs.
-  const merged = [...byKey.values()].sort((a, b) => a.phase.localeCompare(b.phase)
-    || a.source.localeCompare(b.source) || a.title.localeCompare(b.title))
+  const merged = sortRecords([...byKey.values(), ...receipts])
   write(join(runDir, INJECTIONS_FILE), JSON.stringify(merged, null, 2) + '\n')
   return merged
 }
@@ -173,6 +296,13 @@ export function settleInjections(
   // what to do with it; what is missing is an honest SOURCE for it (a re-opened phase), and until there is
   // one, this function reports only what it can prove.
   for (const record of injections) {
+    // ⚠ A READ RECEIPT IS NOT AN INJECTION, so it can never settle a counter. It carries no shard — its
+    // subject is the reserved {@link MEMORY_READ_SOURCE}, which no memory entry can hold — so without this
+    // line an empty plane would write a counter row for a source that does not exist and the book would
+    // carry evidence about nothing. Filtered HERE rather than at the reader, because `readInjections` is a
+    // documented shape (`tests/memory-feedback.spec.ts` pins the row it returns) and a second reader would
+    // be a second answer to "what is in this file".
+    if (isMemoryReadRecord(record)) continue
     if (!locked.has(record.phase)) continue
     const counter = book[record.source] ?? { applied: 0, contradicted: 0 }
     counter.applied += 1
@@ -204,6 +334,21 @@ export function feedbackBonus(book: FeedbackBook, source: string): number {
 
 function countPhase(injections: readonly InjectionRecord[], phase: string): number {
   return injections.filter((record) => record.phase === phase).length
+}
+
+/**
+ * The file's ONE ordering, applied by both writers: phase, then source, then title.
+ *
+ * Both writers sort through this function rather than each carrying a copy, so two rows for one phase can
+ * never end up in an order that depends on which writer ran last — the property that keeps the file
+ * comparable between runs, and between a `recursive_phase` call and a `recursive_init` call.
+ */
+function compareRecords(a: InjectionRecord, b: InjectionRecord): number {
+  return a.phase.localeCompare(b.phase) || a.source.localeCompare(b.source) || a.title.localeCompare(b.title)
+}
+
+function sortRecords(records: readonly InjectionRecord[]): InjectionRecord[] {
+  return [...records].sort(compareRecords)
 }
 
 function keyOf(record: { source: string; title: string; phase: string }): string {

@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os'
 import {
   globMatch, isValidGlobPattern, patternSyntaxError, patternSpecificity, isCatchAllPattern,
   evaluateToolPolicy, resolveToolPolicy, loadToolPolicyFile, toolPolicyPath, builtInToolPolicyRules,
-  TOOL_POLICY_RELATIVE_PATH,
+  TOOL_POLICY_RELATIVE_PATH, WRITE_TOOL_NAMES,
   type ToolPolicy, type ToolPolicyRule, type ToolPolicyContext, type Verdict,
 } from '../src/policy-globs.ts'
 import { withPhaseBaseline, phaseBaselineRules, policyVerdictRank } from '../src/phase-rules.ts'
@@ -390,6 +390,31 @@ describe('T16 — the shipped policy file (repo self-check)', () => {
     // that matches a deny pattern, i.e. brick the repo.)
     expect(evaluateToolPolicy(loaded.policy, 'recursive_lock', { artifact: 'x.md' }, NO_CONTEXT).kind).toBe('allow')
     expect(evaluateToolPolicy(loaded.policy, 'fs_write', { file_path: 'notes.md' }, NO_CONTEXT).kind).toBe('allow')
+  })
+
+  it('mirrors the built-in list down to the LABEL, which is what selects a rule\'s CONDITION', () => {
+    // ⚠ WHY THE LABEL IS PART OF THE MIRROR AND NOT DECORATION. Three rules share each write-tool pattern in
+    // both lists (locked-artifact, phase-order, memory-read), and `attachPolicyPredicate` selects their
+    // conditions BY LABEL, falling back to the pattern when a rule has none. A rule that lost its label
+    // would therefore keep the same pattern and the same verdict and be given the WRONG CONDITION — the
+    // file's `memory-read` rule would deny on the locked-artifact condition and the gate would vanish from
+    // every repo that ships this file while the `pattern:verdict` comparison above still passed. So the
+    // label is compared with the pattern and the verdict, and the gate is asserted present on every
+    // write-tool id in BOTH lists.
+    const repo = join(import.meta.dirname, '..')
+    const loaded = loadToolPolicyFile(repo)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok || loaded.source !== 'file') return
+    const labelled = (r: ToolPolicyRule) => r.pattern + ':' + r.verdict + ':' + (r.label ?? 'none')
+    expect(loaded.policy.rules.map(labelled)).toEqual(builtInToolPolicyRules().map(labelled))
+    for (const [where, rules] of [['file', loaded.policy.rules], ['built-in', builtInToolPolicyRules()]] as const) {
+      const gate = rules.filter((r) => r.label === 'memory-read')
+      expect(gate, where + ': one memory-read rule per write-tool id').toHaveLength(WRITE_TOOL_NAMES.size)
+      for (const r of gate) {
+        expect(r.verdict, where + ': ' + r.pattern).toBe('deny')
+        expect(typeof r.predicate, where + ': ' + r.pattern + ' must carry the gate, not a bare verdict').toBe('function')
+      }
+    }
   })
 })
 

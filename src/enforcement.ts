@@ -176,8 +176,13 @@ export const DEFAULT_ENFORCEMENT: EnforcementConfig = {
  * active phase must be locked before proceeding to next phase*: `'lock-order'` refuses
  * locking ahead, `'phase-order'` refuses WRITING ahead. Two labels rather than one,
  * because the guard log has to tell the owner which of the two the agent attempted.
+ *
+ * `'memory-read'` is the third WRITE-side rule and the owner's other requirement, verbatim: *the memory must
+ * be read before writing requirements.md*. It rides the same write-tool family as `'phase-order'` (see
+ * `memoryReadRule` in `policy-globs.ts`) and is listed here because this union is what the guard's decision
+ * record is typed by — a label the record's type does not know is a label the log cannot honestly carry.
  */
-export type GuardRule = 'lock-order' | 'phase-order' | 'tdd-evidence' | 'locked-write' | 'transition' | 'none'
+export type GuardRule = 'lock-order' | 'phase-order' | 'memory-read' | 'tdd-evidence' | 'locked-write' | 'transition' | 'none'
 
 /** T15: the transition gate's verdict as attached to a decision (advisory only). */
 export interface GuardTransition {

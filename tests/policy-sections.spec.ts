@@ -15,9 +15,13 @@ import { Context } from '@deepseek-ai/cordis'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { RecursiveRuntime } from '../src/runtime.ts'
 import { renderStableContract, renderPhaseTail, contractDigest, renderRecursivePolicy } from '../src/policy.ts'
 import { DEFAULT_ENFORCEMENT } from '../src/enforcement.ts'
+import { createRecursivePhaseTool } from '../src/recursive_phase.tool.ts'
 
 describe('T22 — the stable contract does not vary with the phase', () => {
   it('is byte-identical when rendered twice', () => {
@@ -29,12 +33,48 @@ describe('T22 — the stable contract does not vary with the phase', () => {
     // Vocabulary that is true for the whole run.
     expect(stable).toContain('lock monotonically')
     expect(stable).toContain('00-requirements.md')
+    // ⚠ AND IT SAYS THE MEMORY IS READ, which measured as ABSENT before this change: `grep -E
+    // 'memor|shard|learn' src/policy.ts` returned ZERO hits, so the model-facing contract never told the
+    // agent that prior-run memory arrives at phase entry, never said an empty plane is a normal result,
+    // and never asked for a citation. The mechanism was there the whole time; the CONTRACT was silent,
+    // which is why it reads as a new invention rather than a description.
+    expect(stable).toContain('memory')
+    expect(stable).toContain('recursive_phase')
+    expect(stable).toContain('EMPTY plane is a normal result')
+    expect(stable.toLowerCase()).toContain('cite a shard by title')
     // And nothing that belongs to a phase in flight: no artifact being worked on, no status FIELD.
     // (The lock RULE mentions `Status: LOCKED` — that is contract text, not a phase status, which is
     // why the assertion is on the rendered FIELD rather than on the words.)
     expect(stable).not.toContain('Current phase:')
     expect(stable).not.toContain('Next required artifact')
     expect(stable).not.toContain('- Status: ')
+  })
+
+  /**
+   * THE MEMORY LINE IS PART OF THE CONTRACT, NOT OF THE TAIL.
+   *
+   * A statement about memory holds for EVERY phase, so it belongs in the byte-identical prefix. The
+   * temptation was to render the selection (which shards matched, how many) into the prompt — and that
+   * would have made the prefix vary per phase, which is the one property the split exists to keep. These
+   * cases pin both halves: the statement is in the prefix, and it carries no selection.
+   */
+  it('puts the memory statement in the PREFIX, where it is true for every phase', () => {
+    expect(renderStableContract()).toContain('Memory is READ AT PHASE ENTRY')
+    // No selection rides along: a count would be per-phase state, i.e. a tail dressed as a contract.
+    expect(renderStableContract()).not.toMatch(/\d+\s+shard/)
+  })
+
+  it('COVERS THE MEMORY LINE, so the identifier moves when the text it identifies does', () => {
+    // The contract CHANGED (it now says memory is read), so the digest computed over it changed too — and
+    // that is the property worth pinning: the digest is computed over THIS text, not over a stale copy.
+    // Asserted through the renderer rather than against a hardcoded hash, so a future contract edit does
+    // not have to hunt a literal down; the two contract cases above already prove the digest changes with
+    // the config, and this one proves the memory line is inside what it covers.
+    const memoryLine = renderStableContract().split('\n').find((line) => line.startsWith('- Memory is READ AT PHASE ENTRY'))
+    expect(memoryLine, 'the memory statement is not a line of the stable contract').toBeDefined()
+    expect(memoryLine).toContain('recursive_phase')
+    // It is one line of many, and the rest of the contract is still there beside it.
+    expect(renderStableContract().split('\n').length).toBeGreaterThan(8)
   })
 
   it('DOES vary with the contract — the modes are part of it', () => {
@@ -166,6 +206,69 @@ describe('T22 — the rendered section begins with the stable contract', () => {
       expect(status.contractDigest).toBe(contractDigest())
       expect(status.contractDigest).toMatch(/^[0-9a-f]{16}$/)
     } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * THE TOOL DESCRIPTION IS THE ONLY SURFACE A MODEL READS BEFORE CHOOSING A TOOL, and the one that says
+ * nothing about memory is why nobody knew memory arrived here.
+ *
+ * ⚠ THE ASSERTION THAT MATTERS IS THE CROSS-CHECK, NOT THE WORD COUNT. A description can promise anything;
+ * what these cases pin is that every field and every state it promises is one the payload ACTUALLY carries
+ * on a run whose memory plane is EMPTY — the case a fresh workspace is in, and the case a description that
+ * overpromised would get wrong. The description itself is read from the definition `createRecursivePhaseTool`
+ * builds — the object the tool runtime registers — so this case cannot pass against a doc or a comment that
+ * drifted away from the tool.
+ */
+describe('the recursive_phase description names the memory it returns, and the payload backs it', () => {
+  it('tells the model that prior-run memory arrives on this call, and that an empty plane is normal', () => {
+    // The description is read from the registered definition — the same string a model sees — so this case
+    // cannot pass against a comment or a doc that drifted from the tool.
+    const tool = createRecursivePhaseTool(undefined as never)
+    const description = (tool as unknown as { description?: string }).description ?? ''
+    expect(description).toContain('memory')
+    expect(description.toLowerCase()).toContain('empty memory plane is a normal result')
+    // The gate refuses a write to `00-requirements.md` and tells the caller to call this tool; the
+    // description names that same artifact, so the refusal and the remedy point at one thing.
+    expect(description).toContain('00-requirements.md')
+  })
+
+  it('documents only what the payload carries, checked against a REAL result on an EMPTY plane', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'rm-phase-desc-'))
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(RecursiveRuntime, { repoRoot: root })
+      await ctx.recursive.initRun('desc-run')
+      const tool = createRecursivePhaseTool(ctx.recursive)
+      ctx.tools.register(tool)
+      const description = (tool as unknown as { description?: string }).description ?? ''
+
+      const out = await ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('phase-desc'),
+        name: 'recursive_phase',
+        arguments: { runId: 'desc-run' },
+      } as never)
+      expect(out.isError).toBe(false)
+      const value = out.value as Record<string, unknown>
+
+      // EVERY field the description names is a field the call returns — the cross-check. A description that
+      // advertised a field the payload does not carry is the defect this case exists to prevent.
+      for (const field of ['runId', 'phase', 'memory', 'memoryReason', 'requiredSections', 'audited']) {
+        expect(value, 'the description names `' + field + '` and the payload does not carry it').toHaveProperty(field)
+      }
+      expect(value.phase).toBe('00-requirements.md')
+      // AND THE EMPTY-PLANE STATE IS THE ONE THE DESCRIPTION DESCRIBES: no shards, and a reason that says
+      // why — not an absence the caller has to interpret.
+      expect(value.memory).toBe('')
+      expect(String(value.memoryReason)).toContain('empty')
+      expect(description.toLowerCase()).toContain('memoryreason')
+    } finally {
+      await ctx.fiber.dispose()
       rmSync(root, { recursive: true, force: true })
     }
   })

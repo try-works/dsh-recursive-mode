@@ -196,6 +196,76 @@ const ANCHORS = {
   'tool.auditTeamApprove': ['src/recursive_audit_team.tool.ts', 'ONLY after an APPROVE verdict'],
   'tool.lockOrdering': ['src/recursive_lock.tool.ts', 'IT IS ATTACHED TO THE ORDERING REFUSAL SPECIFICALLY'],
   'tool.reopenParam': ['src/recursive_lock.tool.ts', 'reopen: { type:'],
+
+  /* -- the memory plane, the read gate, and the cross-run training loop ---- */
+  'memory.kinds': ['src/memory.ts', 'export const MEMORY_KINDS = ['],
+  'memory.kindsWhy': ['src/memory.ts', '⚠ `training` IS IN THIS LIST BECAUSE IT IS THE KIND'],
+  'memory.notRead': ['src/memory.ts', '`incidents/` and `archive/` stay out deliberately'],
+  'memory.indexFile': ['src/memory.ts', 'export const MEMORY_INDEX_FILE'],
+  'memory.planeBases': ['src/memory.ts', 'export const MEMORY_PLANE_BASES'],
+  'memory.select': ['src/memory.ts', 'export function selectMemory'],
+  'memory.retrieve': ['src/memory.ts', 'export function retrieveMemory'],
+  'feedback.readReceipt': ['src/memory-feedback.ts', 'export function recordMemoryRead'],
+  'feedback.source': ['src/memory-feedback.ts', 'export const MEMORY_READ_SOURCE'],
+  'feedback.injections': ['src/memory-feedback.ts', 'export const INJECTIONS_FILE'],
+  'feedback.empty': ['src/memory-feedback.ts', '`injected: false` is a SATISFIED read'],
+  'feedback.settle': ['src/memory-feedback.ts', 'export function settleInjections'],
+  'globs.memoryReadWhy': ['src/policy-globs.ts', 'THE MEMORY-READ GATE — the owner'],
+  'globs.memoryReadRefuse': ['src/policy-globs.ts', 'WHAT IT REFUSES, exactly: a write to a PHASE-0 artifact'],
+  'globs.memoryReadTrap': ['src/policy-globs.ts', 'AND THE TRAP THAT DECIDES THE WHOLE DESIGN'],
+  'globs.hasMemoryRead': ['src/policy-globs.ts', 'function hasMemoryRead'],
+  'rules.phase8Artifact': ['src/phase-rules.ts', 'export const PHASE8_MEMORY_ARTIFACT'],
+  'rules.phase8Section': ['src/phase-rules.ts', 'export const PHASE8_MEMORY_SECTION'],
+  'rules.provenanceField': ['src/phase-rules.ts', 'export const MEMORY_PROVENANCE_FIELD'],
+  'training.phase8Artifact': ['src/training.ts', 'export const PHASE8_ARTIFACT'],
+  'training.exit': ['src/training.ts', 'export const TRAINING_EXIT = {'],
+  'training.lockedRuns': ['src/training.ts', 'export function countPhase8LockedRuns'],
+  'training.gate': ['src/training.ts', 'export function trainingGate'],
+  'training.anecdote': ['src/training.ts', 'ONE RUN IS NOT EVIDENCE — it is an anecdote'],
+  'training.trigger': ['src/training.ts', 'export function runPhase8Trigger'],
+  'training.rerun': ['src/training.ts', 'The trigger, run at the **RE-RUN** of closeout phase 08.'],
+  'training.selfTrain': ['src/training.ts', 'training at the first lock would train the run on itself'],
+  'training.extractorEnv': ['src/training.ts', 'export const TRAINING_EXTRACTOR_ENV'],
+  'training.extractorUnset': ['src/training.ts', 'no extractor is available; set RECURSIVE_TRAINING_EXTRACTOR_CMD'],
+  'training.noWriter': ['src/training.ts', 'ABSENT IS NOT SUCCESS: with no writer the groups are planned'],
+  'training.domains': ['src/training.ts', "writes.push(options.write('memory/domains/'"],
+  'training.taskType': ['src/training.ts', 'export function taskTypeShardPath'],
+  'training.taskTypeWhy': ['src/training.ts', '`task-type` IS READ FROM THE GROUP'],
+  'training.registry': ['src/training.ts', 'export function updateMemoryRegistry'],
+  'training.registryLine': ['src/training.ts', 'export function registryLine'],
+  'training.supersede': ['src/training.ts', 'AND A SHARD IS NEVER REMOVED HERE'],
+  'training.evidenceWhy': ['src/training.ts', 'THE CHECKABLE FACT BEHIND'],
+  'training.lockRefusal': ['src/training.ts', 'export function phase8MemoryLockRefusal'],
+  'training.lockRefusalWhy': ['src/training.ts', 'A MISSING ARTIFACT IS NOT THIS GATE'],
+  'training.refusalRemedy': ['src/training.ts', 'THE MESSAGE NAMES THE REMEDY'],
+  'training.countField': ['src/training.ts', 'A lock is a FIELD, not a filename'],
+  'runtime.phaseRead': ['src/runtime.ts', 'const selection = selectMemory(root, {'],
+  'runtime.phaseReceipt': ['src/runtime.ts', 'recordMemoryRead(resolved.runDir, phase, {'],
+  'runtime.phaseReceiptWhy': ['src/runtime.ts', 'AND RECORD THAT THE READ HAPPENED, EVEN WHEN IT RETURNED NOTHING'],
+  'runtime.phasePayload': ['src/runtime.ts', 'memory: selection.injected ? renderMemorySection'],
+  'runtime.rerunDetect': ['src/runtime.ts', 'const rerun = isPhase8 && existsSync('],
+  'runtime.triggerCall': ['src/runtime.ts', '? runPhase8Trigger(root, runId, {'],
+  'runtime.extractorSeam': ['src/runtime.ts', 'runner: spawnExtractorRunner({ cwd: root'],
+  'runtime.trainingWrite': ['src/runtime.ts', 'T40 - WRITER/READER AGREEMENT'],
+  'runtime.settle': ['src/runtime.ts', 'settleInjections(root, runDir, PHASE_SEQUENCE.filter'],
+  'status.phases': ['src/status.ts', 'export const PHASES: PhaseDef[] = ['],
+  'closeout.phaseConfig': ['src/closeout.ts', 'export const PHASE_CONFIG: Record<string, CloseoutPhaseConfig> = {'],
+  'closeout.sectionBodies': ['src/closeout.ts', 'const SECTION_BODIES: Record<string, string> = {'],
+  'tpl.scopeRequirements': ['src/init-templates.ts', 'Scope note: This document defines stable requirement identifiers and acceptance criteria.'],
+  'tpl.scopeWorktree': ['src/init-templates.ts', 'Scope note: This document records the Phase 0 worktree context'],
+  'tpl.scopeScaffold': ['src/init-templates.ts', 'Scope note: Scaffold generated by the recursive-mode plugin (R5).'],
+  'plan.discovery': ['src/plan-gate.ts', 'Requirements / AS-IS / TO-BE-Plan are NON-MUTATING discovery'],
+  'plan.discoveryRange': ['src/plan-gate.ts', 'Everything strictly below it (0 requirements, 1 AS-IS, 1.5 root cause,'],
+  'stub.markers': ['src/runtime.ts', 'const ARTIFACT_STUB = {'],
+  'lint.wildcard06': ['src/ts-lint.ts', "a !== '06-decisions-update.md'"],
+  'lint.wildcard08': ['src/ts-lint.ts', "a !== '08-memory-impact.md'"],
+  'lint.inputFilter': ['src/ts-lint.ts', 'return candidates.filter(a => present.has(a))'],
+  /* The two facts behind JOB 1's "positive" statement and the late-set correction. */
+  'lint.lateProfile': ['src/ts-lint.ts', 'LATE_PHASE_ARTIFACTS.some(a => existsSync'],
+  'runtime.scaffoldLoop': ['src/runtime.ts', 'for (const file of laterPhases) {'],
+  /* The SECOND optionality declaration, and the calculation that consumes it. */
+  'status.optional': ['src/status.ts', "if (phase.optional && !state.exists) state.status = 'SKIPPED'"],
+  'snapshot.complete': ['src/snapshot.ts', 'const mandatory = status.phases.filter(p => !p.optional)'],
 }
 
 /**
@@ -432,7 +502,81 @@ const SRC = {
   toolAuditTeamApprove: citeOf('tool.auditTeamApprove'),
   toolLockOrdering: citeOf('tool.lockOrdering'),
   toolReopenParam: citeOf('tool.reopenParam'),
+
+  /* -- the memory plane ---------------------------------------------------- */
+  memoryKinds: citeOf('memory.kinds'),
+  memoryKindsWhy: citeOf('memory.kindsWhy'),
+  memoryNotRead: citeOf('memory.notRead'),
+  memoryIndexFile: citeOf('memory.indexFile'),
+  memoryPlaneBases: citeOf('memory.planeBases'),
+  memorySelect: citeOf('memory.select'),
+  memoryRetrieve: citeOf('memory.retrieve'),
+  readReceipt: citeOf('feedback.readReceipt'),
+  readSource: citeOf('feedback.source'),
+  injectionsFile: citeOf('feedback.injections'),
+  emptyPlaneOk: citeOf('feedback.empty'),
+  settleInjections: citeOf('feedback.settle'),
+  memoryReadWhy: citeOf('globs.memoryReadWhy'),
+  memoryReadRefuse: citeOf('globs.memoryReadRefuse'),
+  memoryReadTrap: citeOf('globs.memoryReadTrap'),
+  hasMemoryRead: citeOf('globs.hasMemoryRead'),
+  phase8Artifact: citeOf('rules.phase8Artifact'),
+  phase8Section: citeOf('rules.phase8Section'),
+  provenanceField: citeOf('rules.provenanceField'),
+
+  /* -- the cross-run training loop ----------------------------------------- */
+  trainingExit: citeOf('training.exit'),
+  trainingLockedRuns: citeOf('training.lockedRuns'),
+  trainingGate: citeOf('training.gate'),
+  trainingAnecdote: citeOf('training.anecdote'),
+  trainingTrigger: citeOf('training.trigger'),
+  trainingRerun: citeOf('training.rerun'),
+  trainingSelfTrain: citeOf('training.selfTrain'),
+  trainingExtractorEnv: citeOf('training.extractorEnv'),
+  trainingExtractorUnset: citeOf('training.extractorUnset'),
+  trainingNoWriter: citeOf('training.noWriter'),
+  trainingDomains: citeOf('training.domains'),
+  trainingTaskType: citeOf('training.taskType'),
+  trainingTaskTypeWhy: citeOf('training.taskTypeWhy'),
+  trainingRegistry: citeOf('training.registry'),
+  trainingRegistryLine: citeOf('training.registryLine'),
+  trainingSupersede: citeOf('training.supersede'),
+  trainingEvidenceWhy: citeOf('training.evidenceWhy'),
+  trainingLockRefusal: citeOf('training.lockRefusal'),
+  trainingLockRefusalWhy: citeOf('training.lockRefusalWhy'),
+  trainingRefusalRemedy: citeOf('training.refusalRemedy'),
+  trainingCountField: citeOf('training.countField'),
+  runtimePhaseRead: citeOf('runtime.phaseRead'),
+  runtimePhaseReceipt: citeOf('runtime.phaseReceipt'),
+  runtimePhaseReceiptWhy: citeOf('runtime.phaseReceiptWhy'),
+  runtimePhasePayload: citeOf('runtime.phasePayload'),
+  runtimeRerunDetect: citeOf('runtime.rerunDetect'),
+  runtimeTriggerCall: citeOf('runtime.triggerCall'),
+  runtimeExtractorSeam: citeOf('runtime.extractorSeam'),
+  runtimeTrainingWrite: citeOf('runtime.trainingWrite'),
+  runtimeSettle: citeOf('runtime.settle'),
+
+  /* -- per-phase purpose, and the linkage ---------------------------------- */
+  statusPhases: citeOf('status.phases'),
+  closeoutPhaseConfig: citeOf('closeout.phaseConfig'),
+  closeoutSectionBodies: citeOf('closeout.sectionBodies'),
+  tplScopeRequirements: citeOf('tpl.scopeRequirements'),
+  tplScopeWorktree: citeOf('tpl.scopeWorktree'),
+  tplScopeScaffold: citeOf('tpl.scopeScaffold'),
+  planDiscovery: citeOf('plan.discovery'),
+  planDiscoveryRange: citeOf('plan.discoveryRange'),
+  stubMarkers: citeOf('stub.markers'),
+  lintWildcard06: citeOf('lint.wildcard06'),
+  lintWildcard08: citeOf('lint.wildcard08'),
+  inputFilter: citeOf('lint.inputFilter'),
+  lintLateProfile: citeOf('lint.lateProfile'),
+  scaffoldLoop: citeOf('runtime.scaffoldLoop'),
+  statusOptional: citeOf('status.optional'),
+  snapshotComplete: citeOf('snapshot.complete'),
 }
+
+/** The status.ts label lines for all twelve artifacts, resolved from the anchor. */
+const STATUS_LABELS = citeOf('status.phases#1-13')
 
 /** Declared SECTION_MAP list lengths — every one is re-derived from source in verify(). */
 const SECTION_LENGTHS = {
@@ -890,6 +1034,326 @@ const PHASES = [
 /** The three-late-phase set, as its own row so the overview can call it out. */
 const LATE = { files: ['06-decisions-update.md', '07-state-update.md', '08-memory-impact.md'], c: SRC.late }
 
+/* ==========================================================================
+   WHAT EACH PHASE IS FOR — one line each, SOURCED, never written
+   ==========================================================================
+
+   The owner read the first version of this page and said the graphic "lists phases
+   one after another without showing ... what each phase does". This is the answer to
+   that half, and the rule for it is the page's own rule: every line below is drawn
+   from the repository, and the repository is quoted rather than paraphrased.
+
+   THREE SOURCES EXIST, and they are not equally strong, so each line declares which
+   ones it used:
+
+     · `label` — the phase's own name, from `PHASES` in `src/status.ts`. The repo's
+       vocabulary for the phase, and what its own artifacts are stamped with.
+     · `sections` — required sections from `SECTION_MAP` in `src/phase-rules.ts`. THE
+       STRONGEST EVIDENCE THERE IS for what a phase is for: a phase that must contain
+       `## Root Cause Summary` and `## Hypothesis Testing` is a root-cause phase, and
+       that is a fact about the linter rather than a description of it. verify()
+       re-derives every named section from the parsed map, so a renamed or deleted
+       section is a FAILING CHECK rather than a stale sentence.
+     · `tpl` — the phase TEMPLATE's own prose, from `src/init-templates.ts`. This
+       exists for exactly two phases. Every later phase's template carries the SAME
+       generic line (`tplScopeScaffold`), so there is no per-phase prose in the code
+       to transcribe for 01-08 — which the Phase graph view says out loud instead of
+       inventing one.
+
+   ⚠ FOR PHASES 04-08 A FOURTH SOURCE EXISTS and is NOT used as the purpose line:
+   `PHASE_CONFIG[...].scopeNote` in `src/closeout.ts` describes what the CLOSEOUT
+   scaffolds for that phase ("Scaffolds the audited test-summary receipt from …"),
+   which is the receipt's job rather than the phase's. It is cited where it belongs —
+   on the Closeout view — and not stretched to cover this. */
+const PURPOSES = {
+  '00-requirements.md': {
+    t: 'Defines the stable requirement identifiers (R1, R2, …) and the acceptance criteria the whole run is measured against.',
+    label: 'Requirements',
+    sections: ['Requirements', 'Out of Scope', 'Constraints'],
+    tpl: SRC.tplScopeRequirements,
+    tplText: 'This document defines stable requirement identifiers and acceptance criteria.',
+  },
+  '00-worktree.md': {
+    t: 'Records the isolation and the EXECUTABLE diff basis that every later audited phase reuses.',
+    label: 'Worktree',
+    sections: ['Directory Selection', 'Safety Verification', 'Diff Basis For Later Audits'],
+    tpl: SRC.tplScopeWorktree,
+    tplText: 'This document records the Phase 0 worktree context and the executable diff basis that all later audited phases must reuse.',
+  },
+  '01-as-is.md': {
+    t: 'Characterises the code AS IT IS — reproduction steps, current behaviour per requirement, and the source requirement inventory — and changes nothing.',
+    label: 'AS-IS',
+    sections: ['Reproduction Steps (Novice-Runnable)', 'Current Behavior by Requirement', 'Source Requirement Inventory'],
+    extra: SRC.planDiscovery,
+  },
+  '01.5-root-cause.md': {
+    t: 'Establishes WHY the current behaviour is what it is, from error analysis through hypothesis testing to a root-cause summary.',
+    label: 'Root Cause',
+    sections: ['Error Analysis', 'Hypothesis Testing', 'Root Cause Summary'],
+  },
+  '02-to-be-plan.md': {
+    t: 'Plans the change TO BE: the files to change, the implementation steps and testing strategy, and the mapping from each requirement to the plan.',
+    label: 'TO-BE Plan',
+    sections: ['Planned Changes by File', 'Implementation Steps', 'Testing Strategy', 'Requirement Mapping'],
+  },
+  '03-implementation-summary.md': {
+    t: 'Applies the plan and records the evidence for it — changes applied, the TDD compliance log, and every deviation from the plan.',
+    label: 'Implementation',
+    sections: ['Changes Applied', 'TDD Compliance Log', 'Plan Deviations', 'Implementation Evidence'],
+  },
+  '03.5-code-review.md': {
+    t: 'Reviews the implementation independently and returns a VERDICT: plan alignment, code quality, and the issues found.',
+    label: 'Code Review',
+    sections: ['Review Scope', 'Plan Alignment Assessment', 'Code Quality Assessment', 'Verdict'],
+  },
+  '04-test-summary.md': {
+    t: 'Records the test evidence: the environment, the exact commands run, their results, and any failures or reruns.',
+    label: 'Test Summary',
+    sections: ['Commands Executed (Exact)', 'Results Summary', 'Failures and Diagnostics (if any)', 'Flake/Rerun Notes'],
+  },
+  '05-manual-qa.md': {
+    t: 'Runs the manual QA scenarios and records what was observed, plus the sign-off the declared QA mode requires.',
+    label: 'Manual QA',
+    sections: ['QA Execution Record', 'QA Scenarios and Results', 'User Sign-Off'],
+  },
+  '06-decisions-update.md': {
+    t: 'Writes the decision-ledger DELTA for the completed run, pointing at the entry it changed.',
+    label: 'Decisions',
+    sections: ['Decisions Changes Applied', 'Resulting Decision Entry', 'Rationale'],
+  },
+  '07-state-update.md': {
+    t: 'Writes the state-ledger DELTA for the completed run, as the resulting state summary.',
+    label: 'State',
+    sections: ['State Changes Applied', 'Resulting State Summary', 'Rationale'],
+  },
+  '08-memory-impact.md': {
+    t: 'Reviews the run\'s changed paths against the memory plane and promotes what is durable into it — the phase that turns a run into memory.',
+    label: 'Memory',
+    sections: ['Affected Memory Docs', 'Changed Paths Review', 'Router and Parent Refresh', 'Skill Memory Promotion Review'],
+  },
+}
+
+/** Resolve one purpose's citation: the section list, the status label table, and any extra source. */
+function purposeCite(p) {
+  const parts = [p.sectionsC, STATUS_LABELS]
+  if (p.tpl) parts.push(p.tpl)
+  if (p.extra) parts.push(p.extra)
+  return parts.join(', ')
+}
+for (const phase of PHASES) {
+  const purpose = PURPOSES[phase.file]
+  if (!purpose) throw new Error('no declared purpose for ' + phase.file)
+  purpose.sectionsC = sectionsCite(phase.file)
+  purpose.c = purposeCite(purpose)
+  phase.purpose = purpose
+}
+
+/* ==========================================================================
+   THE LINKAGE — the edges, DERIVED from the phase data, VERIFIED against the linter
+   ==========================================================================
+
+   `getPhaseExpectedInputArtifactNames` (src/ts-lint.ts) is the linter's own input map,
+   and it is what decides which upstream artifacts a phase must cite before it can lock.
+   It is therefore the only honest source for "how the phases are wired" — and it is a
+   GRAPH, not a chain: five phases read more than one upstream artifact.
+
+   THE EDGES ARE DERIVED FROM `PHASES[].inputs`, not typed in twice: the input column on
+   every phase panel and the arrows on the graph view are then the same data, and a change
+   to one cannot leave the other behind. verify() re-derives the whole set from
+   `src/ts-lint.ts` and compares it to what is rendered, so the drawing fails the build if
+   the linter's map moves.
+
+   THREE EDGE SHAPES, and the difference is in the DRAWING as well as the data:
+     · required     — the artifact is always an expected input (a solid arrow);
+     · conditional  — pushed only when the source artifact is PRESENT on disk
+                      (`candidates.push(…)`, a dashed arrow, labelled "when present");
+     · wildcard     — "every present artifact in the run except itself": 06 and 08 read
+                      the whole run, which is 11 possible sources each, and no single one
+                      of them is required. Drawn as a RAIL under the row rather than as
+                      eleven arrows, because eleven lines into one node is the picture
+                      that stops being readable — and the rail's count is verified. */
+const WILDCARD_INPUT = 'every present artifact in the run except itself'
+const edgeKind = (doc) => (/ — only when present$/.test(doc) ? 'conditional'
+  : doc === WILDCARD_INPUT ? 'wildcard' : 'required')
+const EDGES = PHASES.flatMap((p) => p.inputs
+  .filter((input) => input.artifact)
+  .map((input) => ({
+    from: input.doc.replace(/ — only when present$/, ''),
+    to: p.file,
+    kind: edgeKind(input.doc),
+    c: input.c,
+  })))
+
+/** How many artifacts a wildcard input can actually name: every other member of the run. */
+const WILDCARD_SOURCES = PHASES.length - 1
+
+/** Incoming artifact count for one phase, with the wildcard counted as what it really is. */
+function sourcesOf(file) {
+  return EDGES.filter((edge) => edge.to === file)
+    .reduce((n, edge) => n + (edge.kind === 'wildcard' ? WILDCARD_SOURCES : 1), 0)
+}
+const fanInOf = (file) => EDGES.filter((edge) => edge.to === file).length
+const conditionalFanIn = (file) => EDGES.filter((edge) => edge.to === file && edge.kind === 'conditional').length
+const hasWildcard = (file) => EDGES.some((edge) => edge.to === file && edge.kind === 'wildcard')
+
+/** The one-line fan-in a phase node carries, in the diagram and in the table. */
+function fanInText(file) {
+  if (fanInOf(file) === 0) return 'no upstream artifact'
+  if (hasWildcard(file)) return 'fan-in ' + WILDCARD_SOURCES + ' · all present'
+  const cond = conditionalFanIn(file)
+  return 'fan-in ' + sourcesOf(file) + (cond ? ' · ' + cond + ' when-present' : '')
+}
+
+/* ==========================================================================
+   THE TRAINING LOOP — the cross-run cycle, as data
+   ==========================================================================
+
+   This is the part the page did not show at all, and it is the reason the plugin
+   exists: a run's memory is what the NEXT run reads. Every step and every gate below
+   is transcribed from `src/runtime.ts`, `src/training.ts`, `src/memory.ts`,
+   `src/memory-feedback.ts` and `src/policy-globs.ts`, with the citation on the row.
+
+   ⚠ THE THREE GATES ARE REFUSALS, NOT FOOTNOTES, and each one STOPS A DIFFERENT STEP:
+     · the receipt gate  — stops the FIRST WRITE of a run (the memory-read guard rule);
+     · the phase-8 gate  — stops a LOCK (phase8MemoryLockRefusal inside lockArtifact);
+     · the ≥2-runs gate  — stops the EXTRACTION (trainingGate, exit 3);
+     · the extractor gate — stops the EXTRACTION (exit 2), a different failure.
+   A fifth thing that is not a gate is drawn as one anyway because it stops the step just
+   as firmly: the FIRST lock extracts nothing, on purpose, because a run that trained on
+   itself would promote its own accidents to rules. */
+const TRAINING = {
+  kinds: ['domains', 'patterns', 'episodes', 'training', 'skills'],
+  notRead: ['incidents', 'archive'],
+  steps: [
+    {
+      t: 'recursive_phase — PHASE ENTRY',
+      lines: [
+        'reads .recursive/memory/{domains,patterns,',
+        'episodes,training,skills} — MEMORY_KINDS',
+        'returns `memory` + `memoryReason` to the caller',
+        'incidents/ and archive/ are NOT read',
+      ],
+      c: SRC.memoryKinds + ', ' + SRC.runtimePhaseRead + ', ' + SRC.runtimePhasePayload + ', ' + SRC.memoryNotRead,
+    },
+    {
+      t: 'recordMemoryRead — the READ RECEIPT',
+      lines: [
+        'one receipt per phase, REPLACED not appended',
+        'injected: false when the plane had nothing to say',
+        'an EMPTY plane therefore SATISFIES the gate',
+      ],
+      c: SRC.readReceipt + ', ' + SRC.emptyPlaneOk + ', ' + SRC.readSource,
+    },
+    {
+      t: 'write 00-requirements.md — GATED',
+      lines: ['the FIRST phase-0 write of the run is refused', 'until the receipt above exists'],
+      gate: 'receipt',
+      c: SRC.memoryReadWhy + ', ' + SRC.memoryReadRefuse,
+    },
+    {
+      t: 'phases 1 → 7, then LOCK 08-memory-impact.md — GATED',
+      lines: ['refused unless this run WROTE a doc under', '.recursive/memory/ carrying Source-Runs'],
+      gate: 'phase8',
+      c: SRC.trainingLockRefusal + ', ' + SRC.provenanceField + ', ' + SRC.memoryGate,
+    },
+    {
+      t: 'recursive_closeout --phase 08 — RE-RUN ONLY',
+      lines: ['detected from the receipt that already exists', 'the FIRST lock extracts nothing, by design'],
+      gate: 'first-lock',
+      c: SRC.runtimeRerunDetect + ', ' + SRC.trainingRerun + ', ' + SRC.runtimeTriggerCall,
+    },
+    {
+      t: 'trainingGate — ≥ 2 LOCKED runs',
+      lines: ['counts runs whose phase-8 artifact carries', 'a `Status: LOCKED` FIELD'],
+      gate: 'two-runs',
+      c: SRC.trainingGate + ', ' + SRC.trainingCountField + ', ' + SRC.trainingLockedRuns,
+    },
+    {
+      t: 'the EXTRACTOR — RECURSIVE_TRAINING_EXTRACTOR_CMD',
+      lines: ['set from the environment; the plugin embeds none', 'spawned with stdio ignored, answering by file'],
+      gate: 'extractor',
+      c: SRC.trainingExtractorEnv + ', ' + SRC.runtimeExtractorSeam,
+    },
+    {
+      t: 'writes the plane, then REGISTERS it',
+      lines: [
+        'memory/training/<task-type>.md',
+        'memory/domains/<subsystem>.md',
+        'memory/MEMORY.md — one line per shard, replaced',
+      ],
+      gate: 'no-writer',
+      c: SRC.trainingDomains + ', ' + SRC.trainingTaskType + ', ' + SRC.trainingRegistry + ', ' + SRC.trainingRegistryLine,
+    },
+  ],
+  gates: {
+    receipt: {
+      head: 'REFUSAL — guard rule `memory-read`',
+      lines: [
+        '"<file>: no memory read is recorded for phase 0',
+        'of this run" — a DENY from the write guard,',
+        'decided from the RECEIPT and never from the',
+        'artifact text, which a caller could forge.',
+      ],
+      fix: 'Recovery: call recursive_phase once. One call.',
+      c: SRC.memoryReadRefuse + ', ' + SRC.memoryReadTrap,
+    },
+    phase8: {
+      head: 'REFUSAL — phase8-memory-missing',
+      lines: [
+        '"locking 08-memory-impact.md requires this run',
+        'to have WRITTEN a doc under .recursive/memory/"',
+        'checked IN lockArtifact: declared path, exists,',
+        'and carries Source-Runs naming THIS run.',
+      ],
+      fix: 'A citing shard the run merely READ is not a write.',
+      c: SRC.trainingLockRefusal + ', ' + SRC.trainingEvidenceWhy + ', ' + SRC.trainingRefusalRemedy,
+    },
+    'first-lock': {
+      head: 'SKIP — not a refusal',
+      lines: [
+        '"phase 08 has not been re-run for <run>, so',
+        'nothing is extracted yet (training at the first',
+        'lock would train the run on itself)" — exit 0,',
+        'writes: [].',
+      ],
+      fix: 'So the cycle is cross-run by construction.',
+      c: SRC.trainingSelfTrain + ', ' + SRC.trainingRerun,
+    },
+    'two-runs': {
+      head: 'STOP — exit 3 INSUFFICIENT_EVIDENCE',
+      lines: [
+        '"extraction needs at least two phase-8-locked',
+        'runs and found N; one run is an anecdote, not',
+        'evidence" — writes: [] on every failure path.',
+      ],
+      fix: 'Run the workflow twice before expecting training.',
+      c: SRC.trainingAnecdote + ', ' + SRC.trainingExit + ', ' + SRC.trainingGate,
+    },
+    extractor: {
+      head: 'STOP — exit 2 EXTRACTOR_UNAVAILABLE',
+      lines: [
+        '"no extractor is available; set',
+        'RECURSIVE_TRAINING_EXTRACTOR_CMD or pass a',
+        'response file. Do not claim memory updates"',
+      ],
+      fix: 'A configured command with no runner is exit 2 too.',
+      c: SRC.trainingExtractorUnset + ', ' + SRC.trainingExit,
+    },
+    'no-writer': {
+      head: 'NO WRITES — asserted, not promised',
+      lines: [
+        '"planned N group(s) … but NO writer was supplied,',
+        'so no memory file was written and the plan alone',
+        'is not a learning" — `writes` is EMPTY on every',
+        'failure path.',
+      ],
+      fix: 'And with no registry reader the refresh is reported too.',
+      c: SRC.trainingNoWriter + ', ' + SRC.trainingTrigger,
+    },
+  },
+}
+
+
 /* -- the DSH seams this plugin attaches to --------------------------------- */
 
 const SEAMS = [
@@ -1057,12 +1521,43 @@ const PRESTEP = {
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const cite = (c) => (c ? `<span class="cite">${esc(c)}</span>` : '')
 
+/**
+ * The badge text for the two sets whose names are NOT their meanings.
+ *
+ * ⚠ WHY THESE ARE CONSTANTS. Both badges used to state a WORKFLOW property while
+ * actually describing a STRUCTURAL one, and the page contradicted itself as a result:
+ *
+ *   · `optional`, rendered 14 times (once per overview row and once per phase detail
+ *     view, for the seven members of `lock.ts` `OPTIONAL_PHASES`). The set's ONLY
+ *     consumer in the whole plugin is `lock.ts:262`
+ *     `nextLegalPhase(graph, { optional: OPTIONAL_PHASES })`, where it means "a member
+ *     that is ABSENT does not stop the chain" — a statement about the legal-phase
+ *     SELECTOR, not about the phase's work. A reader is entitled to read a bare
+ *     `optional` badge as "this phase is optional", and the owner did exactly that.
+ *     It now says `MAY BE ABSENT`, which is the property the code implements and
+ *     cannot be read as a judgement about the work. The two detail views' own gate
+ *     sentences keep the code's vocabulary ("Declared OPTIONAL: an absent optional
+ *     phase does not stop the run") because THAT sentence carries its scope — it is
+ *     the bare badge, not the word, that was wrong.
+ *   · `late phase`, rendered 3 times, for the members of `phase-rules.ts`
+ *     `LATE_PHASE_ARTIFACTS`. That set's only use in shipped code is a PROFILE
+ *     DETECTOR (`ts-lint.ts` returns the compat workflow profile when any of the three
+ *     exists); the phase 6-8 write freeze comes from `phaseBaselineRules`, which keys
+ *     on the phase NUMBER from `phaseNumberForArtifact`, not on this set. The badge
+ *     now names the set and says what the set does.
+ *
+ * Both are constants so `--verify` can assert the EXACT rendered string rather than a
+ * substring, which is what makes "the badge cannot drift back" a checked fact.
+ */
+const BADGE_MAY_BE_ABSENT = 'may be absent'
+const BADGE_LATE_SET = 'late set · profile detector'
+
 function tagList(p) {
   const t = []
   if (p.human) t.push('<span class="tag tag-human">human gate</span>')
-  if (p.late) t.push(`<span class="tag tag-late">late phase</span>`)
+  if (p.late) t.push(`<span class="tag tag-late">${BADGE_LATE_SET}</span>`)
   if (p.audited) t.push('<span class="tag tag-audited">audited</span>')
-  if (p.optional) t.push('<span class="tag tag-optional">optional</span>')
+  if (p.optional) t.push(`<span class="tag tag-may-be-absent">${BADGE_MAY_BE_ABSENT}</span>`)
   if (p.tdd) t.push('<span class="tag tag-tdd">TDD gate</span>')
   if (p.memoryGate) t.push('<span class="tag tag-refuse">lock gate</span>')
   if (p.closeout) t.push('<span class="tag tag-closeout">closeout</span>')
@@ -1090,6 +1585,7 @@ function phaseRow(p, i) {
             <div class="step-tags">${tagList(p)}</div>
             <div class="step-kind">${esc(p.kind)}${cite(p.c)}</div>
           </header>
+          <p class="step-purpose"><span class="g-shape">PURPOSE</span><span>${esc(p.purpose.t)}</span>${cite(p.purpose.c)}</p>
           <div class="io">
             <div class="io-col">
               <h4>reads <span class="io-sub">input docs</span></h4>
@@ -1121,6 +1617,8 @@ const phaseDetail = (p, i) => {
     <div class="panel-head">
       <h2><span class="h-num">phase ${esc(p.phaseN)}</span> ${esc(p.file)}</h2>
       <p class="lede">${esc(p.kind)} — artifact ${i + 1} of ${PHASES.length} in <code>PHASE_SEQUENCE</code>.${cite(p.c)}</p>
+      <p class="lede" style="margin-top:var(--sp-2)"><b>What it is for:</b> ${esc(p.purpose.t)}${cite(p.purpose.c)}</p>
+      <p class="note" style="margin-top:var(--sp-2)">Reads ${fanInOf(p.file) === 0 ? 'no upstream artifact — it is where a run starts' : sourcesOf(p.file) + ' upstream artifact' + (sourcesOf(p.file) === 1 ? '' : 's') + (hasWildcard(p.file) ? ' (the wildcard input: every present artifact except itself)' : '')} ${cite(EDGES.filter((edge) => edge.to === p.file).map((edge) => edge.c).filter((c, j, all) => all.indexOf(c) === j).join(', '))}</p>
       <div class="step-tags">${tagList(p)}</div>
     </div>
 
@@ -1182,18 +1680,34 @@ const phaseDetail = (p, i) => {
 }
 
 function render() {
-  // The diagram is CHARTED before the page is built, because the chart tells the
-  // stylesheet how wide it is (`--dg-w`): the SVG then keeps its own coordinate
-  // system at every viewport and the wrapper scrolls instead of squeezing it.
-  const dg = diagram()
+  // The charts are CHARTED before the page is built: each one lays itself out, each one
+  // carries its own width into its own wrapper (`--dg-w`), and each one ships the
+  // manifest the checker re-reads. Three views, three charts, one engine.
+  const dgOverview = chart({
+    id: 'overview',
+    label: 'Overview diagram: the Phase 0 human gate, the twelve-artifact sequence as one horizontally scrollable strip carrying the fan-in of each phase, the two gating hooks in their own column, the lock chain, the backward edge, and the phases that read more than one upstream artifact. The same information is given as text in the sequence below.',
+    draw: drawOverview,
+  })
+  const dgGraph = chart({
+    id: 'phase-graph',
+    label: 'Phase graph: twelve phase nodes in PHASE_SEQUENCE order. Solid arrows are the required inputs the linter expects, dashed arrows are the two conditional inputs pushed only when the source artifact is present, a rail under the row carries the wildcard input that lets phases 06 and 08 read every present artifact, and a dashed node border marks the five phases that read more than one upstream artifact. The same edge set is given as a table below.',
+    draw: drawGraph,
+  })
+  const dgTraining = chart({
+    id: 'learning-loop',
+    label: 'Learning loop: the cross-run memory cycle. A run reads the memory plane at phase entry, records a read receipt, has its first phase-0 write gated on that receipt, must write a memory doc before phase 8 can lock, and then - only on a re-run, only with at least two locked runs, and only with an extractor configured - extracts training shards that the NEXT run reads. Each step carries the refusal, skip or exit code that can stop it. The same steps are given as a table below.',
+    draw: drawTraining,
+  })
 
   const tabs = [
     { id: 'overview', label: 'Overview', sub: 'whole flow' },
+    { id: 'graph', label: 'Phase graph', sub: 'who reads whom' },
     { id: 'start', label: 'Phase 0', sub: 'the human gate' },
     ...PHASES.map((p) => ({ id: 'phase-' + p.file.replace(/[^a-z0-9]+/gi, '-'), label: p.file.replace(/\.md$/, ''), sub: 'phase ' + p.phaseN })),
     { id: 'hooks', label: 'Hooks & seams', sub: 'where it attaches' },
     { id: 'guards', label: 'Guards & refusals', sub: 'what says no' },
     { id: 'loops', label: 'Backward loops', sub: 'REVISE / repair' },
+    { id: 'training', label: 'Learning loop', sub: 'cross-run memory' },
     { id: 'closeout', label: 'Closeout & receipts', sub: 'the chain' },
     { id: 'tools', label: 'Tools', sub: '13 definitions' },
     { id: 'codes', label: 'Error codes', sub: 'RM####' },
@@ -1208,9 +1722,11 @@ function render() {
 <title>recursive-mode — the workflow, extracted from the source</title>
 <meta name="description" content="A tabbed, citation-carrying map of the recursive-mode workflow: phase sequence, per-phase gates, DSH hooks, lock chain and the backward loops.">
 <style>
-/* The diagram's own width, decided by the generator's diagram() and consumed by
-   .diagram svg below: the chart keeps its coordinate system and the wrapper scrolls. */
-:root{ --dg-w:${dg.width}px; --dg-h:${dg.height}px; }
+/* Each chart writes its OWN width into the wrapper it is drawn in (the --dg-w custom
+   property, set inline on div.diagram[data-diagram] below), so three charts can coexist
+   at three different widths and no chart is ever scaled by the box it lands in — it
+   SCROLLS instead. */
+:root{ --dg-min:600px; }
 /* ==========================================================================
    TOKENS — primitive → semantic. Dark canvas, one accent per MEANING, and no
    meaning carried by colour alone: every gate also carries a word and a shape.
@@ -1363,7 +1879,16 @@ h3{ font-size:var(--fs-sm); color:var(--fg); margin-bottom:var(--sp-3); display:
 .tag-audited{ border-color:var(--accent-line); color:var(--accent); }
 .tag-refuse{ border-color:var(--danger-dim); color:var(--danger); }
 .tag-tdd{ border-color:var(--ok-dim); color:var(--ok); }
-.tag-optional{ border-style:dashed; }
+/* Three marker meanings, three classes. They shared one class before, which is
+   exactly how a STRUCTURAL marker came to look like a statement about the WORK: the
+   bare phase badge and the graph's edge markers ("when present", "wildcard") were the
+   same visual class. .tag-may-be-absent is the phase badge; .tag-shape marks a
+   shape of the data (a conditional input, a wildcard input, a conditionally
+   registered tool) and never a phase. The distinction is a dashed vs a dotted BORDER, so it
+   survives without colour — and --verify asserts that no .tag-optional class and
+   no bare optional badge survives in the output at all. */
+.tag-may-be-absent{ border-style:dashed; }
+.tag-shape{ border-style:dotted; color:var(--fg-2); }
 .tag-closeout{ border-color:var(--n-400); color:var(--fg-2); }
 .step-tags{ display:flex; flex-wrap:wrap; gap:var(--sp-1); }
 .step-tags .tag{ margin-top:var(--sp-1); }
@@ -1377,7 +1902,11 @@ h3{ font-size:var(--fs-sm); color:var(--fg); margin-bottom:var(--sp-3); display:
 .sw-auto{ background:var(--n-800); }
 .sw-refuse{ background:repeating-linear-gradient(45deg,var(--danger) 0 2px,transparent 2px 5px); border-color:var(--danger); }
 .sw-loop{ background:var(--violet); border-color:var(--violet); }
-.sw-late{ background:var(--n-800); border-color:var(--violet); border-style:dashed; }
+.sw-late{ background:var(--n-800); border-color:var(--violet); }
+/* The MAY BE ABSENT marker as a SWATCH: the same dashed BORDER the tag carries, so
+   the legend key and the badge it explains are one shape. Colour is not the signal —
+   a filled swatch (member of the late set) versus a dashed outline (may be absent). */
+.sw-absent{ background:transparent; border-color:var(--n-300); border-style:dashed; }
 
 /* WHY minmax(0,1fr) AND NOT 1fr: a bare 1fr track has an automatic minimum of
    min-content, so ONE unbreakable string — a 40-character file path in a citation —
@@ -1398,6 +1927,11 @@ h3{ font-size:var(--fs-sm); color:var(--fg); margin-bottom:var(--sp-3); display:
 .step-num{ font-size:var(--fs-lg); color:var(--accent); font-weight:600; min-width:2ch; }
 .step-artifact{ font-size:var(--fs-sm); color:var(--fg); font-weight:600; }
 .step-kind{ font-size:var(--fs-3xs); color:var(--fg-faint); min-width:0; overflow-wrap:anywhere; }
+/* The purpose line: one sentence per phase, sourced, with the sections it was read
+   from cited beside it. Grid so the PURPOSE badge lines up with the gate badges. */
+.step-purpose{ display:grid; grid-template-columns:5.5rem minmax(0,1fr); gap:var(--sp-2) var(--sp-3); align-items:start; font-size:var(--fs-2xs); color:var(--fg-2); margin:0 0 var(--sp-3); padding:var(--sp-2) 0; border-top:1px dotted var(--n-700); border-bottom:1px dotted var(--n-700); }
+.step-purpose .g-shape{ border-color:var(--accent-line); color:var(--accent); }
+.step-purpose .cite{ grid-column:2; }
 
 .io{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:var(--sp-4); }
 .io h4, .gates h4{ font-size:var(--fs-3xs); text-transform:uppercase; letter-spacing:0.12em; color:var(--fg-faint); font-weight:600; margin-bottom:var(--sp-2); }
@@ -1476,20 +2010,27 @@ td .cite{ margin-left:var(--sp-1); }
 .loop p{ font-size:var(--fs-2xs); color:var(--fg-2); margin-top:var(--sp-2); overflow-wrap:anywhere; }
 
 /* ---- diagram ------------------------------------------------------------
-   THE DIAGRAM IS AN SVG IN AN EXPLICIT SET OF BANDS, and the two custom properties
-   in this rule are the interface to it: --dg-w is the width the chart laid itself
-   out for and --dg-h its height, both written by the generator (see diagram()), so
-   the svg keeps its OWN coordinate system and its text stays at its declared size
-   instead of being scaled by whatever box it lands in. Below --dg-w the wrapper
-   SCROLLS HORIZONTALLY — one strip, exactly the mechanism the tab strip already
-   uses at every width — so a narrow viewport never squeezes the chart, and nothing
-   inside it can be painted outside the box that holds it. */
+   THE CHARTS ARE SVGs IN AN EXPLICIT SET OF BANDS, and the custom property each
+   wrapper carries — --dg-w, written by the generator's chart() into the wrapper's own
+   inline style — is the interface to them: the svg keeps its OWN coordinate system and
+   its text stays at its declared size instead of being scaled by whatever box it lands
+   in. Below --dg-w the wrapper SCROLLS HORIZONTALLY — one strip, exactly the mechanism
+   the tab strip already uses at every width — so a narrow viewport never squeezes a
+   chart, and nothing inside it can be painted outside the box that holds it. */
 .diagram{ border:1px solid var(--line); border-radius:var(--r-2); background:var(--n-950); padding:var(--sp-4); overflow-x:auto; overscroll-behavior-inline:contain; scrollbar-width:thin; scrollbar-color:var(--n-600) transparent; }
 .diagram svg{ display:block; width:var(--dg-w); min-width:var(--dg-w); height:auto; }
 .dg-box-strip{ fill:none; stroke:var(--n-600); stroke-width:1; stroke-dasharray:3 3; }
 .dg-box{ fill:var(--n-850); stroke:var(--n-500); stroke-width:1; }
 .dg-box-human{ fill:var(--warn-ink); stroke:var(--warn); }
 .dg-box-refuse{ fill:var(--danger-ink); stroke:var(--danger); }
+/* A phase that reads MORE THAN ONE upstream artifact: a dashed border, which is a SHAPE
+   difference — the node's own third line states the count in words as well, so nothing
+   here is carried by colour. */
+.dg-box-fan{ fill:var(--n-800); stroke:var(--n-300); stroke-width:1; stroke-dasharray:4 2; }
+/* The wildcard rail: one edge with eleven possible sources, drawn as a rail. */
+.dg-box-rail{ fill:var(--n-800); stroke:var(--n-400); stroke-width:1; stroke-dasharray:1 3; }
+/* A step that a gate can stop: the same fill, with the border the refusal column uses. */
+.dg-box-gate{ fill:var(--n-850); stroke:var(--warn); stroke-width:1; stroke-dasharray:4 2; }
 /* Text styles for the diagram, EMITTED FROM DG_TEXT so the size the boxes were
    computed at and the size the glyphs are drawn at are the same number. The checker
    re-reads these four declarations and re-derives the fit from them. */
@@ -1498,10 +2039,17 @@ ${Object.entries(DG_TEXT).map(([k, v]) => `.${k}{ fill:${v.fill}; font-family:va
 .dg-line-acc{ stroke:var(--accent); stroke-width:1; fill:none; }
 .dg-line-warn{ stroke:var(--warn); stroke-width:1; fill:none; }
 .dg-line-loop{ stroke:var(--violet); stroke-width:1; fill:none; stroke-dasharray:4 3; }
+/* CONDITIONAL edge: dashed, and the legend and the edge table say which ones. The dash
+   is the signal — a colour-blind reader loses nothing. */
+.dg-line-cond{ stroke:var(--n-300); stroke-width:1; fill:none; stroke-dasharray:5 4; }
+/* WILDCARD edge: twice as thick as every other edge. */
+.dg-line-wide{ stroke:var(--n-400); stroke-width:2; fill:none; }
 .dg-head{ fill:var(--n-500); }
 .dg-head-acc{ fill:var(--accent); }
 .dg-head-warn{ fill:var(--warn); }
 .dg-head-loop{ fill:var(--violet); }
+.dg-head-cond{ fill:var(--n-300); }
+.dg-head-wide{ fill:var(--n-400); }
 
 /* ---- misc --------------------------------------------------------------- */
 footer.colophon{ border-top:1px solid var(--line-strong); margin-top:var(--sp-8); padding-top:var(--sp-5); font-size:var(--fs-3xs); color:var(--fg-faint); }
@@ -1546,15 +2094,17 @@ footer.colophon p{ margin-bottom:var(--sp-2); max-width:100ch; }
   <div class="masthead-top">
     <div>
       <h1><span class="tick">▚</span> recursive-mode — the workflow</h1>
-      <p class="mast-sub">Twelve phase artifacts, five DSH lifecycle seams, two hook points that can actually refuse, three human gates, and a lock chain with seven refusals. Every factual block below carries the <code>file:line</code> it was transcribed from.</p>
+      <p class="mast-sub">Twelve phase artifacts wired by ${EDGES.length} directed edges, five DSH lifecycle seams, two hook points that can actually refuse, three human gates, a lock chain with seven refusals, and the cross-run learning loop that carries one run's memory into the next. Every factual block below carries the <code>file:line</code> it was transcribed from.</p>
     </div>
   </div>
   <div class="mast-meta">
     <span class="chip chip-acc"><b>12</b> phase artifacts</span>
+    <span class="chip"><b>${EDGES.length}</b> artifact edges</span>
     <span class="chip"><b>13</b> tools (12 without agentTeams)</span>
     <span class="chip"><b>8</b> guard rules</span>
     <span class="chip chip-warn"><b>3</b> human gates + run-start</span>
     <span class="chip"><b>5</b> hook points</span>
+    <span class="chip"><b>${TRAINING.kinds.length}</b> memory kinds read</span>
     <span class="chip"><b>24</b> RM#### codes</span>
     <span class="chip">source: <b>${esc(REPO)}</b></span>
   </div>
@@ -1581,14 +2131,58 @@ ${tabs.map((t, i) => `    <button role="tab" id="tab-${t.id}" aria-controls="pan
     <div><span class="swatch sw-human"></span> DECISION — a human must answer</div>
     <div><span class="swatch sw-refuse"></span> REFUSAL — the call is stopped</div>
     <div><span class="swatch sw-loop"></span> backward edge</div>
-    <div><span class="swatch sw-late"></span> late phase (dashed = optional phase)</div>
+    <div><span class="swatch sw-late"></span> member of <code>LATE_PHASE_ARTIFACTS</code></div>
+    <div><span class="swatch sw-absent"></span> dashed border = the phase <b>may be absent</b></div>
   </div>
 
   <div class="callout">
     <strong>Reading the shapes, not the colours.</strong> Every gate below carries a word — <b>DECISION</b>, <b>REFUSAL</b> or <b>AUTO</b> — and a border treatment, so nothing here depends on colour alone. The human steps are also the only cards with a filled amber rail dot. Layout follows the workflow, not a hardware pipeline: this is a gated process with decision points, so the diagram is a vertical sequence with side rails, not a data bus.
   </div>
 
-  ${dg.markup}
+  <div class="callout">
+    <strong>All twelve artifacts are MANDATORY work. Nothing here is an optional phase.</strong>
+    Every phase row below carries a <span class="tag tag-may-be-absent">${BADGE_MAY_BE_ABSENT}</span> badge, and it is worth stating plainly what that badge does <em>not</em> mean: it does not mean the phase is optional. It is the property of one SET — <code>lock.ts</code> <code>OPTIONAL_PHASES</code>, whose only use in the plugin is <code>nextLegalPhase(graph, { optional: OPTIONAL_PHASES })</code>, i.e. "a member that is ABSENT does not stop the legal-phase selector". That is a statement about a fallback query, not about the work.
+    <br><br>
+    <b>The positive fact, which the plugin enforces end to end:</b> <code>recursive_init</code> scaffolds <b>all twelve</b> artifacts in one call — the two Phase 0 templates and then every later phase — so a scaffolded run has no missing phase to skip. ${cite(SRC.scaffoldLoop)} All twelve then lock <b>in sequence</b>: <code>PHASE_SEQUENCE</code> is the canonical order and the lock chain refuses out of order. ${cite(SRC.seq + ', ' + SRC.lockArtifact)} And a normal run produces twelve: the seven <em>may-be-absent</em> phases are written and locked exactly like the other five, because the scaffold writes them and the sequence locks them — being able to be ABSENT is not the same as being permitted to be absent.
+    <br><br>
+    <span class="unv">⚠ Stated precisely, because this is the whole point of the badge change:</span> the seven <em>may-be-absent</em> phases are the seven members of <code>OPTIONAL_PHASES</code>, and their badge means only that an <b>absent</b> one will not block the chain. Whether a phase's WORK is optional is not a property any code in this repo declares, and this page no longer implies one.
+    <br><br>
+    <span class="unv">⚠ AND THIS IS A REAL INCONSISTENCY IN THE REPOSITORY, reported rather than smoothed over.</span> There are <b>two independent optionality declarations</b> and they disagree. <code>lock.ts</code> <code>OPTIONAL_PHASES</code> has seven members, and it is what the legal-phase selector uses; <code>status.ts</code> carries its own <code>optional:</code> flag on the twelve-row status table and marks only <b>two</b> — <code>01.5-root-cause.md</code> and <code>03.5-code-review.md</code>. That second flag is load-bearing in two places: a missing phase is reported <code>SKIPPED</code> from it, and <code>snapshot.ts</code> computes a run's <code>complete</code> state by requiring every phase where <code>!p.optional</code>. So five of these seven phases are treated as <b>required</b> by the run-completion calculation while the selector treats them as skippable. Both readings are honest; they are just not the same reading, and a reader deserves to know which one is speaking. ${cite(SRC.statusPhases + ', ' + SRC.statusOptional + ', ' + SRC.snapshotComplete + ', ' + SRC.optional)}
+  </div>
+
+  <div class="callout">
+    <strong>Three things this overview does NOT try to be, and the views that are.</strong>
+    It is the readable SPINE, so it states what each phase is FOR and how many upstream artifacts it reads — the fan-in on every node. It does not draw the arrows: <a href="#graph-edges">the <b>Phase graph</b> view draws every one of the ${EDGES.length} directed edges</a>, with the ${EDGES.filter((e) => e.kind === 'conditional').length} conditional ones dashed and the ${EDGES.filter((e) => e.kind === 'wildcard').length} wildcard ones as a rail, because ${PHASES.filter((p) => sourcesOf(p.file) > 1).length} phases read more than one upstream artifact and a chain of boxes cannot show that.
+    And no view here showed the CROSS-RUN cycle at all until <a href="#training-steps">the <b>Learning loop</b> view</a>: a run reads the memory plane at phase entry, must write memory before phase 8 can lock, and — only on a re-run, only with two locked runs and a configured extractor — writes training shards that the NEXT run reads.
+  </div>
+
+  ${dgOverview.markup}
+
+  <h2 style="font-size:var(--fs-lg);margin:var(--sp-8) 0 var(--sp-4)">What each phase is FOR</h2>
+  <p class="lede" style="margin-bottom:var(--sp-4)">One line per phase, and every line is sourced rather than written: the phase's own label from <code>PHASES</code> in <code>src/status.ts</code>, plus the required sections that phase must contain in <code>SECTION_MAP</code> — the strongest evidence in the repository for what a phase is for. ${cite(SRC.statusPhases + ', ' + SRC.sectionMapRoot)} <code>--verify</code> re-derives every named section from the parsed map, so a renamed section fails the build instead of leaving a stale sentence on the page.</p>
+  <div class="tablewrap">
+    <table>
+      <caption>The purpose line, its label, and the required sections it was read from. The two Phase 0 purposes additionally quote their template's own Scope note, which exists for those two phases only. ${cite(SRC.tplScopeRequirements + ', ' + SRC.tplScopeWorktree)}</caption>
+      <thead><tr><th>Phase</th><th>Label</th><th>What it is for</th><th>Read from</th></tr></thead>
+      <tbody>
+        ${PHASES.map((p) => `        <tr><td><code>${esc(p.file)}</code></td><td>${esc(p.purpose.label)}</td><td>${esc(p.purpose.t)}${p.purpose.tplText ? ` <span class="note">Template Scope note: “${esc(p.purpose.tplText)}”</span>` : ''}${cite(p.purpose.c)}</td><td>${p.purpose.sections.map((s) => `<code>## ${esc(s)}</code>`).join('<br>')}</td></tr>`).join('\n')}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">⚠ <b>For phases 01-08 there is no per-phase PROSE in the repository to transcribe.</b> Every later-phase template carries the same generic line — <code>${esc('Scope note: Scaffold generated by the recursive-mode plugin (R5). Fill every required section before lint.')}</code> — so the section lists and the labels above are the sourcing, and this page says that instead of inventing a description. ${cite(SRC.tplScopeScaffold)}</p>
+
+  <h2 style="font-size:var(--fs-lg);margin:var(--sp-8) 0 var(--sp-4)">Where the chain becomes a graph</h2>
+  <p class="lede" style="margin-bottom:var(--sp-4)">${PHASES.filter((p) => sourcesOf(p.file) > 1).length} of the twelve phases read more than one upstream artifact. That is the difference between a sequence and a dependency graph, and it is why <code>src/phase-graph.ts</code> models the phases as a graph at all. ${cite(SRC.graphWhy)}</p>
+  <div class="tablewrap">
+    <table>
+      <caption>The multi-source phases, with the artifact count each one is expected to re-read. ${cite(SRC.inputMap)}</caption>
+      <thead><tr><th>Phase</th><th>Reads</th><th>Which artifacts</th><th>Source</th></tr></thead>
+      <tbody>
+        ${PHASES.filter((p) => sourcesOf(p.file) > 1).map((p) => `        <tr><td><code>${esc(p.file)}</code></td><td class="tnum">${sourcesOf(p.file)}${hasWildcard(p.file) ? ' <span class="tag">wildcard</span>' : ''}</td><td>${EDGES.filter((e) => e.to === p.file).map((e) => `<code>${esc(e.from === WILDCARD_INPUT ? 'every present artifact except itself' : e.from)}</code>${e.kind === 'conditional' ? ' <span class="tag tag-shape">when present</span>' : e.kind === 'wildcard' ? ' <span class="tag tag-shape">wildcard</span>' : ''}`).join('<br>')}</td><td>${cite([...new Set(EDGES.filter((e) => e.to === p.file).map((e) => e.c))].join(', '))}</td></tr>`).join('\n')}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">The full set: <b>${EDGES.length} directed edges</b> — ${EDGES.filter((e) => e.kind === 'required').length} required, ${EDGES.filter((e) => e.kind === 'conditional').length} conditional, ${EDGES.filter((e) => e.kind === 'wildcard').length} wildcard — derived from <code>getPhaseExpectedInputArtifactNames</code> and drawn arrow by arrow in the <a href="#graph-edges">Phase graph</a> view. <code>00-requirements.md</code> is the graph's root and has no upstream artifact edge at all: the run starts at the conversation. ${cite(SRC.inputMap + ', ' + SRC.inputFilter)}</p>
 
   <h2 style="font-size:var(--fs-lg);margin:var(--sp-8) 0 var(--sp-4)">The twelve artifacts, in order</h2>
 
@@ -1620,8 +2214,9 @@ ${PHASES.map(phaseRow).join('\n')}
     </table>
   </div>
 
-  <h2 style="font-size:var(--fs-lg);margin:var(--sp-8) 0 var(--sp-4)">The late phases</h2>
-  <p class="lede" style="margin-bottom:var(--sp-4)"><code>LATE_PHASE_ARTIFACTS</code> is a three-member set declared separately from the sequence, and it is what the cold-face of the workflow leans on: by phase 6 the implementation is FROZEN and these three phases document rather than change. ${cite(LATE.c)}</p>
+  <h2 style="font-size:var(--fs-lg);margin:var(--sp-8) 0 var(--sp-4)">The late-phase set, and the separate rule that actually freezes phases 6-8</h2>
+  <p class="lede" style="margin-bottom:var(--sp-4)"><code>LATE_PHASE_ARTIFACTS</code> is a three-member set declared separately from the sequence — and its one use in the shipped code is a <b>profile detector</b>, not a gate: the linter returns the compat workflow profile when any of the three artifacts exists on disk. ${cite(LATE.c + ', ' + SRC.lintLateProfile)}</p>
+  <p class="lede" style="margin-bottom:var(--sp-4)">The freeze those three phases are known for comes from a DIFFERENT mechanism that keys on the phase <b>number</b>: <code>phaseBaselineRules</code> derives it with <code>phaseNumberForArtifact</code> and denies <code>write*</code> for phase 6, 7 or 8 — narrower than a path scope, so it bites without blocking the phase's own artifact edits. Phase 8 carries one carve-out: <code>.recursive/memory/**</code> is admitted, because phase 8's whole job is that plane and a blanket denial made the hard requirement unsatisfiable. ${cite(SRC.baseline + ', ' + SRC.phaseNumber + ', ' + SRC.ownMemoryPlane)}</p>
   <ul class="io-list" style="border:1px solid var(--line);border-radius:var(--r-2);padding:var(--sp-3) var(--sp-4);background:var(--surface-2)">
     ${LATE.files.map((f) => `<li><span class="doc doc-artifact">${esc(f)}</span>${cite(LATE.c)}</li>`).join('')}
   </ul>
@@ -1673,6 +2268,54 @@ ${PHASES.map(phaseRow).join('\n')}
   <div class="callout" style="margin-top:var(--sp-5)">
     <strong>A refusal does not surface as a tool error.</strong> A <code>tools/pre-execute</code> deny becomes <code>content: [{ type: 'text', text: 'Error: ' + reason }]</code> and every other field of the decision is dropped — which is why the gate-block ask has to be RENDERED INTO THE SENTENCE to reach the caller at all. ${cite(SRC.denyText)}
   </div>
+</section>
+
+<!-- ===================== PHASE GRAPH ===================== -->
+<section class="panel" id="panel-graph" role="tabpanel" aria-labelledby="tab-graph" tabindex="0" hidden>
+  <div class="panel-head">
+    <h2>Who reads whom — the ${EDGES.length} edges, drawn</h2>
+    <p class="lede">The overview is a row of boxes; this is the wiring. Every arrow below is an entry in the linter's own input map — <code>getPhaseExpectedInputArtifactNames</code> decides which upstream artifacts a phase must cite in its <code>Inputs:</code> header and its <code>## Effective Inputs Re-read</code> section before it can lock, so the arrows are read off the code rather than drawn from a description of it. ${cite(SRC.inputMap)}</p>
+  </div>
+
+  <div class="callout">
+    <strong>How to read it.</strong> A <b>solid</b> arrow is a REQUIRED input. A <b>dashed</b> arrow is CONDITIONAL: the linter pushes that artifact only when it exists on disk (<code>present.has(…)</code>), so the edge is real but optional. A <b>thick</b> arrow comes off the rail under the row: that input is <em>every present artifact in the run except itself</em>, which is why phases 06 and 08 have eleven possible sources and no single required one. A node with a <b>dashed border</b> reads more than one upstream artifact, and every node states its own fan-in in words — the shapes, the words and the counts all carry the distinction, so none of it rests on colour. ${cite(SRC.inputMap + ', ' + SRC.inputFilter + ', ' + SRC.lintWildcard06 + ', ' + SRC.lintWildcard08)}
+    <br><br><b>The drawing is wider than the column, and it scrolls — deliberately.</b> Twelve artifact names cannot be abbreviated without losing the names the rest of this page cites, so, like the twelve-node strip on the overview, this chart keeps its own coordinate system and scrolls sideways in one strip rather than squeezing its labels. Every arrow in it is also a row in the table below, and the table is the complete form.
+  </div>
+
+  ${dgGraph.markup}
+
+  <h3 id="graph-edges" style="margin-top:var(--sp-6)">Every edge, in full</h3>
+  <div class="tablewrap">
+    <table>
+      <caption>All ${EDGES.length} declared input edges, from → to. This table is the accessible equivalent of the drawing above: no edge exists in the picture that is not a row here. ${cite(SRC.inputMap)}</caption>
+      <thead><tr><th>#</th><th>From</th><th>To</th><th>Kind</th><th>Source</th></tr></thead>
+      <tbody>
+        ${EDGES.map((e, i) => `        <tr><td><span class="seq">${i + 1}</span></td><td><code>${esc(e.from)}</code></td><td><code>${esc(e.to)}</code></td><td>${e.kind === 'required' ? 'required' : e.kind === 'conditional' ? '<span class="tag tag-shape">conditional — when present</span>' : '<span class="tag tag-shape">wildcard — every present artifact</span>'}</td><td>${cite(e.c)}</td></tr>`).join('\n')}
+      </tbody>
+    </table>
+  </div>
+
+  <h3 style="margin-top:var(--sp-6)">The fan-in, per phase</h3>
+  <div class="tablewrap">
+    <table>
+      <caption>How many upstream artifacts each phase is expected to re-read. ${WILDCARD_SOURCES} is the wildcard's real count: every other member of the run. ${cite(SRC.inputMap + ', ' + SRC.lintSequence)}</caption>
+      <thead><tr><th>Phase</th><th>Fan-in</th><th>Kind</th><th>Source</th></tr></thead>
+      <tbody>
+        ${PHASES.map((p) => `        <tr><td><code>${esc(p.file)}</code></td><td class="tnum">${fanInOf(p.file) === 0 ? '0' : sourcesOf(p.file)}</td><td>${fanInOf(p.file) === 0 ? 'the root — the run starts at the conversation' : hasWildcard(p.file) ? 'wildcard' : conditionalFanIn(p.file) > 0 ? `${conditionalFanIn(p.file)} of them conditional` : 'required only'}</td><td>${cite(SRC.inputMap)}</td></tr>`).join('\n')}
+      </tbody>
+    </table>
+  </div>
+
+  <h3 style="margin-top:var(--sp-6)">Why this is a graph and not a chain</h3>
+  <p class="note">Three queries in the plugin are graph operations being run over a linear array: <code>getStaleDownstreamPhases</code> is a REACHABILITY query, <code>getPrerequisites</code> is an IN-EDGE query, and <code>getNextLegalPhase</code> is a topological walk. An array can answer all three only while the dependency happens to be linear — and the moment an artifact depends on something LATER than itself, the array model answers <em>wrongly</em> rather than not at all. ${cite(SRC.graphWhy)}</p>
+  <p class="note">Two of the edges above cross a phase boundary that the sequence order alone would not suggest: <code>03.5-code-review.md</code> reads <code>03-implementation-summary.md</code> (the SAME phase number 3), and <code>05-manual-qa.md</code> reads <code>02-to-be-plan.md</code> — three nodes back. Neither is a backward edge in the graph sense: every edge here runs forward in <code>PHASE_SEQUENCE</code>, which the generator ASSERTS before it draws one, because the routing cannot represent an edge that runs backwards. ${cite(SRC.inputMap + ', ' + SRC.seq)}</p>
+
+  <h3 style="margin-top:var(--sp-6)">What could NOT be sourced, and what is therefore not on this page</h3>
+  <ul class="refuse-list">
+    <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>A per-phase PROSE description of each phase's job, for phases 01-08.</b> The repository does not contain one. <code>laterPhaseContent</code> writes the same generic Scope note for every later phase — <code>${esc('Scaffold generated by the recursive-mode plugin (R5). Fill every required section before lint.')}</code> — so the purpose lines on this page are built from the phase LABEL and its REQUIRED SECTIONS, which is what the code actually states, plus the two Phase 0 templates' own Scope notes. Nothing was written to fill the gap. ${cite(SRC.tplScopeScaffold)}</span></li>
+    <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Whether a real run's artifacts actually CITE the artifacts the map expects.</b> This page draws what the linter DEMANDS. It makes no claim about any particular run's <code>Inputs:</code> header — the check that reads it (<code>lint_effective_input_addenda</code>) reports per run, and no run was examined here. ${cite(SRC.effectiveInputs)}</span></li>
+    <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Addendum edges.</b> <code>src/phase-graph.ts</code> adds edges for addenda attached to a phase, and this drawing does not include them: they are per-run files rather than a fixed part of the workflow, so there is nothing in <code>src/</code> to fix their number. ${cite(SRC.graphAddendum)}</span></li>
+  </ul>
 </section>
 
 <!-- ===================== PHASE 0 GATE ===================== -->
@@ -1865,6 +2508,85 @@ ${PHASES.map(phaseDetail).join('\n')}
   <p class="note"><span class="unv">⚠ Not verified here:</span> whether a back-edge occurs in practice depends on an addendum being filed with a forward citation. The code supports it and reports it; this page does not claim any particular run produced one.</p>
 </section>
 
+<!-- ===================== LEARNING LOOP ===================== -->
+<section class="panel" id="panel-training" role="tabpanel" aria-labelledby="tab-training" tabindex="0" hidden>
+  <div class="panel-head">
+    <h2>The learning loop — how one run's work reaches the next</h2>
+    <p class="lede">This is the cycle the whole plugin exists for, and it is a CROSS-RUN cycle: no single run can close it. A run READS the memory plane when it enters a phase; it must WRITE its own memory before phase 8 can lock; and on a re-run — with at least two locked runs and an extractor configured — it extracts training shards that the NEXT run's phase entry reads. ${cite(SRC.memoryKinds + ', ' + SRC.trainingTrigger)}</p>
+  </div>
+
+  <div class="callout">
+    <strong>The back edge is the point.</strong> Everything else here is a step; the reason the steps exist is that the arrow at the bottom travels back to the top <em>in a different run</em>. That is why the plugin has a memory plane at all, and it is the part a row of phase boxes cannot show.
+  </div>
+
+  ${dgTraining.markup}
+
+  <h3 id="training-steps" style="margin-top:var(--sp-6)">Every step, and what stops it</h3>
+  <div class="tablewrap">
+    <table>
+      <caption>The eight steps in the order a run reaches them, with the gate that can stop each one. This table is the accessible equivalent of the cycle above: no step is drawn that is not a row here. ${cite(SRC.memoryKinds + ', ' + SRC.readReceipt)}</caption>
+      <thead><tr><th>#</th><th>Step</th><th>What it does</th><th>What can stop it</th><th>Source</th></tr></thead>
+      <tbody>
+        ${TRAINING.steps.map((s, i) => {
+    const gate = s.gate === 'receipt' ? 'the receipt gate: the guard rule <code>memory-read</code> denies the write'
+      : s.gate === 'phase8' ? 'the phase-8 lock gate: <code>phase8-memory-missing</code>'
+        : s.gate === 'first-lock' ? 'a SKIP, not a refusal: the first lock extracts nothing (exit 0, no writes)'
+          : s.gate === 'two-runs' ? 'the evidence gate: exit 3 <code>INSUFFICIENT_EVIDENCE</code>'
+            : s.gate === 'extractor' ? 'the capability gate: exit 2 <code>EXTRACTOR_UNAVAILABLE</code>'
+              : s.gate === 'no-writer' ? 'no writer or no registry reader: the writes list stays EMPTY'
+                : '<span style="color:var(--fg-faint)">nothing — this step cannot be refused</span>'
+    return `        <tr><td><span class="seq">${i + 1}</span></td><td><code>${esc(s.t)}</code></td><td>${s.lines.map(esc).join('<br>')}</td><td>${gate}</td><td>${cite(s.c)}</td></tr>`
+  }).join('\n')}
+      </tbody>
+    </table>
+  </div>
+
+  <h3 style="margin-top:var(--sp-6)">What the phase-entry read covers — and what it deliberately does not</h3>
+  <div class="rail-pair">
+    <div class="subcard" style="border-left:2px solid var(--accent)">
+      <h3>Read: <code>MEMORY_KINDS</code></h3>
+      <ul class="io-list">
+        ${TRAINING.kinds.map((k) => `<li><code>.recursive/memory/${esc(k)}/</code></li>`).join('\n        ')}
+      </ul>
+      <p class="note">Five kinds, in the order the scaffold creates them, and <code>training</code> is one of them — which is what closes the loop: the shard the trigger writes is a kind the loader READS. ${cite(SRC.memoryKinds + ', ' + SRC.memoryKindsWhy)}</p>
+    </div>
+    <div class="subcard" style="border-left:2px solid var(--danger)">
+      <h3>NOT read, deliberately</h3>
+      <ul class="io-list">
+        ${TRAINING.notRead.map((k) => `<li><code>.recursive/memory/${esc(k)}/</code></li>`).join('\n        ')}
+      </ul>
+      <p class="note"><code>archive/</code> is historical by the router's own definition, and widening retrieval to <code>incidents/</code> is a separate ranking decision that the change which added <code>training</code> did not make. So the plane is read SELECTIVELY, and the two omissions are stated in the source rather than left implicit. ${cite(SRC.memoryNotRead)}</p>
+    </div>
+  </div>
+
+  <h3 style="margin-top:var(--sp-6)">The gates, as refusals</h3>
+  <div class="tablewrap">
+    <table>
+      <caption>${TRAINING.steps.filter((s) => s.gate).length} of the ${TRAINING.steps.length} steps can be stopped, and the five stops are not the same kind of thing: two are hard refusals, one is a deliberate skip, and two are exit codes that leave <code>writes</code> empty. ${cite(SRC.trainingExit)}</caption>
+      <thead><tr><th>Gate</th><th>Stops</th><th>What it says</th><th>Exit</th><th>Source</th></tr></thead>
+      <tbody>
+        ${TRAINING.steps.filter((s) => s.gate).map((s) => {
+    const g = TRAINING.gates[s.gate]
+    const exit = s.gate === 'two-runs' ? '3' : s.gate === 'extractor' ? '2' : '0'
+    return `        <tr><td><code>${esc(g.head)}</code></td><td><code>${esc(s.t)}</code></td><td>${g.lines.map(esc).join('<br>')}<br><span class="note">${esc(g.fix)}</span></td><td class="tnum">${exit}${s.gate === 'receipt' || s.gate === 'phase8' ? '<br><span class="note">deny / refusal</span>' : ''}</td><td>${cite(g.c)}</td></tr>`
+  }).join('\n')}
+      </tbody>
+    </table>
+  </div>
+
+  <h3 style="margin-top:var(--sp-6)">The read that becomes evidence: the receipt</h3>
+  <p class="note">The phase-entry read is not merely performed, it is RECORDED, and the phase-0 write gate is decided from the record rather than from the artifact text — a caller controls the text and could forge it. <code>recordMemoryRead</code> writes one receipt per phase entry, REPLACED rather than appended while the phase is still draft, into <code>&lt;run&gt;/${esc('memory-injections.json')}</code> beside the shard rows. ${cite(SRC.readReceipt + ', ' + SRC.injectionsFile)}</p>
+  <p class="note">⚠ And the trap that decides the whole design: <code>recordInjection</code> only writes a row when a shard was SELECTED, so on an empty plane a gate keyed on "a record exists" would refuse forever in a fresh workspace. The receipt is therefore written on every phase entry with <code>injected: false</code> when nothing matched — <b>an empty plane SATISFIES the gate, a never-entered phase does not</b>, and the two cannot be confused because one of them has a row. ${cite(SRC.memoryReadTrap + ', ' + SRC.emptyPlaneOk + ', ' + SRC.readSource)}</p>
+  <p class="note">The selection itself is a ranking, not a scan: the query is the run's own <code>00-requirements.md</code> plus its changed paths, the phase in play reweights entries that declare it, and the feedback counters from earlier runs are handed to the ranker as evidence about retrieval. ${cite(SRC.runtimePhaseRead + ', ' + SRC.memorySelect + ', ' + SRC.memoryRetrieve + ', ' + SRC.settleInjections)}</p>
+
+  <h3 style="margin-top:var(--sp-6)">What is NOT verified here</h3>
+  <ul class="refuse-list">
+    <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>That any run in this workspace has passed the two-locked-runs gate.</b> The page states what <code>trainingGate</code> requires and what it returns; it does not claim a run reached it, and it did not count the runs on disk. The threshold is a fact about the code; the count is a fact about a workspace. ${cite(SRC.trainingAnecdote)}</span></li>
+    <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>That an extractor is configured anywhere.</b> <code>RECURSIVE_TRAINING_EXTRACTOR_CMD</code> is read from the environment at closeout time; this page is generated without reading the environment, and the plugin deliberately embeds no extractor. Unset is exit 2, with an empty <code>writes</code> list. ${cite(SRC.trainingExtractorEnv + ', ' + SRC.trainingExtractorUnset)}</span></li>
+    <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>That the shards improve a later run.</b> The loop's READ half is <code>MEMORY_KINDS</code> including <code>training</code>, and the source states that the loop closes because of it. Whether a given shard changes what an agent does is not measured here, and no page can claim it from the code. ${cite(SRC.memoryKindsWhy)}</span></li>
+  </ul>
+</section>
+
 <!-- ===================== CLOSEOUT ===================== -->
 <section class="panel" id="panel-closeout" role="tabpanel" aria-labelledby="tab-closeout" tabindex="0" hidden>
   <div class="panel-head">
@@ -1931,7 +2653,7 @@ ${PHASES.map(phaseDetail).join('\n')}
       <caption>Name and declared purpose, read from the tool definitions. ${cite(SRC.toolsReg)}</caption>
       <thead><tr><th>#</th><th>Tool</th><th>Declared purpose</th><th>Source</th></tr></thead>
       <tbody>
-        ${TOOLS.map((t, i) => `<tr><td><span class="seq">${i + 1}</span></td><td><code>${esc(t.n)}</code>${t.reg === 'conditional' ? '<br><span class="tag tag-optional">conditional</span>' : ''}</td><td>${esc(t.p)}${t.note ? `<br><span class="note" style="display:block;margin-top:var(--sp-2)">${t.note}</span>` : ''}</td><td>${cite(t.c)}</td></tr>`).join('')}
+        ${TOOLS.map((t, i) => `<tr><td><span class="seq">${i + 1}</span></td><td><code>${esc(t.n)}</code>${t.reg === 'conditional' ? '<br><span class="tag tag-shape">registered only when agentTeams is mounted</span>' : ''}</td><td>${esc(t.p)}${t.note ? `<br><span class="note" style="display:block;margin-top:var(--sp-2)">${t.note}</span>` : ''}</td><td>${cite(t.c)}</td></tr>`).join('')}
       </tbody>
     </table>
   </div>
@@ -1991,7 +2713,11 @@ ${PHASES.map(phaseDetail).join('\n')}
         <tr><td>Accessibility affordances the accessibility skill requires: a <code>:focus-visible</code> style, a skip link, <code>prefers-reduced-motion</code>, ≥44px tab hit areas, <code>text-wrap</code>, tabular numerals, font smoothing, exact transition properties, no <code>transition: all</code> declaration, and a text label on every gate so colour is never the only signal</td><td>the generated HTML</td></tr>
         <tr><td>The tab strip scrolls in ONE row and does not wrap (checked against the parsed <code>[role="tablist"]</code> rule, not against a substring anywhere in the sheet)</td><td>the generated HTML</td></tr>
         <tr><td>Every <code>id</code> a tab's <code>aria-controls</code> names exists, every panel is a <code>tabpanel</code> labelled by its own tab, every panel is addressed by exactly one tab, and the roving tabindex is complete (one <code>0</code>, the rest <code>-1</code>, one <code>aria-selected="true"</code>)</td><td>the generated HTML itself</td></tr>
-        <tr><td>The tab count equals 1 overview + 12 phases + 8 other views</td><td>the generated HTML itself</td></tr>
+        <tr><td><b>The ${EDGES.length} directed edges</b>, re-derived from <code>getPhaseExpectedInputArtifactNames</code> — the required, the conditional (<code>candidates.push</code>) and the two wildcard filters, including that each wildcard excludes its own artifact and that <code>00-requirements.md</code> has no upstream edge at all. The fan-in rendered on every node is checked against the same derivation, so the Phase graph view fails the build if the linter's map moves.</td><td><code>src/ts-lint.ts</code> — the whole function body</td></tr>
+        <tr><td><b>Every phase's purpose line.</b> Each one carries the label <code>PHASES</code> gives that artifact, and names at least two required sections that are still in <code>SECTION_MAP</code>; the two Phase 0 lines are checked to quote their template's Scope note verbatim, no line may be a closeout scope note lifted as-is, and the page asserts that the later-phase template carries ONE generic Scope note — which is why 01-08 have no per-phase prose to transcribe.</td><td><code>src/status.ts</code>, <code>src/phase-rules.ts</code>, <code>src/init-templates.ts</code>, <code>src/closeout.ts</code></td></tr>
+        <tr><td><b>The learning loop:</b> the five kinds the phase-entry read covers, the two it deliberately does not, the read RECEIPT written on every phase entry, the phase-0 write gate being decided from that receipt, the phase-8 lock gate being called from <code>lockArtifact</code> and matching <code>Source-Runs</code>, the re-run being detected from an existing receipt, the ORDER of the trigger's three gates (evidence → re-run → extractor), the strict-2 comparison, both exit codes, the extractor's environment variable, and the shard path the trigger writes.</td><td><code>src/memory.ts</code>, <code>src/memory-feedback.ts</code>, <code>src/policy-globs.ts</code>, <code>src/training.ts</code>, <code>src/runtime.ts</code></td></tr>
+        <tr><td><b>Every chart's own manifest, re-read from the markup:</b> the phase graph draws exactly one run per derived edge (by label, so a missing arrow is a failure rather than a smaller picture) and one node per phase, and the learning loop draws every step and every gate that can stop one.</td><td>the generated HTML itself</td></tr>
+        <tr><td>The tab count equals 1 overview + 1 graph + 12 phases + 1 learning loop + 8 other views</td><td>the generated HTML itself</td></tr>
       </tbody>
     </table>
   </div>
@@ -2015,8 +2741,8 @@ ${PHASES.map(phaseDetail).join('\n')}
 
   <h3 style="margin-top:var(--sp-6)">NOT verified — stated rather than filled in</h3>
   <ul class="refuse-list">
-    <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>The rendered pixels.</b> No browser was available to this generator, so the visual result — the contrast as actually rendered, wrapping at 700 px, sticky-tab behaviour, the appearance of the focus ring, whether the diagram's labels collide at some width — is NOT confirmed. The CSS is written to stated rules and its colours are measured, but it has not been SEEN. Treat every layout claim on this page as a design intent, not an observation.</span></li>
-    <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Keyboard and screen-reader behaviour.</b> The tablist's roles, <code>aria-selected</code>, roving tabindex and <code>aria-controls</code> targets are asserted against the markup, and the arrow-key handler is present in the source — but no browser and no assistive technology ran this page, so "the arrow keys work" and "the tab order reads correctly" are NOT demonstrated here.</span></li>
+    <li><span class="g-shape g-shape-refuse">MEASURED ELSEWHERE</span><span><b>The rendered pixels — measured in a separate headless pass, NOT by this generator.</b> Three charts now ship, and each one was rendered in headless Chromium (the Playwright build on this machine) at <b>eight viewport widths</b> — 360, 480, 600, 768, 820, 1024, 1440 and 1920 px — with every panel un-hidden, and the glyph boxes were compared pairwise: <b>0 text-on-text overlaps</b> in all three charts and <b>0</b> across the whole page at every width (text-NODE rects via a DOM Range, so a <code>&lt;code&gt;</code> inside a paragraph is not miscounted as an overlap with its own parent), <b>0</b> labels crossing a card they do not belong to, every chart rendering at <b>scale 1.0000</b> (never rescaled by its box), and no horizontal page overflow at any width. The worst measured label overhang was <b>−2.7 px, −3.2 px and −4.4 px</b> (overview, phase graph, learning loop) — negative, i.e. every label fits its reserved box with that much room, because the real monospace advance is <b>0.560–0.562 em</b> against the declared 0.602. ⚠ THE HARNESS FOR THAT PASS IS NOT PART OF THIS REPOSITORY and <code>--verify</code> does not re-run it, so treat these as a dated measurement rather than a standing check — which is why the generator and the two checkers carry the arithmetic invariants instead.</span></li>
+    <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Keyboard and screen-reader behaviour.</b> The tablist's roles, <code>aria-selected</code>, roving tabindex and <code>aria-controls</code> targets are asserted against the markup, and the arrow-key handler is present in the source — but no assistive technology ran this page, so "the arrow keys work" and "the tab order reads correctly" are NOT demonstrated here.</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Per-phase "inputs" beyond the artifact list.</b> The scaffold writes a generic <code>- (list upstream artifacts re-read for this phase)</code> placeholder for every later phase, so there is no per-phase PROSE list of inputs in the code to transcribe. What IS in the code is <code>getPhaseExpectedInputArtifactNames</code>, and that is what the input column shows — plus the file-level sources a phase names (git state, DECISIONS.md, STATE.md, the memory plane). ${cite(SRC.tplLater + ', ' + SRC.inputMap)}</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Which hooks fire in a given real session.</b> The page states which seam each listener attaches to and what it does; it does not claim a particular live run took a particular path, and it makes no claim about run outcomes.</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Whether any addendum back-edge exists in the current workspace.</b> <code>backEdges()</code> can report one; nothing on this page asserts that one has occurred.</span></li>
@@ -2147,6 +2873,46 @@ node scripts/gen-workflow-map.mjs --out elsewhere.html</pre>
        how the four defects above got in.
    ========================================================================== */
 
+/* ==========================================================================
+   THE CHARTS — LAYOUT BY ARITHMETIC, NOT BY EYE
+   ==========================================================================
+
+   WHY THIS IS NOT A HAND-PLACED SVG. It was one, and it shipped four collisions that a
+   reader saw in a browser and the author could not see at all, because nothing in the
+   file ever compared two coordinates:
+
+     1. the phase-0 gate card ended at y=84 while the strip heading was drawn at y=88 —
+        a 6px overlap of heading text across the card's lower third;
+     2. the twelve nodes were 62 user units wide against labels measuring 61-63, so each
+        label overran its own box and landed on its neighbour's, and nodes 8-11 sat at
+        x=690..900, INSIDE the hook column that starts at x=668;
+     3. the backward-edge arc ran at y=268 and its REVISE label at y=264 — the same band
+        as the prose line at y=262, so the label was painted across a sentence;
+     4. the hook channel cards (y=38..138) and the sequence row (y=96..136) occupied the
+        same horizontal band in the same x-range: the grey panel sliced the amber one.
+
+   Every one of those is a coordinate that was never checked against another coordinate.
+   So a chart is CHARTED before it is drawn: `makeEngine()` reserves a box for every
+   element about to be emitted — cards, text, rules, arrowheads — and THROWS if two
+   reserved boxes of ink intersect. The page cannot be generated with the defect in it,
+   and the width of every text box comes from a declared per-character metric rather
+   than from a guess, so "does this label fit?" is arithmetic, not opinion.
+
+   Two rules make that worth anything:
+     · INK MAY NOT OVERLAP INK, except that a box may CONTAIN text and a box may contain
+       another box. Everything else is a hard failure at build time.
+     · NOTHING IS PLACED WITHOUT A RESERVED BOX — there is no escape hatch that writes
+       coordinates without recording them, because an unrecorded coordinate is exactly
+       how the four defects above got in.
+
+   ⚠ THREE CHARTS NOW, AND THEY ALL GO THROUGH THE SAME ENGINE. The overview, the phase
+   graph and the learning loop each call `chart()`, and each one ships its OWN manifest
+   in `data-layout` with its own wrapper width, so `check-workflow-map.mjs` re-derives
+   every invariant for every chart rather than for the first one it finds. A new graphic
+   that bypassed `reserve()` could not be emitted at all: there is no other way to write
+   into the SVG body. The linkage arrows and the training loop's cycle are therefore
+   covered by the intersection check exactly as the phase strip is. */
+
 /**
  * The four diagram text styles, as ONE declaration used by BOTH the layout arithmetic
  * below and the stylesheet that draws them. That is the point: the sheet used to say
@@ -2179,7 +2945,7 @@ const CHAR_W = 0.602
 /** Reserved box height of one text line, as a multiple of the font size. */
 const TEXT_LH = 1.4
 
-function diagram() {
+function makeEngine() {
   /* ---- the chart's own geometry ---------------------------------------- */
   const GUTTER = 48     // left column: nothing is drawn in it except the return arc
   const PAD = 8         // between a box edge and the text inside it
@@ -2320,6 +3086,83 @@ function diagram() {
     return y
   }
 
+  /**
+   * A CARD AND ITS TEXT, with the card's height DERIVED from the rows it holds rather
+   * than chosen. That is what makes the arrow geometry below safe: a box is as tall as
+   * its own content, so a stub computed from its bottom edge cannot land inside it.
+   * Rows are strings (the default class) or `{ cls, s }`.
+   */
+  function block(x, y, w, klass, rows, opts = {}) {
+    const pad = opts.pad === undefined ? PAD : opts.pad
+    const gap = opts.gap === undefined ? 1 : opts.gap
+    const norm = rows.map((r) => (typeof r === 'string' ? { cls: opts.cls || CLS.s, s: r } : r))
+    let h = pad * 2
+    norm.forEach((r, i) => { h += lh(FS[r.cls]) + (i < norm.length - 1 ? gap : 0) })
+    h = round(h)
+    const i = card(x, y, w, h, klass, opts.label || norm[0].s)
+    let ty = round(y + pad)
+    for (const r of norm) {
+      textEl(x + pad, ty, r.cls, r.s, i)
+      ty = round(ty + lh(FS[r.cls]) + gap)
+    }
+    return { i, h, bottom: round(y + h) }
+  }
+
+  /** The same, with each row word-wrapped to the card's own width first. */
+  function blockPara(x, y, w, klass, rows, opts = {}) {
+    const flat = []
+    for (const r of rows) {
+      const cls = typeof r === 'string' ? (opts.cls || CLS.s) : r.cls
+      const s = typeof r === 'string' ? r : r.s
+      for (const line of wrap(s, FS[cls], w - 2 * PAD)) flat.push({ cls, s: line })
+    }
+    return block(x, y, w, klass, flat, opts)
+  }
+
+  return {
+    GUTTER, PAD, LINE_PAD, CLS, FS, tw, lh, round, boxes, contains, svgParts,
+    reserve, textEl, card, rule, ruleH, ruleV, head, wrap, para, block, blockPara,
+  }
+}
+
+/**
+ * Draw one chart through the engine and wrap it in its own scrollable box. `draw(api)`
+ * returns `{ width, height }`; the manifest is built from the boxes the engine actually
+ * reserved, so what the checker re-reads is what was emitted.
+ */
+function chart(spec) {
+  const api = makeEngine()
+  const size = spec.draw(api)
+  const manifest = {
+    v: 1,
+    charW: CHAR_W,
+    lineHeight: TEXT_LH,
+    viewBox: [0, 0, size.width, size.height],
+    fit: api.boxes.filter((b) => b.kind === 'text').map((b) => [b.label, b.x, b.y, b.w, b.h]),
+    boxes: api.boxes.map((b) => [b.kind, b.x, b.y, b.w, b.h, b.label]),
+    // The declared overlaps, by index pair: [inside, container]. A box that CONTAINS
+    // another is an overlap by construction, so the relation is exported rather than
+    // left for the checker to re-infer — an inferred exception is not a checked one.
+    contains: api.contains,
+  }
+  return {
+    id: spec.id,
+    width: size.width,
+    height: size.height,
+    markup: `
+  <div class="diagram" id="dg-${spec.id}" data-diagram="${spec.id}" role="img" aria-label="${esc(spec.label)}" style="--dg-w:${size.width}px" data-layout="${esc(JSON.stringify(manifest)).replace(/\n/g, ' ')}">
+    <svg viewBox="0 0 ${size.width} ${size.height}" width="${size.width}" height="${size.height}" preserveAspectRatio="xMinYMin meet">
+${api.svgParts.map((s) => '      ' + s).join('\n')}
+    </svg>
+  </div>`,
+  }
+}
+
+/* ---- CHART 1: the overview ------------------------------------------------ */
+
+function drawOverview(api) {
+  const { GUTTER, PAD, CLS, FS, tw, lh, round, card, textEl, rule, ruleH, ruleV, head, para } = api
+
   /* ---- BAND 1: the title ----------------------------------------------- */
   let y = 0
   textEl(GUTTER, y, CLS.a, 'THE WORKFLOW, CHARTED — every band below reserves its space before it is drawn')
@@ -2355,7 +3198,12 @@ function diagram() {
   const stripLabels = PHASES.map((p) => p.file.replace(/\.md$/, ''))
   const NODE_GAP = 6
   const NODE_W = Math.ceil(Math.max(...stripLabels.map((s) => tw(s, FS[CLS.t]))) + 2 * PAD + 4)
-  const NODE_H = 44
+  /* ⚠ THREE LINES PER NODE, AND THE THIRD IS THE FAN-IN. The owner's report was that the
+     graphic lists phases "without showing how they are linked"; the strip is the readable
+     SPINE, so each node states how many upstream artifacts it takes — `fan-in 1` for a
+     chain link, `fan-in 3` for a phase that joins three, and `no upstream artifact` for
+     the root. The full edge set is drawn, arrow by arrow, on the Phase graph view. */
+  const NODE_H = Math.round(7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1 + lh(FS[CLS.s]) + 7)
   const STRIP_PAD = 10
   const stripW = PHASES.length * NODE_W + (PHASES.length - 1) * NODE_GAP + 2 * STRIP_PAD
   const stripH = 18 + lh(FS[CLS.a]) + 10 + NODE_H
@@ -2371,6 +3219,7 @@ function diagram() {
     // sliced this to nine characters, which is where "00-requir" came from.)
     textEl(nx + PAD, nodesTop + 7, CLS.t, stripLabels[i], node)
     textEl(nx + PAD, nodesTop + 7 + lh(FS[CLS.t]) + 1, CLS.s, 'phase ' + p.phaseN, node)
+    textEl(nx + PAD, nodesTop + 7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1, CLS.s, fanInText(p.file), node)
   })
   midBottom = Math.max(midBottom, nodesTop + NODE_H)
 
@@ -2438,7 +3287,18 @@ function diagram() {
   head([[14, arcTop], [10, arcTop + 8], [18, arcTop + 8]], 'dg-head-loop', 'backward-edge arrowhead', riser)
   y = by + 22
 
-  /* ---- BAND 5: the footer legend -------------------------------------- */
+  /* ---- BAND 5: the fan-in line — where the chain becomes a graph ------- */
+  const multi = PHASES.filter((p) => sourcesOf(p.file) > 1)
+  textEl(GUTTER, y, CLS.a, 'WHERE IT STOPS BEING A CHAIN — the phases that read more than one upstream artifact')
+  y += lh(FS[CLS.a]) + 6
+  y = para(GUTTER, y, 760, CLS.s,
+    multi.map((p) => p.file.replace(/\.md$/, '') + ' ← ' + sourcesOf(p.file)).join('   ·   ')
+    + '   — 16 directed edges in all: 12 required, 2 conditional ("when present"), 2 wildcard.')
+  y = para(GUTTER, y, 760, CLS.s,
+    'Arrow by arrow, with the conditional edges drawn dashed, on the PHASE GRAPH view. The cross-run memory cycle is its own view: THE LEARNING LOOP.')
+
+  /* ---- BAND 6: the footer legend -------------------------------------- */
+  y += 12
   textEl(GUTTER, y, CLS.s, 'DECISION = amber box, filled rail dot  ·  REFUSAL = hatched  ·  everything else: AUTO')
   y += lh(FS[CLS.s]) + 6
   textEl(GUTTER, y, CLS.s, 'Every element above reserved its box first: the generator REFUSES to emit the chart when two of them intersect.')
@@ -2447,41 +3307,346 @@ function diagram() {
   const W = Math.ceil(Math.max(
     col3 + hookW + 24,
     stripX + stripW + 24,
-    GUTTER + 460 + 24,
-    GUTTER + 560 + 24,
+    GUTTER + 760 + 24,
   ))
   const H = Math.ceil(y + 16)
+  return { width: W, height: H }
+}
 
-  /* ---- the manifest, shipped inside the markup -------------------------
-     The reserved boxes ARE the invariant, so they leave the generator with the page:
-     `check-workflow-map.mjs` re-reads them from this attribute and re-verifies the
-     geometry — including that no two boxes intersect — by parsing the markup rather
-     than by looking at it. `charW` and `lineHeight` ship with them so the arithmetic
-     is auditable instead of implied, and an independent headless pass can compare the
-     reserved boxes against what a real layout engine actually renders. */
-  const manifest = {
-    v: 1,
-    charW: CHAR_W,
-    lineHeight: TEXT_LH,
-    viewBox: [0, 0, W, H],
-    fit: boxes.filter((b) => b.kind === 'text').map((b) => [b.label, b.x, b.y, b.w, b.h]),
-    boxes: boxes.map((b) => [b.kind, b.x, b.y, b.w, b.h, b.label]),
-    // The declared overlaps, by index pair: [inside, container]. A box that CONTAINS
-    // another is an overlap by construction, so the relation is exported rather than
-    // left for the checker to re-infer — an inferred exception is not a checked one.
-    contains,
+/* ---- CHART 2: the phase graph — every edge, drawn ------------------------- */
+
+/**
+ * ORDER THE LANE EDGES SO THAT NO ARROW CROSSES ANOTHER.
+ *
+ * An edge routed in a lane is drawn as: a stub UP from its source node's top edge, a
+ * horizontal run in its own lane, and a stub DOWN into its target node's top edge. Two
+ * such edges CROSS exactly when one of the upper edge's stubs lands inside the lower
+ * edge's run, and that happens precisely when one edge's [source, target] interval
+ * interleaves the other's. So the sufficient condition used here is:
+ *
+ *     U may sit above L  ⟺  U starts at or after L ends (to the right of it)
+ *                          OR  U contains L (starts at or before it and ends at or after it)
+ *
+ * — and `bandOrder` below SEARCHES for an order that satisfies it for every pair, at two
+ * depths: lanes above the node row, and lanes below it (an interleaving that cannot be
+ * ordered inside one band is moved to the other, and the two bands never meet). If three
+ * bands were ever needed the generator THROWS rather than drawing a crossing; and the
+ * engine's own intersection check is the backstop, so a mistake here fails the build
+ * instead of shipping a tangle.
+ */
+function graphBands(edges) {
+  const above = (u, l) => (u.s >= l.t) || (u.s <= l.s && u.t >= l.t)
+  const comparable = (a, b) => above(a, b) || above(b, a)
+  // 1. greedy band assignment: the first band in which this edge is COMPARABLE with
+  //    every edge already there. Two bands exist (above and below the row).
+  const bands = [[], []]
+  for (const e of edges) {
+    const fit = bands.findIndex((band) => band.every((o) => comparable(o, e)))
+    if (fit < 0) throw new Error('phase graph: the edge set needs a third routing band, which is not drawn')
+    bands[fit].push(e)
+  }
+  // 2. inside a band, order bottom → top by repeatedly taking an edge that every
+  //    remaining edge may sit above.
+  return bands.map((band) => {
+    const left = [...band]
+    const order = []
+    while (left.length > 0) {
+      const at = left.findIndex((x) => left.every((u) => u === x || above(u, x)))
+      if (at < 0) throw new Error('phase graph: a routing band could not be ordered without a crossing')
+      order.push(left[at])
+      left.splice(at, 1)
+    }
+    // Guard against the case the greedy cannot see: the bottom-first rule is necessary
+    // but not sufficient on its own, so every pair is checked once more, in the order
+    // the lanes will be drawn.
+    for (let i = 0; i < order.length; i++) {
+      for (let j = i + 1; j < order.length; j++) {
+        if (!above(order[j], order[i])) {
+          throw new Error('phase graph: lane order would cross — ' + order[i].from + ' and ' + order[j].from)
+        }
+      }
+    }
+    return order
+  })
+}
+
+function drawGraph(api) {
+  const { GUTTER, PAD, LINE_PAD, CLS, FS, tw, lh, round, card, textEl, rule, ruleH, ruleV, head, para, block } = api
+
+  const idxOf = Object.fromEntries(PHASES.map((p, i) => [p.file, i]))
+  const short = (file) => file.replace(/\.md$/, '')
+  const NODE_W = Math.ceil(Math.max(...PHASES.map((p) => tw(short(p.file), FS[CLS.t]))) + 2 * PAD + 4)
+  const NODE_H = Math.round(7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1 + lh(FS[CLS.s]) + 7)
+  const COL_GAP = 48          // holds the spine arrow: 8 units of air on each side of it
+  const PITCH = NODE_W + COL_GAP
+  const nodeX = (i) => round(GUTTER + i * PITCH)
+  const rowW = PHASES.length * NODE_W + (PHASES.length - 1) * COL_GAP
+
+  /* ---- classify the edges ------------------------------------------------- */
+  const spine = []   // adjacent in PHASE_SEQUENCE: drawn as a short arrow in the gap
+  const lanes = []   // everything else with a concrete source: routed in a lane
+  const wild = []    // "every present artifact except itself": drawn as a rail
+  for (const edge of EDGES) {
+    if (edge.kind === 'wildcard') { wild.push(edge); continue }
+    const s = idxOf[edge.from]
+    const t = idxOf[edge.to]
+    if (s === undefined) throw new Error('phase graph: unknown edge source ' + edge.from)
+    // The routing assumes every edge runs LEFT TO RIGHT in PHASE_SEQUENCE order. It is
+    // asserted rather than assumed: an edge that ran backwards would put its run under
+    // its own source node, which is the one shape this layout cannot draw.
+    if (!(s < t)) {
+      throw new Error('phase graph: edge ' + edge.from + ' -> ' + edge.to + ' does not run forward in PHASE_SEQUENCE')
+    }
+    if (t - s === 1) spine.push(edge)
+    else lanes.push({ edge, s, t })
   }
 
-  return {
-    width: W,
-    height: H,
-    markup: `
-  <div class="diagram" role="img" aria-label="Overview diagram: the Phase 0 human gate, the twelve-artifact sequence as one horizontally scrollable strip, the two gating hooks in their own column, the lock chain, and the backward edge drawn in its own band. The same information is given as text in the sequence below." data-layout="${esc(JSON.stringify(manifest)).replace(/\n/g, ' ')}">
-    <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" preserveAspectRatio="xMinYMin meet">
-${svgParts.map((s) => '      ' + s).join('\n')}
-    </svg>
-  </div>`,
+  const [upper, lower] = graphBands(lanes)
+
+  /* ---- band geometry ------------------------------------------------------ */
+  const LANE_STEP = 22        // one lane: a 5-unit rule and a 13.3-unit label, plus air
+  const LANE_DROP = 16        // from a node edge to the nearest lane
+  const LABEL_H = lh(FS[CLS.s])
+  const upperBase = LANE_DROP
+  const laneY = (band, k) => (band === 'upper'
+    ? round(-(upperBase + k * LANE_STEP))
+    : round(NODE_H + upperBase + k * LANE_STEP))
+  const upperH = upper.length === 0 ? 0 : LANE_DROP + (upper.length - 1) * LANE_STEP + 5 + LABEL_H + 8
+  const lowerH = lower.length === 0 ? 0 : LANE_DROP + (lower.length - 1) * LANE_STEP + 5 + LABEL_H + 8
+
+  const titleH = lh(FS[CLS.a]) + 12
+  let y = titleH
+  const legendH = lh(FS[CLS.s]) * 3 + 24
+  const railH = Math.round(7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1 + lh(FS[CLS.s]) + 7)
+  y += upperH
+  const rowTop = round(y)
+  const rowBottom = round(rowTop + NODE_H)
+  y = rowBottom + lowerH
+  const railTop = round(y + 14)
+  const railBottom = round(railTop + railH)
+  y = railBottom + 22
+  const legendTop = round(y)
+  y += legendH
+
+  /* ---- the nodes ---------------------------------------------------------- */
+  const multiSource = PHASES.filter((p) => fanInOf(p.file) > 1)
+  PHASES.forEach((p, i) => {
+    const x = nodeX(i)
+    const klass = fanInOf(p.file) > 1 ? 'dg-box dg-box-fan' : 'dg-box'
+    const node = card(x, rowTop, NODE_W, NODE_H, klass, 'node ' + p.file)
+    textEl(x + PAD, rowTop + 7, CLS.t, short(p.file), node)
+    const purpose = PURPOSES[p.file]
+    textEl(x + PAD, rowTop + 7 + lh(FS[CLS.t]) + 1, CLS.s, 'phase ' + p.phaseN + ' — ' + purpose.label, node)
+    textEl(x + PAD, rowTop + 7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1, CLS.s, fanInText(p.file), node)
+  })
+
+  /* ---- the spine: one arrow per adjacent pair ----------------------------- */
+  spine.forEach((edge) => {
+    const i = idxOf[edge.from]
+    const mid = round(rowTop + NODE_H / 2)
+    const start = round(nodeX(i) + NODE_W + 10.5)
+    const tip = round(nodeX(i + 1) - 8)
+    const dash = edge.kind === 'conditional'
+    const line = dash ? 'dg-line-cond' : 'dg-line'
+    const headCls = dash ? 'dg-head-cond' : 'dg-head'
+    const run = ruleH(start, mid, round(tip - 8 - start), line, 'spine ' + edge.from + ' -> ' + edge.to)
+    head([[tip, mid], [tip - 8, mid - 4], [tip - 8, mid + 4]], headCls, 'spine head ' + edge.to, run)
+  })
+
+  /* ---- the lanes: stub up, run across in its own lane, stub down ---------- */
+  const attach = (file, side, edges, step) => {
+    // THE TWO SIDES RULE IN OPPOSITE DIRECTIONS, and the asymmetry is forced rather than
+    // chosen. A lane farther from the node row has the LONGER stubs, and a stub must not
+    // be drawn across a nearer lane's run:
+    //   · SOURCE side — the farther lane attaches LEFTMOST, so its long stub rises clear
+    //     of every nearer edge's horizontal run;
+    //   · TARGET side — the farther lane attaches RIGHTMOST, so the nearer edge's run
+    //     ENDS before that stub comes down.
+    // Both directions were needed: the first version used "leftmost" on both sides and
+    // the engine found the crossing (00-requirements.md -> 02-to-be-plan's stub drawn
+    // across 01-as-is.md -> 02-to-be-plan's run, 5x5 units) rather than shipping it.
+    const base = side === 'out' ? nodeX(idxOf[file]) + NODE_W - 6 : nodeX(idxOf[file]) + 6
+    const sorted = [...edges].sort((a, b) => (side === 'out' ? b.dist - a.dist : a.dist - b.dist))
+    sorted.forEach((e, j) => {
+      e[side] = round(side === 'out' ? base - (sorted.length - 1 - j) * step : base + j * step)
+    })
   }
+  const laneOf = (edge) => (upper.includes(edge) ? 'upper' : 'lower')
+  upper.forEach((e, k) => { e.band = 'upper'; e.k = k; e.dist = e.k })
+  lower.forEach((e, k) => { e.band = 'lower'; e.k = k; e.dist = e.k })
+  const outGroups = new Map()
+  const inGroups = new Map()
+  for (const e of lanes) {
+    if (!outGroups.has(e.edge.from)) outGroups.set(e.edge.from, [])
+    outGroups.get(e.edge.from).push(e)
+    if (!inGroups.has(e.edge.to)) inGroups.set(e.edge.to, [])
+    inGroups.get(e.edge.to).push(e)
+  }
+  for (const [file, group] of outGroups) attach(file, 'out', group, 12)
+  for (const [file, group] of inGroups) attach(file, 'in', group, 12)
+
+  for (const e of lanes) {
+    const band = e.band
+    const yy = band === 'upper' ? round(rowTop + laneY('upper', e.k)) : round(rowTop + laneY('lower', e.k))
+    const xs = e.out
+    const xt = e.in
+    const dash = e.edge.kind === 'conditional'
+    const line = dash ? 'dg-line-cond' : 'dg-line'
+    const headCls = dash ? 'dg-head-cond' : 'dg-head'
+    const label = e.edge.from + ' -> ' + e.edge.to
+    // The run: from the source stub to the target stub, in this lane and no other.
+    const run = ruleH(xs, yy, round(xt - xs), line, 'lane ' + e.edge.from + ' -> ' + e.edge.to)
+    // The label sits INSIDE the run's own x-range, one row clear of it. A label wider
+    // than its run would reach a stub that crosses this lane, so the fit is CHECKED
+    // here rather than hoped for — the arithmetic is the same one the engine uses.
+    const labelW = tw(label, FS[CLS.s])
+    if (labelW > xt - xs - 8) {
+      throw new Error('phase graph: lane label "' + label + '" does not fit its run (' + labelW + ' > ' + (xt - xs - 8) + ')')
+    }
+    // Two stubs, one arrowhead: the source end is a plain join, the target end carries
+    // the arrow. The TARGET stub stops one arrowhead-length short of the node edge so
+    // the head starts exactly where it ends — the two boxes TOUCH, which needs no
+    // exemption at all, and a manifest with fewer declared exceptions is a manifest with
+    // fewer places for a real overlap to hide.
+    const HEAD_L = 8
+    const stubS = ruleV(xs, band === 'upper' ? yy : rowBottom,
+      band === 'upper' ? round(rowTop - yy) : round(yy - rowBottom), line, 'stub ' + band + ' ' + e.edge.from, run)
+    const stubT = ruleV(xt, band === 'upper' ? yy : round(rowBottom + HEAD_L),
+      band === 'upper' ? round(rowTop - HEAD_L - yy) : round(yy - rowBottom - HEAD_L), line, 'stub ' + band + ' ' + e.edge.to, run)
+    if (band === 'upper') {
+      head([[xt, rowTop], [xt - 4, rowTop - HEAD_L], [xt + 4, rowTop - HEAD_L]], headCls, 'lane arrow ' + e.edge.to)
+      textEl(round(xs + 4), round(yy - LINE_PAD * 2 - LABEL_H), CLS.s, label)
+    } else {
+      head([[xt, rowBottom], [xt - 4, rowBottom + HEAD_L], [xt + 4, rowBottom + HEAD_L]], headCls, 'lane arrow ' + e.edge.to)
+      textEl(round(xs + 4), round(yy + LINE_PAD * 2 + 2), CLS.s, label)
+    }
+    void stubS
+    void stubT
+  }
+
+  /* ---- the wildcard rail: one edge, eleven sources ------------------------ */
+  const railX = nodeX(0)
+  const rail = card(railX, railTop, rowW, railH, 'dg-box dg-box-rail', 'the wildcard input rail')
+  textEl(railX + PAD, railTop + 7, CLS.t,
+    'EVERY PRESENT ARTIFACT EXCEPT ITSELF — the wildcard input, declared by 2 phases', rail)
+  textEl(railX + PAD, railTop + 7 + lh(FS[CLS.t]) + 1, CLS.s,
+    'RUN_ARTIFACT_SEQUENCE.filter(a => present.has(a) && a !== thisFile) — ' + WILDCARD_SOURCES + ' possible sources, and NO single one of them is required', rail)
+  textEl(railX + PAD, railTop + 7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1, CLS.s,
+    'Drawn as a rail rather than as ' + WILDCARD_SOURCES + ' arrows each: the fan-in is the fact, and a bundle of eleven lines into one node is the picture that stops being readable.', rail)
+  wild.forEach((edge) => {
+    const x = nodeX(idxOf[edge.to]) + NODE_W / 2
+    const stub = ruleV(x, rowBottom + 8, railTop - rowBottom - 8, 'dg-line-wide', 'wildcard stub ' + edge.to)
+    head([[x, rowBottom], [x - 4, rowBottom + 8], [x + 4, rowBottom + 8]], 'dg-head-wide', 'wildcard head ' + edge.to, stub)
+  })
+
+  /* ---- the legend and the reading notes ---------------------------------- */
+  let ly = legendTop
+  textEl(GUTTER, ly, CLS.s, 'SOLID ARROW = required input (12 edges)   ·   DASHED ARROW = conditional: pushed only when the source artifact is present (2 edges)')
+  ly = round(ly + lh(FS[CLS.s]) + 4)
+  textEl(GUTTER, ly, CLS.s, 'THICK ARROW from the rail = the wildcard input (2 edges, ' + WILDCARD_SOURCES + ' sources each)   ·   DASHED NODE = reads more than one upstream artifact (' + multiSource.length + ' nodes)')
+  ly = round(ly + lh(FS[CLS.s]) + 4)
+  textEl(GUTTER, ly, CLS.s, 'Shape, word and count carry every distinction here; colour carries none of them. Each arrow is the linter\'s own expected-input map, not a reading of the prose.')
+
+  return { width: Math.ceil(Math.max(railX + rowW + 24, GUTTER + tw('SOLID ARROW = required input (12 edges)   ·   DASHED ARROW = conditional: pushed only when the source artifact is present (2 edges)', FS[CLS.s]) + 24)), height: Math.ceil(y + 16) }
+}
+
+/* ---- CHART 3: the training loop — the cross-run cycle -------------------- */
+
+function drawTraining(api) {
+  const { GUTTER, PAD, LINE_PAD, CLS, FS, tw, lh, round, textEl, card, rule, ruleH, ruleV, head, para, block, blockPara } = api
+
+  const STEP_W = 470
+  const GATE_W = 430
+  const COL_GAP = 72
+  const colA = GUTTER
+  const colB = round(colA + STEP_W + COL_GAP)
+  const W = Math.ceil(colB + GATE_W + 24)
+
+  let y = 0
+  textEl(colA, y, CLS.a, 'THE LEARNING LOOP — one run writes memory, the NEXT run reads it')
+  y += lh(FS[CLS.a]) + 8
+  y = para(colA, y, W - 2 * GUTTER, CLS.s,
+    'Every box below is one call or one file, in the order a run reaches it. The boxes on the right are the places a step STOPS: two are hard refusals, one is a skip, and two are exit codes with an empty `writes` list. Nothing here is a summary — each box names the function or the field it was read from.')
+  y += 14
+
+  const flowTop = round(y)
+  /* ---- the rows ---------------------------------------------------------- */
+  const rows = []
+  let ry = flowTop
+  TRAINING.steps.forEach((step, i) => {
+    const stepRows = [{ cls: CLS.t, s: step.t }].concat(step.lines.map((s) => ({ cls: CLS.s, s })))
+    const gate = step.gate ? TRAINING.gates[step.gate] : null
+    // The card heights are computed from the rows first, because the ROW's height, the
+    // vertical arrow between rows and the horizontal gate arrow are all derived from
+    // them — never chosen.
+    const stepH = Math.round(PAD * 2 + stepRows.reduce((h, r) => h + lh(FS[r.cls]), 0) + (stepRows.length - 1))
+    let gateH = 0
+    let gateRows = []
+    if (gate) {
+      gateRows = [{ cls: CLS.h, s: gate.head }].concat(gate.lines.map((s) => ({ cls: CLS.s, s }))).concat([{ cls: CLS.s, s: gate.fix }])
+      gateH = Math.round(PAD * 2 + gateRows.reduce((h, r) => h + lh(FS[r.cls]), 0) + (gateRows.length - 1))
+    } else if (i === 0) {
+      gateRows = [{ cls: CLS.h, s: 'MEMORY_KINDS — read at every phase entry' }]
+        .concat(TRAINING.kinds.map((k) => ({ cls: CLS.s, s: '  ' + k + '/' })))
+        .concat([{ cls: CLS.s, s: '5 kinds, in the order the scaffold creates them.' }])
+      gateH = Math.round(PAD * 2 + gateRows.reduce((h, r) => h + lh(FS[r.cls]), 0) + (gateRows.length - 1))
+    } else if (i === 1) {
+      gateRows = [{ cls: CLS.h, s: 'NOT read, deliberately' }]
+        .concat(TRAINING.notRead.map((k) => ({ cls: CLS.s, s: '  ' + k + '/' })))
+        .concat([{ cls: CLS.s, s: 'archive/ is historical by the router\x27s own' }, { cls: CLS.s, s: 'definition, and widening retrieval to incidents/' }, { cls: CLS.s, s: 'is a separate ranking decision.' }])
+      gateH = Math.round(PAD * 2 + gateRows.reduce((h, r) => h + lh(FS[r.cls]), 0) + (gateRows.length - 1))
+    }
+    const rowH = Math.max(stepH, gateH)
+    rows.push({ step, i, stepRows, gateRows, stepH, gateH, rowH, top: ry })
+    ry = round(ry + rowH + 26)
+  })
+  const flowBottom = round(ry - 26)
+
+  /* ---- draw each row ----------------------------------------------------- */
+  rows.forEach((row, i) => {
+    const stepCls = row.step.gate ? 'dg-box dg-box-gate' : 'dg-box'
+    block(colA, row.top, STEP_W, stepCls, row.stepRows, { label: 'step ' + (i + 1) + ': ' + row.step.t })
+    if (row.gateRows.length > 0) {
+      const gateCls = row.step.gate ? 'dg-box dg-box-refuse' : 'dg-box'
+      // The label distinguishes a GATE (a box that can stop the step) from the two
+      // ASIDES that share the column: the kinds that ARE read and the two that are not.
+      // verify() counts the gates by that label, so a gate that stopped being drawn
+      // would fail the build rather than quietly disappear.
+      block(colB, row.top, GATE_W, gateCls, row.gateRows, { label: (row.step.gate ? 'gate for step ' : 'aside for step ') + (i + 1) })
+      // The connector: step -> the box that can stop it, at a y inside BOTH boxes.
+      const cy = round(row.top + Math.min(row.stepH, row.gateH) / 2)
+      const run = ruleH(round(colA + STEP_W + 10.5), cy, round(colB - 16 - (colA + STEP_W + 10.5)), 'dg-line-warn', 'gate link ' + (i + 1))
+      head([[colB, cy], [colB - 8, cy - 4], [colB - 8, cy + 4]], 'dg-head-warn', 'gate arrow ' + (i + 1), run)
+    }
+    // the arrow down to the next row
+    if (i < rows.length - 1) {
+      const x = round(colA + STEP_W / 2)
+      const from = round(row.top + row.rowH)
+      const to = round(rows[i + 1].top)
+      const stub = ruleV(x, from, to - 8 - from, 'dg-line', 'flow arrow ' + (i + 1))
+      head([[x, to], [x - 4, to - 8], [x + 4, to - 8]], 'dg-head', 'flow head ' + (i + 1), stub)
+    }
+  })
+
+  /* ---- the back edge: the loop closes ACROSS RUNS ------------------------ */
+  const yFirst = round(rows[0].top + rows[0].stepH / 2)
+  const yLast = round(rows[rows.length - 1].top + rows[rows.length - 1].stepH / 2)
+  const riser = ruleV(14, yFirst, yLast - yFirst, 'dg-line-loop', 'cross-run riser')
+  ruleH(14, yFirst, round(GUTTER - 8 - 14), 'dg-line-loop', 'cross-run top run', riser)
+  head([[GUTTER, yFirst], [GUTTER - 8, yFirst - 4], [GUTTER - 8, yFirst + 4]], 'dg-head-loop', 'cross-run arrowhead')
+  ruleH(14, yLast, round(GUTTER - 6 - 14), 'dg-line-loop', 'cross-run bottom run', riser)
+
+  y = round(flowBottom + 26)
+  textEl(colA, y, CLS.a, 'THE BACK EDGE — ACROSS RUNS, which is the whole point of the cycle')
+  y += lh(FS[CLS.a]) + 6
+  y = para(colA, y, W - 2 * GUTTER, CLS.s,
+    'Run N writes `memory/training/<task-type>.md` and registers it in `memory/MEMORY.md`. Run N+1\'s FIRST call — `recursive_phase`, at phase entry — reads the memory plane, and `training` is one of the five kinds it reads. So the shard run N extracted is offered to run N+1, and the arrow above travels from the bottom box back to the top one.')
+  y = para(colA, y, W - 2 * GUTTER, CLS.s,
+    'It is a CYCLE, not a pipeline: nothing in a single run can close it. One locked run is an anecdote, so the extractor does not run until a SECOND run has locked its own phase 8 — and that is the gate that stops this step, drawn on the step it stops.')
+  y = para(colA, y, W - 2 * GUTTER, CLS.s,
+    'The write half and the read half agree by construction: `MEMORY_KINDS` in src/memory.ts carries `training` precisely because the trigger writes it, and the comment there records what went wrong when it did not — the writer\'s own output was unreachable by the reader.')
+
+  return { width: W, height: Math.ceil(y + 16) }
 }
 
 
@@ -2549,6 +3714,97 @@ function verify(html) {
   check('LATE_PHASE_ARTIFACTS', stringList(rulesSrc, 'export const LATE_PHASE_ARTIFACTS'), LATE.files)
   check('AUDITED_PHASE_FILES', stringList(rulesSrc, 'export const AUDITED_PHASE_FILES = new Set(', { set: true }), PHASES.filter((p) => p.audited).map((p) => p.file))
   check('OPTIONAL_PHASES', stringList(lockSrc, 'export const OPTIONAL_PHASES = new Set(', { set: true }), PHASES.filter((p) => p.optional).map((p) => p.file))
+
+  /* 1b. JOB 1 — THE MISLEADING `optional` BADGE, AS CHECKED FACTS.
+     ------------------------------------------------------------------------
+     The owner found this by eye: the page printed a bare `optional` badge 14 times
+     for the seven members of `OPTIONAL_PHASES`, and read correctly as "these seven
+     phases are optional work". The set's only consumer is `nextLegalPhase(…,
+     { optional })`, i.e. "an ABSENT member does not stop the selector". There was
+     nothing on the page to contradict the badge, and nothing in `--verify` to catch
+     it, which is why it shipped. These three checks are that missing contradiction:
+
+       (a) the badge text never contains the bare word, so the class of defect
+           cannot be reintroduced by rewording one string;
+       (b) the rendered SET is exactly the seven the code declares — derived from the
+           source, not asserted in prose, and divided between the two render sites
+           (overview row and phase detail view), so a phase cannot silently gain or
+           lose the badge;
+       (c) the page states the POSITIVE fact — that all twelve are scaffolded by one
+           call and lock in sequence — because a reader must not come away thinking
+           seven phases are optional and five are real. (c) is checked as (i) the
+           scaffold loop in `runtime.ts` names exactly the ten later phases, (ii) it
+           plus the two Phase 0 templates is PHASE_SEQUENCE in order, and (iii) the
+           rendered page says so. */
+  check('the may-be-absent badge text carries its own scope and never says the bare word',
+    [BADGE_MAY_BE_ABSENT, BADGE_LATE_SET].filter((s) => /(?<![-\w])optional(?![-\w])/i.test(s)), [])
+  check('the words `optional` and `late phase` are never rendered as a standalone badge anymore',
+    [
+      ...html.matchAll(/<span class="tag[^"]*">([^<]*)<\/span>/g),
+    ].map((m) => m[1].trim()).filter((s) => s === 'optional' || s === 'late phase'), [])
+  /* THE ATTRIBUTION IS BY NEAREST PRECEDING ARTIFACT NAME, within a bounded window.
+     Measured distances in the rendered page: 118-135 units in an overview row (the
+     `step-artifact` span sits immediately before `step-tags`) and 622-681 in a phase
+     detail view (the badge is after the panel heading, which names the artifact).
+     720 covers both with room to spare, and NEAREST-wins rather than last-wins: a
+     larger window would otherwise pick up the PREVIOUS phase's heading and attribute
+     the badge to the wrong artifact. One badge on the page is inside the explanatory
+     callout and belongs to no phase; it is counted separately below rather than
+     silently skipped, so the three populations are each asserted: the phase badges
+     (the set, and the two render sites), the prose badge (exactly the one the callout
+     draws), and the total. */
+  const badgeWindow = 720
+  const badgeAll = [...html.matchAll(new RegExp('<span class="tag tag-may-be-absent">' + BADGE_MAY_BE_ABSENT + '</span>', 'g'))]
+  const badgeOf = []
+  const badgeProse = []
+  for (const m of badgeAll) {
+    const before = html.slice(0, m.index)
+    const nearest = PHASES
+      .map((p) => ({ file: p.file, at: before.lastIndexOf(p.file) }))
+      .filter((c) => c.at >= 0 && before.length - c.at <= badgeWindow)
+      .sort((a, b) => b.at - a.at)[0]
+    if (nearest) badgeOf.push(nearest.file)
+    else badgeProse.push(m.index)
+  }
+  check('every may-be-absent badge on the page is accounted for: phase-attributed + prose',
+    badgeOf.length + badgeProse.length, badgeAll.length)
+  check('exactly ONE may-be-absent badge is prose — the one the explanatory callout draws',
+    badgeProse.length, 1)
+  check('the set the may-be-absent badge DESCRIBES is exactly the set the code declares',
+    [...new Set(badgeOf)].sort(), PHASES.filter((p) => p.optional).map((p) => p.file).sort())
+  check('every may-be-absent phase carries the badge at BOTH render sites (overview row + detail view)',
+    PHASES.filter((p) => p.optional).map((p) => p.file).filter((f) => badgeOf.filter((b) => b === f).length !== 2), [])
+  check('no phase OUTSIDE the declared set carries the badge',
+    badgeOf.filter((b) => !PHASES.filter((p) => p.optional).some((p) => p.file === b)), [])
+  {
+    const scaffold = [...(readRepo('src/runtime.ts').match(/const laterPhases = \[([\s\S]*?)\]/) || ['', ''])[1]
+      .matchAll(/'([^']+\.md)'/g)].map((m) => m[1])
+    check('recursive_init names every later phase in ONE literal scaffold list', scaffold, PHASES.slice(2).map((p) => p.file))
+    check('the scaffold list plus the two Phase 0 templates IS PHASE_SEQUENCE, so recursive_init writes all twelve in order',
+      ['00-requirements.md', '00-worktree.md', ...scaffold], PHASES.map((p) => p.file))
+    check('the page states the positive fact rather than leaving the badge to speak for itself',
+      /All twelve artifacts are MANDATORY work/.test(html) && /scaffolds <b>all twelve<\/b>/.test(html), true)
+  }
+  /* (d) THE SECOND DECLARATION, CHECKED RATHER THAN MERELY MENTIONED. `status.ts` carries
+     its own `optional:` flag, and the page now says that it disagrees with `lock.ts`. A
+     sentence like that is worth nothing unless the disagreement is re-derived, so the
+     flag is parsed out of the status table and compared: if the two declarations are ever
+     reconciled, THIS CHECK FAILS and the paragraph must be rewritten rather than left
+     asserting a split that no longer exists. */
+  {
+    const statusFile = readRepo('src/status.ts')
+    const rows = (statusFile.match(/export const PHASES: PhaseDef\[\] = \[([\s\S]*?)\n\]/) || ['', ''])[1]
+    const statusOnly = [...rows.matchAll(/file: '([^']+)', optional: true/g)].map((m) => m[1])
+    check('status.ts declares its own optional set, and it is the TWO the page names',
+      statusOnly, ['01.5-root-cause.md', '03.5-code-review.md'])
+    check('the two optionality declarations DISAGREE — which is what the page reports',
+      PHASES.filter((p) => p.optional).filter((p) => !statusOnly.includes(p.file)).map((p) => p.file),
+      ['01-as-is.md', '02-to-be-plan.md', '03-implementation-summary.md', '04-test-summary.md', '05-manual-qa.md'])
+    check('the run-completion calculation consumes the status.ts flag, not the lock.ts set',
+      /const mandatory = status\.phases\.filter\(p => !p\.optional\)/.test(readRepo('src/snapshot.ts')), true)
+    check('the page SAYS the two declarations disagree, and cites both',
+      /two independent optionality declarations/.test(html) && /optionality declarations<\/b> and they disagree/.test(html), true)
+  }
   check('TRACEABILITY_REQUIRED_FILES', stringList(rulesSrc, 'export const TRACEABILITY_REQUIRED_FILES = new Set(', { set: true }), PHASES.filter((p) => p.traceability).map((p) => p.file))
   check('AUDIT_REQUIRED_HEADINGS: 9 entries', stringList(rulesSrc, 'export const AUDIT_REQUIRED_HEADINGS'), ['Audit Context', 'Effective Inputs Re-read', 'Earlier Phase Reconciliation', 'Subagent Contribution Verification', 'Worktree Diff Audit', 'Gaps Found', 'Repair Work Performed', 'Requirement Completion Status', 'Audit Verdict'])
 
@@ -2610,6 +3866,141 @@ function verify(html) {
   check('the two "all present artifacts except itself" phases are exactly 06 and 08',
     /fileName === '06-decisions-update\.md'\) candidates = RUN_ARTIFACT_SEQUENCE\.filter/.test(lintSrc) &&
     /fileName === '08-memory-impact\.md'\) candidates = RUN_ARTIFACT_SEQUENCE\.filter/.test(lintSrc), true)
+
+  /* 3b. THE LINKAGE — the edge set drawn on the Phase graph view, re-derived from the
+     linter's own input map. This is the check that makes the drawing fail the build
+     when src/ moves: the arrows are not a reading of the map, they ARE the map. */
+  const runSeq = stringList(lintSrc, 'export const RUN_ARTIFACT_SEQUENCE = [')
+  const derivedEdges = []
+  for (const [file, list] of Object.entries(inputMap)) for (const from of list) derivedEdges.push({ from, to: file, kind: 'required' })
+  for (const [file, list] of Object.entries(inputExtras)) for (const from of list) derivedEdges.push({ from, to: file, kind: 'conditional' })
+  const wildcardBranches = [...lintSrc.matchAll(/fileName === '([^']+)'\) candidates = RUN_ARTIFACT_SEQUENCE\.filter\(a => present\.has\(a\) && a !== '([^']+)'\)/g)]
+    .map((m) => ({ file: m[1], excluded: m[2] }))
+  for (const w of wildcardBranches) derivedEdges.push({ from: WILDCARD_INPUT, to: w.file, kind: 'wildcard' })
+  const edgeKey = (e) => e.from + ' | ' + e.to + ' | ' + e.kind
+  check('THE EDGE SET, re-derived from getPhaseExpectedInputArtifactNames',
+    derivedEdges.map(edgeKey).sort(), EDGES.map(edgeKey).sort())
+  check('every wildcard branch excludes the artifact it belongs to',
+    wildcardBranches.filter((w) => w.file !== w.excluded).map((w) => w.file), [])
+  check('the wildcard source count is the run minus the artifact itself',
+    WILDCARD_SOURCES, runSeq.length - 1)
+  check('00-requirements.md has NO upstream artifact edge — the run starts at the conversation',
+    EDGES.filter((e) => e.to === PHASES[0].file), [])
+  check('every edge endpoint is one of the twelve phase artifacts (or the wildcard)',
+    [...new Set(EDGES.flatMap((e) => [e.from, e.to]))].filter((f) => f !== WILDCARD_INPUT && !PHASES.some((p) => p.file === f)), [])
+  check('the rendered fan-in per phase, re-derived from the linter',
+    PHASES.map((p) => p.file + '=' + sourcesOf(p.file)),
+    PHASES.map((p) => {
+      const concrete = (inputMap[p.file] || []).length + (inputExtras[p.file] || []).length
+      const wild = wildcardBranches.some((w) => w.file === p.file)
+      return p.file + '=' + (concrete + (wild ? runSeq.length - 1 : 0))
+    }))
+  check('the rendered edge counts by kind',
+    ['required', 'conditional', 'wildcard'].map((k) => k + '=' + EDGES.filter((e) => e.kind === k).length),
+    ['required=' + (Object.values(inputMap).flat().length), 'conditional=' + (Object.values(inputExtras).flat().length), 'wildcard=' + wildcardBranches.length])
+
+  /* 3c. WHAT EACH PHASE IS FOR — the label and the required sections, re-derived. */
+  const statusSrc = readRepo('src/status.ts')
+  const purposeLabels = Object.fromEntries([...statusSrc.matchAll(/label: 'Phase [^']*\(([^)]+)\)', file: '([^']+)'/g)].map((m) => [m[2], m[1]]))
+  check('every phase purpose carries the label src/status.ts gives that artifact',
+    PHASES.map((p) => p.file + '=' + p.purpose.label),
+    PHASES.map((p) => p.file + '=' + purposeLabels[p.file]))
+  check('every section a purpose names is still a REQUIRED section of that phase',
+    PHASES.flatMap((p) => p.purpose.sections.filter((s) => !(sm[p.file] || []).includes(s)).map((s) => p.file + ' -> ' + s)), [])
+  check('every purpose names at least two required sections, so no line is unsourced',
+    PHASES.filter((p) => p.purpose.sections.length < 2).map((p) => p.file), [])
+  const tplSrc = readRepo('src/init-templates.ts')
+  check('both phase-0 purpose lines quote their template Scope note verbatim',
+    PHASES.filter((p) => p.purpose.tplText && !tplSrc.includes(p.purpose.tplText)).map((p) => p.file), [])
+  check('the later-phase template carries ONE generic Scope note — which is why 01-08 have no per-phase prose to transcribe',
+    (tplSrc.match(/Scope note: Scaffold generated by the recursive-mode plugin \(R5\)\. Fill every required section before lint\./g) || []).length, 1)
+  const closeoutScopeNotes = [...readRepo('src/closeout.ts').matchAll(/scopeNote: '([^']+)'/g)].map((m) => m[1])
+  check('no purpose line is a closeout scope note lifted as-is (they describe the RECEIPT, not the phase)',
+    PHASES.filter((p) => closeoutScopeNotes.includes(p.purpose.t)).map((p) => p.file), [])
+
+  /* 3d. THE LEARNING LOOP — every step and every gate, re-read from the modules. */
+  const memorySrc = readRepo('src/memory.ts')
+  const feedbackSrc = readRepo('src/memory-feedback.ts')
+  const trainingSrc = readRepo('src/training.ts')
+  const runtimeSrc = readRepo('src/runtime.ts')
+  check('MEMORY_KINDS, in the source order', stringList(memorySrc, 'export const MEMORY_KINDS = ['), TRAINING.kinds)
+  check('the kinds NOT read are named in the source and are NOT in MEMORY_KINDS',
+    TRAINING.notRead.filter((k) => !memorySrc.includes('`' + k + '/`') || TRAINING.kinds.includes(k)), [])
+  check('the read is recorded on EVERY phase entry, receipt included',
+    /recordMemoryRead\(resolved\.runDir, phase, \{/.test(runtimeSrc), true)
+  check('an empty plane SATISFIES the read gate',
+    /`injected: false` is a SATISFIED read/.test(feedbackSrc), true)
+  check('the read-receipt marker cannot collide with a shard',
+    (feedbackSrc.match(/MEMORY_READ_SOURCE = '([^']+)'/) || [])[1], 'memory-read:attempt')
+  check('the phase-0 gate is decided from the RECEIPT, never from the artifact text',
+    /function hasMemoryRead\(runDir: string\)/.test(readRepo('src/policy-globs.ts')) &&
+    /readMemoryReads\(runDir\)\.some/.test(readRepo('src/policy-globs.ts')), true)
+  check('the phase-8 lock gate is CALLED from lockArtifact',
+    /const memoryRefusal = phase8MemoryLockRefusal\(root, runId, artifact\)/.test(runtimeSrc), true)
+  check('the provenance field the phase-8 gate matches',
+    (rulesSrc.match(/MEMORY_PROVENANCE_FIELD = '([^']+)'/) || [])[1], 'Source-Runs')
+  check('the phase-8 artifact the lock gate guards',
+    (rulesSrc.match(/PHASE8_MEMORY_ARTIFACT = '([^']+)'/) || [])[1], '08-memory-impact.md')
+  check('a lock is a FIELD, not a filename',
+    /A lock is a FIELD, not a filename/.test(trainingSrc), true)
+  check('the re-run is detected from the receipt that ALREADY EXISTS',
+    /const rerun = isPhase8 && existsSync\(join\(runDir, 'locks', '08-memory-impact\.receipt\.json'\)\)/.test(runtimeSrc), true)
+  check('the trigger is called with the production runner and its writer/reader seams',
+    /\? runPhase8Trigger\(root, runId, \{/.test(runtimeSrc) &&
+    /runner: spawnExtractorRunner\(\{ cwd: root/.test(runtimeSrc) &&
+    /readText: \(relativePath\) => \{/.test(runtimeSrc), true)
+  check('THE ORDER OF THE TRIGGER GATES: evidence, then re-run, then extractor', (() => {
+    const body = trainingSrc.slice(trainingSrc.indexOf('export function runPhase8Trigger'))
+    const at = ['const gate = trainingGate(locked)', 'if (options.rerun !== true)', 'options.extractorAvailable ?? resolveExtractor(process.env) !== null']
+      .map((needle) => body.indexOf(needle))
+    return at.every((n) => n >= 0) && at[0] < at[1] && at[1] < at[2]
+  })(), true)
+  check('the two-runs gate is a strict comparison against 2',
+    /if \(lockedRuns < 2\) \{/.test(trainingSrc) && trainingSrc.includes('one run is an anecdote, not evidence'), true)
+  check('the two exit codes of the training trigger',
+    [2, 3].map((n) => (trainingSrc.match(new RegExp('(INSUFFICIENT_EVIDENCE|EXTRACTOR_UNAVAILABLE): ' + n)) || [])[1]).filter(Boolean), ['EXTRACTOR_UNAVAILABLE', 'INSUFFICIENT_EVIDENCE'])
+  check('the extractor is named by an environment variable and never embedded',
+    (trainingSrc.match(/TRAINING_EXTRACTOR_ENV = '([^']+)'/) || [])[1], 'RECURSIVE_TRAINING_EXTRACTOR_CMD')
+  check('the training shard the trigger writes', /return 'memory\/training\/' \+ mode \+ '\.md'/.test(trainingSrc), true)
+  check('the registry the written shards are announced in',
+    (memorySrc.match(/MEMORY_INDEX_FILE = '([^']+)'/) || [])[1], '.recursive/memory/MEMORY.md')
+  check('the group shards land under the memory plane the reader looks in',
+    /writes\.push\(options\.write\('memory\/domains\//.test(trainingSrc), true)
+
+  /* 3e. THE THREE CHARTS — the manifests the page ships, re-read from the markup.
+     A fact about the DRAWING is still a fact: if the graph lost an arrow, or the loop
+     lost a step, these counts would move. */
+  const dec = (s) => s.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'")
+  const layoutOf = (view) => {
+    const at = html.indexOf('data-diagram="' + view + '"')
+    if (at < 0) throw new Error('chart not rendered: ' + view)
+    const open = html.indexOf('data-layout="', at)
+    const raw = html.slice(open + 'data-layout="'.length, html.indexOf('"', open + 'data-layout="'.length))
+    return JSON.parse(dec(raw))
+  }
+  check('three charts are rendered, each with its own manifest',
+    [...html.matchAll(/data-diagram="([a-z-]+)"/g)].map((m) => m[1]), ['overview', 'phase-graph', 'learning-loop'])
+  const graphLayout = layoutOf('phase-graph')
+  const drawnRuns = graphLayout.boxes
+    .filter(([, , , , , label]) => /^(lane|spine) .+ -> .+$/.test(label) || /^wildcard stub /.test(label))
+    .map((b) => b[5])
+  const expectedRuns = EDGES.map((e) => {
+    if (e.kind === 'wildcard') return 'wildcard stub ' + e.to
+    const i = PHASES.findIndex((p) => p.file === e.from)
+    const j = PHASES.findIndex((p) => p.file === e.to)
+    return (j - i === 1 ? 'spine ' : 'lane ') + e.from + ' -> ' + e.to
+  })
+  check('the phase graph draws exactly one run per edge, and every edge is drawn',
+    drawnRuns.slice().sort(), expectedRuns.slice().sort())
+  check('the phase graph draws one node per phase',
+    graphLayout.boxes.filter(([, , , , , label]) => /^node /.test(label)).length, PHASES.length)
+  const loopLayout = layoutOf('learning-loop')
+  check('the learning loop draws every step and every gate that can stop one',
+    [loopLayout.boxes.filter(([, , , , , l]) => /^step \d+: /.test(l)).length,
+      loopLayout.boxes.filter(([, , , , , l]) => /^gate for step /.test(l)).length],
+    [TRAINING.steps.length, TRAINING.steps.filter((s) => s.gate).length])
+  check('each chart carries a distinct wrapper width (no chart is scaled by another)',
+    new Set([layoutOf('overview').viewBox[2], graphLayout.viewBox[2], loopLayout.viewBox[2]]).size, 3)
 
   // 4. tools
   const toolFiles = ['recursive_status', 'recursive_init', 'recursive_lock', 'recursive_lint', 'recursive_closeout', 'recursive_scratch', 'recursive_worktree', 'recursive_phase', 'recursive_review', 'recursive_delegate', 'recursive_ask', 'recursive_preview', 'recursive_audit_team']
@@ -2676,7 +4067,7 @@ function verify(html) {
     [...html.matchAll(/id="panel-([a-z0-9-]+)" role="tabpanel" aria-labelledby="tab-([a-z0-9-]+)"/g)].length, tabIds.length)
   check('every panel is addressed by exactly one tab',
     [...panelIds].filter((p) => tabIds.filter((m) => m[2] === p).length !== 1), [])
-  check('tab count == 1 overview + 12 phases + 8 other views', tabIds.length, 21)
+  check('tab count == 1 overview + 1 graph + 12 phases + 1 learning loop + 8 other views', tabIds.length, 23)
   check('exactly one TAB starts aria-selected=true', [...html.matchAll(/<button role="tab"[^>]*aria-selected="true"/g)].length, 1)
   check('exactly one TAB starts tabindex=0', [...html.matchAll(/<button role="tab"[^>]*tabindex="0"/g)].length, 1)
   check('every other tab starts at tabindex=-1 (the roving tabindex)',

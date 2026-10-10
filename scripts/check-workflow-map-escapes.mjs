@@ -67,15 +67,24 @@ check('<style> and </style> balance', (html.match(/<style>/g) || []).length === 
 check('<script> and </script> balance', (html.match(/<script>/g) || []).length === (html.match(/<\/script>/g) || []).length)
 check('the script block contains no nested closing script tag', !scriptBlock.includes('</script'))
 
-/* 4. the SVG is well formed enough to render ----------------------------- */
-const svg = (html.match(/<svg[\s\S]*?<\/svg>/) || [''])[0]
-check('there is exactly one inline <svg>', (html.match(/<svg/g) || []).length === 1)
-check('the svg has a viewBox', /viewBox="[^"]+"/.test(svg))
-check('the svg is labelled for assistive technology', /role="img"[^>]*aria-label="[^"]+"/.test(html))
-check('svg <text> elements balance', (svg.match(/<text/g) || []).length === (svg.match(/<\/text>/g) || []).length)
-check('every svg <rect> is self-closed', (svg.match(/<rect[^>]*\/>/g) || []).length === (svg.match(/<rect/g) || []).length)
-check('every svg <path> is self-closed', (svg.match(/<path[^>]*\/>/g) || []).length === (svg.match(/<path/g) || []).length)
-check('every svg <polygon> is self-closed', (svg.match(/<polygon[^>]*\/>/g) || []).length === (svg.match(/<polygon/g) || []).length)
+/* 4. the SVGs are well formed enough to render ---------------------------
+   ⚠ EVERY CHART, NOT THE FIRST ONE. The page now carries three charts (the overview,
+   the phase graph and the learning loop), so "exactly one <svg>" stopped being the
+   right invariant the moment the second one was added: what matters is that EVERY svg
+   is well formed, labelled, and self-closed, and that the count is the count the page
+   claims. A check pinned to one svg would have covered one chart and ignored two. */
+const svgs = [...html.matchAll(/<svg[\s\S]*?<\/svg>/g)].map((m) => m[0])
+check('there are three inline <svg> charts (found ' + svgs.length + ')', svgs.length === 3,
+  'the page draws the overview, the phase graph and the learning loop')
+check('every svg has a viewBox and integer dimensions',
+  svgs.every((s) => /viewBox="[^"]+"/.test(s) && /\bwidth="\d+"/.test(s) && /\bheight="\d+"/.test(s)))
+check('every svg is labelled for assistive technology',
+  [...html.matchAll(/data-diagram="[a-z-]+" role="img" aria-label="([^"]*)"/g)].length === 3
+  && [...html.matchAll(/data-diagram="[a-z-]+" role="img" aria-label="([^"]*)"/g)].every((m) => m[1].length > 60))
+check('every svg <text> balances', svgs.every((s) => (s.match(/<text/g) || []).length === (s.match(/<\/text>/g) || []).length))
+check('every svg <rect> is self-closed', svgs.every((s) => (s.match(/<rect[^>]*\/>/g) || []).length === (s.match(/<rect/g) || []).length))
+check('every svg <path> is self-closed', svgs.every((s) => (s.match(/<path[^>]*\/>/g) || []).length === (s.match(/<path/g) || []).length))
+check('every svg <polygon> is self-closed', svgs.every((s) => (s.match(/<polygon[^>]*\/>/g) || []).length === (s.match(/<polygon/g) || []).length))
 
 /* 5. no attribute is left unquoted ---------------------------------------
    Parsed attribute by attribute, not by a scanning regex. A scanning regex reports

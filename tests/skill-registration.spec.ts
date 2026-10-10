@@ -74,7 +74,10 @@ describe('T12 — the skill BODY carries the rules, not a pointer to them', () =
   })
 
   it('says so when a phase declares no sections rather than emitting an empty list', () => {
-    const registration = phaseSkillRegistration({ fileName: 'x.md', label: 'x', requiredSections: [], audited: false, tdd: false, qa: false })
+    // T40: `memoryWrite` is part of PhaseRules like `tdd`/`qa` are, so this hand-built fixture states
+    // it — null here, because the case under test is a phase that declares no sections AND owes no
+    // memory write. The assertions are unchanged.
+    const registration = phaseSkillRegistration({ fileName: 'x.md', label: 'x', requiredSections: [], audited: false, tdd: false, qa: false, memoryWrite: null })
     expect(registration.content).toContain('(none declared for this phase)')
     expect(registration.whenToUse).not.toContain('gate(s)')
   })

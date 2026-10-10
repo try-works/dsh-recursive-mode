@@ -32,7 +32,7 @@ import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
 import { readMemoryEntries, retrieveMemory, renderMemorySection, selectMemory } from './memory.ts'
 import { readFeedback, recordInjection, settleInjections } from './memory-feedback.ts'
-import { runPhase8Trigger, resolveExtractor, spawnExtractorRunner } from './training.ts'
+import { runPhase8Trigger, resolveExtractor, spawnExtractorRunner, phase8MemoryLockRefusal } from './training.ts'
 import { buildAskQuestion, GATE_DEFAULT_ARTIFACT, pendingGateFor } from './recursive_ask.tool.ts'
 import { contractDigest } from './policy.ts'
 import type { WorkflowEngineLike } from './workflow-audit.ts'
@@ -575,14 +575,17 @@ export class RecursiveRuntime extends Service {
             // stdio a capture needs, and the response file is the parent's own interface anyway.
             runner: spawnExtractorRunner({ cwd: root, responseFile: join(runDir, 'training-response.json') }),
             write: (relativePath, content) => {
-              const target = join(root, relativePath)
+              // T40 - WRITER/READER AGREEMENT. The shards this trigger writes are memory-plane docs, so they
+              // belong under .recursive/memory/ where the plane lint, the registry and the phase-8 artifact all
+              // look - the seam previously joined them onto the workspace root, landing them OUTSIDE the plane.
+              const target = join(root, '.recursive', relativePath)
               mkdirSync(dirname(target), { recursive: true })
               writeFileSync(target, content, 'utf8')
               return relativePath
             },
             readText: (relativePath) => {
               try {
-                return readFileSync(join(root, relativePath), 'utf8')
+                return readFileSync(join(root, '.recursive', relativePath), 'utf8')
               } catch {
                 return null
               }

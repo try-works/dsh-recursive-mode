@@ -51,10 +51,11 @@ It exists to reduce blind doc-by-doc scanning. It is not a second workflow spec.
   - the installed `recursive-router`, `recursive-subagent`, and `recursive-review-bundle` skills
 - Working on memory behavior:
   - `/.recursive/memory/MEMORY.md`
-  - the installed `recursive-training` skill
-  - `/.recursive/scripts/recursive-training-loader.py`
-  - `/.recursive/memory/training/`
+  - the memory shards themselves: `/.recursive/memory/domains/`, `/.recursive/memory/training/`, and the rest of the registry in `MEMORY.md`
+  - the plugin's **TS** memory surfaces — `recursive_phase` (injects the shards that match this run and phase) and `/recursive memory "<task>" [--phase <nn>]` (the same selection, printed with its score components)
+  - `recursive_closeout --phase 08` for the run-close training trigger, which runs in-process; its extractor is the operator environment variable `RECURSIVE_TRAINING_EXTRACTOR_CMD`
   - `/.recursive/memory/skills/SKILLS.md`
+  - ⚠ there is no `.recursive/scripts/` helper and no Python anywhere in this plugin — lint, lock, status, closeout and retrieval all run in-process, so a script path is not a route to any of them
 
 ## Non-Canonical Bridges
 

@@ -8,6 +8,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { join, isAbsolute, resolve, sep } from 'node:path'
 import { getLockStatus } from './lock.ts'
+import { runIdProblem } from './run-id.ts'
 import { validateTransition, type GateCheckResult } from './lifecycle.ts'
 import {
   evaluateToolPolicy, loadToolPolicyFile,
@@ -199,11 +200,18 @@ export interface GuardTransition {
  * and the payload is built by `buildGateBlockAsk` — the SAME builder the lock tool uses, so the two
  * refusals cannot offer different options. It is absent on every decision that is not a lock-order
  * refusal decided from real blockers, which is why every reader must treat it as optional.
+ *
+ * ⚠ ISSUE 2 (b): `runId` IS THE RUN THE GUARD RESOLVED AND READ — optional and additive for the same
+ * reason. `evaluateToolGuard` sets it on EVERY decision, allow included, and `index.ts` logs it instead of
+ * the filesystem's active run: a record whose `runId` came from one resolution while the rule read another
+ * is exactly the two-answers-in-one-payload defect this pairs with. It stays OPTIONAL so a hand-built
+ * decision (and `coerceAskToDecision`'s key-frozen input/output) is unaffected; a reader falls back to the
+ * active run when it is absent, which is the pre-existing behaviour.
  */
 export type ToolGuardDecision =
-  | { kind: 'allow'; warn?: string; rule?: GuardRule; transition?: GuardTransition }
-  | { kind: 'deny'; reason: string; rule?: GuardRule; transition?: GuardTransition; ask?: GateBlockAsk }
-  | { kind: 'ask'; reason?: string; rule?: GuardRule; transition?: GuardTransition }
+  | { kind: 'allow'; warn?: string; rule?: GuardRule; transition?: GuardTransition; runId?: string }
+  | { kind: 'deny'; reason: string; rule?: GuardRule; transition?: GuardTransition; ask?: GateBlockAsk; runId?: string }
+  | { kind: 'ask'; reason?: string; rule?: GuardRule; transition?: GuardTransition; runId?: string }
 
 export interface ToolExecLike {
   name: string
@@ -296,6 +304,75 @@ export function currentPhaseArtifact(worktreeRoot: string, runId: string): strin
 }
 
 /**
+ * ISSUE 2 (a) — THE RUN A GUARD CALL IS ABOUT, and the one whose tree it may read.
+ *
+ * THE DEFECT THIS ANSWERS, measured before the fix: `recursive_lock {runId: 'run-b', artifact:
+ * '01-as-is.md'}` was REFUSED with `monotonic lock-order: … 00-requirements.md (DRAFT)` — run-A's blocker —
+ * while `run-b` had `00-requirements.md` LOCKED and `01-as-is.md` DRAFT, so locking it in run-b was LEGAL.
+ * The guard resolved the run from the FILESYSTEM (`resolveRunDir`, i.e. the active/newest run) while the
+ * tool resolves it from `args.runId`, so the guard judged a DIFFERENT RUN than the call was about. Under
+ * `advisory` the deny was coerced to an allow-with-warning and the tool refused on its own terms, which is
+ * why the strict default is what made it bite.
+ *
+ * SO THE RULE IS: for a LOCK call that NAMES a run, the guard judges THAT RUN. It is the same choice the
+ * tool makes, so the two layers cannot disagree about which tree the ordering rule is a property of. A
+ * caller that names nothing (every real `write`, and a lock that relies on the active run) is unaffected:
+ * the active run still governs, which is what the write-side rules rely on.
+ *
+ * ⚠ THIS IS SCOPED TO THE LOCK TOOLS DELIBERATELY, and the scope is per rule, not per convenience:
+ *
+ *   - `lock-order` (`recursive_lock*`) — the caller's run WINS. The tool acts on `args.runId`, and the
+ *     rule is about THAT run's prerequisites, so the guard must not answer for another run. This is the
+ *     measured defect.
+ *   - `locked-write` (the write-tool family) — NOT APPLICABLE, by construction: the rule resolves no run
+ *     at all. It reads the target file's own `Status:` through the path the caller named, so there is no
+ *     run to prefer and nothing could disagree.
+ *   - `phase-order` (the write-tool family) — the ACTIVE run KEEPS WINNING, and this function does not
+ *     touch it. Two reasons, both deliberate: (1) a `write` call carries no run id — no write tool declares
+ *     one — so consulting `args.runId` here would hand a caller a way to ESCAPE the active run's ordering
+ *     by naming some other run in an argument the tool ignores; and (2) the rule's declared scope is the
+ *     run being worked in (it abstains for another run's tree, documented in `phaseOrderRule`), and moving
+ *     that scope would be a new refusal, not a consistency fix.
+ *
+ * ⚠ A CALLER-SUPPLIED ID IS A NAME, NEVER A PATH, and it is validated before it can point the guard at
+ * anything: the id is trimmed the way `recursive_lock` trims it, then put through `runIdProblem` — the
+ * SAME gate the run-id-shaped tools use, which refuses separators, drive specifiers, `..`, a colon, a
+ * leading/trailing dot and an over-long name — and finally the resolved directory must sit UNDER this
+ * worktree's `<root>/.recursive/run`, the containment rule `runtime.ts` applies to a run directory.
+ *
+ * An id that fails any of those is NOT USED: the guard falls back to the active run, exactly as it behaved
+ * before this change. Falling back (rather than denying) is deliberate: an unusable id is a caller mistake
+ * the tool itself refuses (`BAD_RUN_ID` / `Artifact not found`), and inventing a new guard refusal for it
+ * would be a second, competing answer to a question `runIdProblem` already owns.
+ *
+ * A usable id does NOT have to name an EXISTING run: a run with no tree has no unlocked prerequisites, so
+ * the ordering rule abstains and the LOCK TOOL still refuses the lock (it checks the artifact exists before
+ * anything else). Requiring existence would instead re-introduce the defect in its ugliest form — a refusal
+ * built from ANOTHER run's blockers.
+ */
+export function resolveGuardRunId(
+  name: string,
+  args: Record<string, unknown>,
+  worktreeRoot: string,
+  activeRunId: string,
+): string {
+  if (!LOCK_TOOL_NAMES.has(name) || !worktreeRoot) return activeRunId
+  const raw = args.runId
+  if (typeof raw !== 'string') return activeRunId
+  // The lock tool's own normalisation (`args.runId.trim()`), applied before the shape gate so a padded id
+  // is judged as the name the tool will act on, not as the padded string the guard happened to receive.
+  const declared = raw.trim()
+  if (declared === '' || runIdProblem(declared) !== null) return activeRunId
+  // CONTAINMENT. With a shape-valid name the join cannot escape, but the rule is asserted rather than
+  // assumed: a future change to the id grammar must not be able to move the guard's read outside the run
+  // layer, where the "prerequisites" it found would belong to something else entirely.
+  const runRoot = resolve(worktreeRoot, '.recursive', 'run')
+  const prefix = runRoot.endsWith(sep) ? runRoot : runRoot + sep
+  if (!resolve(join(runRoot, declared)).startsWith(prefix)) return activeRunId
+  return declared
+}
+
+/**
  * `mode` is the gate's configured posture. Its parameter default FOLLOWS the config
  * default by REFERENCE (`DEFAULT_ENFORCEMENT.toolGuards`) rather than repeating the
  * literal: a bare call is "the caller had no mode to hand", and the answer to that must
@@ -315,7 +392,11 @@ export function evaluateToolGuard(
 ): ToolGuardDecision {
   const name = exec.name
   const args = (exec.arguments ?? {}) as Record<string, unknown>
-  const runId = typeof activeRunId === 'string' ? activeRunId.trim() : ''
+  // ⚠ ISSUE 2 — THE RUN IS RESOLVED ONCE, HERE, for the whole call: the policy's phase baseline, the
+  // lock-order rule's subject and the decision's own `runId` all read this one answer, so a refusal cannot
+  // describe a run the rule did not read. See `resolveGuardRunId` for which rule prefers the caller's run
+  // and why the others do not.
+  const runId = resolveGuardRunId(name, args, worktreeRoot, typeof activeRunId === 'string' ? activeRunId.trim() : '')
   const runDir = join(worktreeRoot, '.recursive', 'run', runId)
 
   // T15: the transition gate is consulted BEFORE the verdict so its result can
@@ -334,7 +415,10 @@ export function evaluateToolGuard(
   const policy = resolveToolPolicyForGuard(worktreeRoot, runId, activePhaseArtifact)
   const context: ToolPolicyContext = { args, runDir, runId, worktreeRoot, activePhaseArtifact }
   const decision = evaluateToolPolicy(policy, name, args, context)
-  return advisory(verdictFor(mode, decision, String(args.artifact ?? '')), transition)
+  // The resolved run rides on EVERY decision, including an allow: the guard-decision log records which run
+  // a decision was about, and a record that named the ACTIVE run while the rule read another one is exactly
+  // the two-answers-in-one-payload defect this pairs with (see `[run: <id>]` in `lockOrderRule`).
+  return { ...advisory(verdictFor(mode, decision, String(args.artifact ?? '')), transition), runId }
 }
 
 /**

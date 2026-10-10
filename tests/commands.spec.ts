@@ -72,7 +72,11 @@ describe('commands.ts — /recursive grammar (R4)', () => {
     expect(first.text).toContain('created')
     expect(existsSync(join(repo, '.recursive', 'AGENTS.md'))).toBe(true)
     expect(existsSync(join(repo, '.recursive', 'STATE.md'))).toBe(true)
-    expect(existsSync(join(repo, '.recursive', 'scripts'))).toBe(true)
+    // ⚠ ABSENCE, NOT PRESENCE, AND THAT IS THE FIX: the repair used to create an EMPTY
+    // `.recursive/scripts/` while the shipped `CLAUDE.md` pointers and the canonical `RECURSIVE.md`
+    // both sent the agent into it for a script that does not exist. The repair path must not put that
+    // trap back, so `/recursive bootstrap` is asserted to leave the directory absent.
+    expect(existsSync(join(repo, '.recursive', 'scripts'))).toBe(false)
     expect(existsSync(join(repo, 'CLAUDE.md'))).toBe(true)
     // run/ artifacts untouched by repair.
     expect(existsSync(join(runDir, '00-requirements.md'))).toBe(true)

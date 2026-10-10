@@ -7,10 +7,11 @@
  */
 import { describe, it, expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RecursiveRuntime } from '../src/runtime.ts'
+import { selectMemory } from '../src/memory.ts'
 import {
   runPhase8Trigger, countPhase8LockedRuns, trainingGate, groupLearnings, inferSubsystem,
   TRAINING_EXIT, PHASE8_ARTIFACT, resolveExtractor, runExtractor, TRAINING_EXTRACTOR_ENV,
@@ -318,6 +319,70 @@ describe('T30 — extractor payload → items → groups', () => {
     expect(outcome.failure).toBe('EXTRACTOR_UNAVAILABLE')
     expect(items).toEqual([])
     expect(groups).toEqual([])
+  })
+})
+
+/**
+ * T30 — ⚠ THE ROUND TRIP, END TO END: the trigger WRITES a training shard and the plugin's own LOADER
+ * READS IT BACK.
+ *
+ * WHY THIS IS THE TEST THAT MATTERS. Each half can look correct alone and the loop still be open, which
+ * is exactly what was measured: the trigger wrote `memory/training/<task-type>.md` and registered that
+ * path in `MEMORY.md`, while `MEMORY_KINDS` did not list `training` and the loader resolved `memory/`
+ * against a root no workspace has. So the writer's own output was unreachable by the reader that was
+ * supposed to score it, and README §10's "the memory plane's next run scores it" was not true of the
+ * shards training produces. A test of either half passes over that; this one does not.
+ *
+ * ⚠ IT BINDS THE PRODUCTION SHAPE: the write and read seams go to the REAL filesystem under a real
+ * `.recursive/memory/`, and the read goes through `selectMemory` — the same function `recursive_phase`
+ * calls at phase entry — rather than through a helper written for the test.
+ */
+describe('T30 — the written training shard is reachable by the loader (the loop closes)', () => {
+  it('writes memory/training/<mode>.md and then FINDS it through selectMemory', () => {
+    const root = makeRoot(2)
+    try {
+      const items = [
+        { runId: 'run-0', paths: ['src/lock.ts'], text: 'the lock chain must be validated upstream first' },
+        { runId: 'run-1', paths: ['src/lock.ts'], text: 'the lock chain must be validated upstream first' },
+      ]
+      const toDisk = (relativePath: string, content: string): string => {
+        mkdirSync(join(root, '.recursive', relativePath, '..'), { recursive: true })
+        writeFileSync(join(root, '.recursive', relativePath), content, 'utf8')
+        return relativePath
+      }
+      const result = runPhase8Trigger(root, 'run-0', {
+        rerun: true,
+        extractorAvailable: true,
+        items,
+        write: toDisk,
+        readText: (relativePath) => {
+          try {
+            return readFileSync(join(root, '.recursive', relativePath), 'utf8')
+          } catch {
+            return null
+          }
+        },
+      })
+      expect(result.code).toBe('OK')
+      expect(result.writes).toContain('memory/training/winner-only.md')
+
+      // The loader reads the plane the SCAFFOLD creates — `.recursive/memory/` — which is the location
+      // the trigger's own registry line advertises. Asserted on the SOURCE the loader resolved, not on a
+      // rendered title: the title is the renderer's business and the property here is that the loader
+      // OPENED the file the trigger wrote.
+      const selection = selectMemory(root, { query: 'lock chain validated upstream' })
+      expect(selection.injected).toBe(true)
+      const sources = selection.shards.map((shard) => shard.entry.source.split(/[\\/]/).slice(-2).join('/'))
+      expect(sources).toContain('training/winner-only.md')
+      // And the registry line it wrote names a path that resolves on disk — a registry that advertises a
+      // shard nothing can open is the defect this test exists to catch.
+      const registry = readFileSync(join(root, '.recursive', 'memory', 'MEMORY.md'), 'utf8')
+      const line = registry.split('\n').find((candidate) => candidate.includes('memory/training/winner-only.md'))
+      expect(line).toBeDefined()
+      expect(existsSync(join(root, '.recursive', 'memory', 'training', 'winner-only.md'))).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })
 

@@ -289,10 +289,9 @@ Two conventions matter more than they look:
 repoRoot)` resolves the workspace the *session* is in. A plugin that used `process.cwd()` would silently lint the
 wrong repository when the host checkout and the workspace differ.
 
-**The memory plane is read at `<controlPlaneRoot>/memory/<kind>/`.** This was measured, not assumed: a probe
-showed `<dir>/memory/domains` is selected, `<dir>/.recursive/memory/...` is not, and using `.recursive` as the
-root is selected again. A behaviour test that seeds the wrong path fails *exactly like* a broken implementation,
-which is why the distinction is written down here.
+**The memory plane is read from the plane the scaffold creates, not from beside it.** `loadMemoryIndex` resolves each kind under `<controlPlaneRoot>/.recursive/memory/<kind>/` — the directory `bootstrap.ts` scaffolds, `ts-lint.ts` lints, and the review bundle already read — and falls back to `<controlPlaneRoot>/memory/<kind>/` only when that kind has no readable shard there. That is the same **prefer-then-fall-back, never merge** rule `readFeedback` follows for its own moved sidecar: the earlier location is consulted only when the current one yields nothing, because two snapshots of one shard added together would count a shard twice.
+
+Before that fallback existed the loader joined `memory/` straight onto the root it was handed, so it read `<dir>/memory/domains` — **a directory no real workspace has** — while the plane sat at `<dir>/.recursive/memory/domains`. Measured live: a workspace with the plane scaffolded, `memory/training/` included, and no `<dir>/memory/` at all, where `selectMemory` reported *"the memory plane is empty"* on every phase of every run. Passing `.recursive` itself as the root still resolves, through the second entry.
 
 ---
 
@@ -562,11 +561,12 @@ inputs are visible.
 
 ```mermaid
 flowchart LR
-    subgraph sources["memory/&lt;kind&gt;/*.md"]
+    subgraph sources[".recursive/memory/&lt;kind&gt;/*.md"]
         D1["domains/"]
         D2["patterns/"]
-        D3["incidents/"]
-        D4["episodes/"]
+        D3["episodes/"]
+        D4["training/"]
+        D5["skills/"]
     end
 
     Q["query:<br/>the run's own<br/>00-requirements.md<br/>(first 4000 chars)"] --> SEL
@@ -578,8 +578,9 @@ flowchart LR
     D2 --> IDX
     D3 --> IDX
     D4 --> IDX
+    D5 --> IDX
 
-    SEL --> OUT["top N shards →<br/>the review bundle"]
+    SEL --> OUT["top N shards →<br/>the phase payload<br/>and the review bundle"]
     SEL --> REC["recordInjection()<br/>memory-injections.json"]
     REC --> SET["settleInjections() at closeout<br/>over the LOCKED phases only"]
     SET --> FB
@@ -587,6 +588,12 @@ flowchart LR
     classDef input fill:#eef,stroke:#446
     class Q,F,P,FB input
 ```
+
+**`MEMORY_KINDS` is the list of kinds that are auto-loaded, and it is exactly those five.** `incidents/` and
+`archive/` are stored and documented by the router but are *not* auto-loaded — `archive/` is historical by the
+router's own definition, and adding `incidents/` is a ranking decision rather than a typo fix. `training/` **is**
+in the list because it is the kind the phase-8 trigger writes: with it absent, the shards training produced were
+written and registered in `MEMORY.md` while the loader that was supposed to score them could not see the kind.
 
 **Scoring is additive and inspectable.** A shard scores for matching the query, for overlapping the changed
 paths (`MEMORY_PATH_MATCH_WEIGHT = 3`), for applying to the current phase (`MEMORY_PHASE_MATCH_WEIGHT = 2`), and
@@ -688,6 +695,12 @@ Which closes the loop the [memory plane](#9-how-it-works-the-memory-plane) opene
 `selectMemory` **scores** them, `recordInjection` remembers what was used, `settleInjections` settles it at
 closeout, and `feedbackBonus` nudges the next selection. The plugin's prompts and its context are meant to
 improve from its own recorded outcomes rather than from someone's recollection of them.
+
+**And the loop is only closed when the reader can see every kind the writer produces.** The trigger writes one
+shard per subsystem into `memory/domains/` *and* one per task type into `memory/training/<task-type>.md`, and the
+second of those is the reason `training` is in `MEMORY_KINDS` (§9): a writer whose output the reader cannot reach
+is the loop being described rather than closed. `tests/training-trigger.spec.ts` asserts the round trip end to
+end — trigger writes, loader finds the shard it wrote — because either half can look correct alone.
 
 **Design and status:** [TRAINING.md](TRAINING.md) is the design — including the phases P1–P5, each with a live
 acceptance, and the measured comparison with the reference implementation it deliberately does **not** copy.

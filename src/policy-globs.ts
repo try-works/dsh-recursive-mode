@@ -76,6 +76,11 @@ export interface Decision {
  * Extra facts a rule predicate may need. `args` is always the tool call's
  * arguments; the run coordinates are present only when the caller has them
  * (a guard call from a real session does; a pure policy unit test need not).
+ *
+ * ⚠ `runId` IS NOT DECORATION: the lock-order rule puts it in the refusal (`[run: <id>]`), so a refusal
+ * names the run whose tree it was decided from. It is the run the guard RESOLVED for this call — the run
+ * the call named when it named a usable one, otherwise the active run (see `resolveGuardRunId` in
+ * `enforcement.ts`) — never a second, independently-derived answer.
  */
 export interface ToolPolicyContext {
   args: Record<string, unknown>
@@ -444,15 +449,34 @@ export const LOCK_TOOL_NAMES = new Set(['recursive_lock', 'recursive_lock_phase'
  * sentence; the predicate adds the blocking artifact and its status, which is
  * what distinguishes a guard refusal from `lockArtifact`'s own
  * `Prerequisite blockers:` error (`tests/guard-path.spec.ts` asserts both).
+ *
+ * ⚠ ISSUE 2 (b) — AND IT NAMES THE RUN IT READ, `ctx.runId`, as `[run: <id>]`.
+ *
+ * The blockers above are read FROM A DIRECTORY (`runDir`), and until this suffix existed the refusal said
+ * only "an earlier phase must be locked first  00-requirements.md (DRAFT)" — a sentence with no run in it.
+ * That is what let a refusal MIX TWO RUNS in one payload: a call naming run-b could be judged against
+ * run-a's tree (the guard resolved the run from the filesystem, the tool from `args.runId`) and the caller
+ * was told about `00-requirements.md (DRAFT)` while the guard-decision record said `runId: run-a` and the
+ * gate-block ask said `artifact: 01-as-is.md`. The blocking artifact, the artifact the caller named and the
+ * run the record attributed it to were three answers to one question.
+ *
+ * The fix is two-sided: the guard now judges the run the CALL NAMES (see `resolveGuardRunId` in
+ * `enforcement.ts`), and this suffix makes the evaluated run part of the sentence, so the payload can be
+ * read without cross-referencing the log record — and a reader can SEE which run was read, which is what
+ * makes a future mismatch visible instead of silent.
+ *
+ * `runId` is optional because the pure policy layer may be called with no run context at all (a policy
+ * unit test, a preview probe): the sentence is then exactly what it always was, and no run is invented.
  */
-function lockOrderRule(artifact: unknown, runDir: string | undefined): ToolPolicyPredicateMatch | null {
+function lockOrderRule(artifact: unknown, runDir: string | undefined, runId?: string): ToolPolicyPredicateMatch | null {
   const name = String(artifact ?? '')
   if (!name || !runDir) return null
   const blockers = getPrerequisiteBlockers(runDir, name)
   if (blockers.length === 0) return null
+  const where = typeof runId === 'string' && runId.trim() !== '' ? ' [run: ' + runId.trim() + ']' : ''
   return {
     verdict: 'deny',
-    detail: blockers.map((b) => b.artifact + ' (' + b.status + ')').join(', '),
+    detail: blockers.map((b) => b.artifact + ' (' + b.status + ')').join(', ') + where,
     // THE SAME READ, carried up rather than thrown away: the denial's recovery options are built
     // from these blockers, and re-deriving them one layer higher would be a second filesystem
     // answer to a question this rule has already answered.
@@ -603,7 +627,7 @@ export function builtInToolPolicyRules(): ToolPolicyRule[] {
       verdict: 'deny',
       reason: 'monotonic lock-order: an earlier phase must be locked first',
       label: 'lock-order',
-      predicate: (id, args, ctx) => (LOCK_TOOL_NAMES.has(id) ? lockOrderRule(args.artifact, ctx.runDir) : null),
+      predicate: (id, args, ctx) => (LOCK_TOOL_NAMES.has(id) ? lockOrderRule(args.artifact, ctx.runDir, ctx.runId) : null),
     },
   ]
   for (const name of WRITE_TOOL_NAMES) {
@@ -662,7 +686,7 @@ export function builtInToolPolicyDefault(): ToolPolicy {
 export function attachPolicyPredicate(rule: ToolPolicyRule): ToolPolicyRule {
   if (rule.predicate) return rule
   if (rule.pattern === 'recursive_lock*') {
-    return { ...rule, predicate: (id, args, ctx) => (LOCK_TOOL_NAMES.has(id) ? lockOrderRule(args.artifact, ctx.runDir) : null) }
+    return { ...rule, predicate: (id, args, ctx) => (LOCK_TOOL_NAMES.has(id) ? lockOrderRule(args.artifact, ctx.runDir, ctx.runId) : null) }
   }
   // ⚠ THE LABEL IS CONSULTED BEFORE THE PATTERN, because the phase-order rule and the
   // locked-artifact rule share EVERY write-tool pattern (see `builtInToolPolicyRules`).

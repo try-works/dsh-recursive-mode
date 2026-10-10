@@ -188,4 +188,56 @@ describe('T29 — the injection point is the phase-entry call, and it injects no
       await m.dispose()
     }
   })
+
+  /**
+   * ⚠ THE MEASURED DEFECT THIS PINS, and it is why the whole temporal axis was dead in live runs.
+   *
+   * The loader joined `memory/<kind>/` straight onto the root it was handed, so it read
+   * `<root>/memory/domains/` — a directory NO WORKSPACE HAS — while `bootstrap.ts` created the plane at
+   * `<root>/.recursive/memory/domains/`, `ts-lint.ts` linted it there, and the review bundle read it
+   * there. `selectMemory` therefore reported "the memory plane is empty" over a full plane, on every
+   * phase of every run, and the shards the phase-8 trigger writes were unreachable by the loader that
+   * is supposed to score them.
+   */
+  it('reads the SCAFFOLDED plane at .recursive/memory/, which is where bootstrap puts it', async () => {
+    const m = await mount()
+    try {
+      mkdirSync(join(m.root, '.recursive', 'memory', 'domains'), { recursive: true })
+      const requirements = readFileSync(join(m.root, '.recursive', 'run', 'r1', '00-requirements.md'), 'utf8')
+      const term = requirements.split(/\s+/).filter((word) => word.length > 5)[0] ?? 'requirements'
+      writeFileSync(
+        join(m.root, '.recursive', 'memory', 'domains', 'shard.md'),
+        '## Prior learning from the scaffolded plane\n\nThis run concerns ' + term + ' and its ordering rules.\n',
+        'utf8',
+      )
+      const rules = await m.runtime.phaseRules('r1')
+      expect(rules?.memoryReason).toContain('injected 1')
+      expect(rules?.memory).toContain('Prior learning from the scaffolded plane')
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('PREFERS the scaffolded plane per kind and never merges the earlier root into it', async () => {
+    const m = await mount()
+    try {
+      const requirements = readFileSync(join(m.root, '.recursive', 'run', 'r1', '00-requirements.md'), 'utf8')
+      const term = requirements.split(/\s+/).filter((word) => word.length > 5)[0] ?? 'requirements'
+      const body = (title: string) => '## ' + title + '\n\nThis run concerns ' + term + ' and its ordering rules.\n'
+      mkdirSync(join(m.root, '.recursive', 'memory', 'domains'), { recursive: true })
+      mkdirSync(join(m.root, 'memory', 'domains'), { recursive: true })
+      writeFileSync(join(m.root, '.recursive', 'memory', 'domains', 'shard.md'), body('Scaffolded plane'), 'utf8')
+      writeFileSync(join(m.root, 'memory', 'domains', 'shard.md'), body('Beside the plane'), 'utf8')
+
+      const selection = selectMemory(m.root, { query: term })
+      // ONE answer, not two: the current location wins, and the earlier one is consulted only when the
+      // current one has nothing for that kind. Two snapshots of one shard added together would count a
+      // shard twice and a duplicated shard would outrank a real one — the rule `readFeedback` follows.
+      expect(selection.shards.length).toBe(1)
+      expect(selection.shards[0]?.entry.title).toBe('Scaffolded plane')
+      expect(selection.shards[0]?.entry.source).toContain('.recursive')
+    } finally {
+      await m.dispose()
+    }
+  })
 })

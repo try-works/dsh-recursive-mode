@@ -90,8 +90,8 @@ Required read behavior:
 - If relevant prior runs are found, read only the docs needed from those runs to understand the affected codebase areas before writing the new run artifacts.
 - If no relevant prior runs are identified, skip that step.
 - After reading `MEMORY.md`, load only the memory docs relevant to the current task. Do not load the entire memory tree by default.
-- If the task may benefit from prior experiential learnings, load only the relevant docs under `/.recursive/memory/training/` and `/.recursive/memory/domains/`, preferably by using the training loader with filesystem-backed discovery.
-- If the optional `recursive-training` skill is installed, run `/.recursive/scripts/recursive-training-loader.py` after reading `MEMORY.md` and before planning or implementation whenever the task may benefit from experiential memory. If no automatic hook is wired, the agent must still manually load relevant training docs from the memory index when they matter.
+- If the task may benefit from prior experiential learnings, load only the relevant docs under `/.recursive/memory/training/` and `/.recursive/memory/domains/`.
+- The plugin loads those docs itself, **in-process and in TypeScript**: call `recursive_phase` on entering a phase and it returns the memory shards that match the run and the phase in play, with the reason stated when none matched. For an on-demand lookup, `/recursive memory "<task>" [--phase <nn>]` prints the same selection with the score component behind each shard and a reason for each shard it excluded. Nothing is loaded by running a script — this plugin ships no `.recursive/scripts/` helper and no Python — and nothing is ever fabricated: an empty result means continue normally.
 - If the run plans delegated review, subagent help, review bundles, smoke harness portability work, or other skill-sensitive execution, load `/.recursive/memory/skills/SKILLS.md` and the relevant skill-memory shards before planning or auditing.
 - Prefer `Status: CURRENT` memory docs for planning/execution.
 - `Status: SUSPECT` memory docs may be used as leads but must be revalidated before trust.
@@ -559,9 +559,10 @@ Phase 8 — Memory maintenance and impact review
 - Audit must verify memory updates and status transitions against reviewed final product/worktree paths, touched memory docs, prior memory truth, `STATE.md`, and `DECISIONS.md`
 - Must include `## Run-Local Skill Usage Capture` with concrete availability / attempted / used / worked-well / issue / recommendation fields whenever skill usage is relevant to the run
 - Must include `## Skill Memory Promotion Review` explaining what durable lessons were promoted, what stayed run-local, and why
-- If the optional `recursive-training` skill is installed, run `/.recursive/scripts/recursive-training-phase8-trigger.py` immediately after `08-memory-impact.md` locks to extract or refresh cross-run experiential learnings.
-- `recursive-lock` does not invoke training by itself. After Phase 8 locks, either run the trigger directly or re-run `recursive-closeout --phase 08` (without `--force`) so the helper can call `recursive-training-phase8-trigger.py --auto`.
-- Treat trigger/GRPO exit `2` (extractor unavailable) and exit `3` (zero items written) as unsuccessful training; do not claim the memory plane was updated.
+- The training pass runs **in-process**: re-run the closeout for the phase — `recursive_closeout` with `phase 08` for a run whose `08-memory-impact.md` has already been closed out once — and the plugin's phase-8 trigger extracts or refreshes cross-run experiential learnings then.
+- `recursive_lock` does not invoke training by itself, and neither does the FIRST closeout of phase 08: training at the first lock would train the run on itself. The trigger fires on the closeout **re-run**, and it needs at least two runs with a LOCKED `08-memory-impact.md` before it will extract — one run is an anecdote, not evidence. There is no trigger script to run.
+- The extractor is the operator environment variable `RECURSIVE_TRAINING_EXTRACTOR_CMD`, and its answer comes back through a response file rather than a pipe. An unset command is a named failure, never a silent success.
+- Treat trigger exit `2` (extractor unavailable) and exit `3` (nothing usable to extract, including too little evidence) as unsuccessful training; do not claim the memory plane was updated.
 - **TODO Requirement:** Phase artifact MUST include `## TODO` section with checkable items
 - **TODO Enforcement:** ALL TODO items must be checked off before locking
 - **Completion rule:** the run is not fully complete before Phase 8 passes
@@ -752,7 +753,7 @@ Recursive phases are one-way. Iteration is allowed within a phase, but after a p
 ### DRAFT vs LOCKED
 
 - While a phase is in progress, its output artifact status is `DRAFT`. The agent may revise it until both gates pass.
-- When both gates pass, the agent must lock the artifact with `.recursive/scripts/recursive-lock.py` or `.recursive/scripts/recursive-lock.ps1`. The lock command is the primary supported path and must:
+- When both gates pass, the agent must lock the artifact with the **`recursive_lock` tool**. It is the primary supported path and it must:
   1) verify the artifact is lockable,
   2) set Status to `LOCKED`,
   3) set `LockedAt`,
@@ -779,11 +780,11 @@ that contains its own hash.
 
 #### Preferred: use the lock command
 
-Use `.recursive/scripts/recursive-lock.py` (cross-platform) or `.recursive/scripts/recursive-lock.ps1` (PowerShell) to lock a draft artifact. Those commands validate lockability, write `Status: LOCKED`, write `LockedAt`, and compute `LockHash` using the canonical normalization rules.
+Use the **`recursive_lock`** tool to lock a draft artifact — run **`recursive_lint`** first when you want the artifact machine-checked before you attempt the lock. It validates lockability, writes `Status: LOCKED`, writes `LockedAt`, and computes `LockHash` using the canonical normalization rules; it refuses a lock whose gates or whose earlier phases are unmet. This plugin runs in-process in TypeScript: there is no lock script to call under `.recursive/scripts/`, and no Python in the package at all.
 
 #### Secondary: verify an existing lock
 
-Use `.recursive/scripts/verify-locks.py` (cross-platform) or `.recursive/scripts/verify-locks.ps1` (PowerShell) to verify and (optionally) fix mismatched hashes on already locked artifacts.
+Use the **`recursive_status`** tool to verify already locked artifacts: it recomputes every `LockHash` and reports each artifact's state, naming a `Status: LOCKED` artifact whose hash no longer matches as `TAMPERED`. There is no separate verifier to call, and deliberately no fix-up mode — see the tampering action below.
 
 #### Manual computation examples
 
@@ -1763,8 +1764,8 @@ The LockHash is a SHA-256 hash of the normalized artifact content at lock time. 
 "How to compute LockHash" above for the canonical normalization rules.
 
 **Preferred:**
-- use `.recursive/scripts/verify-locks.py` for cross-platform verification (and optional fixing)
-- use `.recursive/scripts/verify-locks.ps1` when running in PowerShell environments
+- use the `recursive_status` tool: it recomputes every `LockHash` under the run and reports the lock state per artifact
+- use the `recursive_lint` tool to machine-check one artifact against its phase rules before or after locking
 
 **PowerShell:**
 ```powershell
@@ -1796,28 +1797,18 @@ A phase artifact is **lock-valid** only when ALL of the following are true:
 
 ### Automated Verification
 
-Use the provided verifier scripts to verify all locks:
+Use the plugin's own tools to verify locks. There is no verifier script to run:
 
-```bash
-# Verify specific run
-python ./.recursive/scripts/verify-locks.py --run-id "<run-id>"
+```text
+# One run: the phase table and per-artifact lock state. A LockHash that no longer
+# matches its content is reported as TAMPERED, with the receipt it was locked under.
+recursive_status  { "runId": "<run-id>" }
 
-# Scan all runs
-python ./.recursive/scripts/verify-locks.py
+# All runs in the workspace, from the slash-command surface
+/recursive status <run-id>
 
-# Fix incorrect hashes (use with caution)
-python ./.recursive/scripts/verify-locks.py --run-id "<run-id>" --fix
-```
-
-```powershell
-# Verify specific run
-.\.agents\skills\recursive-mode\scripts\verify-locks.ps1 -RunId "<run-id>"
-
-# Scan all runs
-.\.agents\skills\recursive-mode\scripts\verify-locks.ps1
-
-# Fix incorrect hashes (use with caution)
-.\.agents\skills\recursive-mode\scripts\verify-locks.ps1 -RunId "<run-id>" -Fix
+# Machine-check a single artifact against its phase rules before locking it
+recursive_lint  { "runId": "<run-id>", "artifact": "<artifact>.md" }
 ```
 
 ### Tampering Detection
@@ -1829,7 +1820,7 @@ If LockHash doesn't match the canonical normalized content:
 3. **Line endings changed** (CRLF vs LF)
 
 **Action:**
-- If accidental: Use `verify-locks.py --fix` (or `verify-locks.ps1 -Fix`) to update hash
+- If accidental: restore the artifact's content. The plugin has **no `--fix` on purpose** — re-hashing a changed artifact would erase the only evidence that it changed, so the mismatch is reported as `TAMPERED` and the decision (restore the content, or record an addendum) stays with you.
 - If intentional modification: This is an anti-pattern. Use addenda instead.
 
 ### Phase Transition Lock Chain

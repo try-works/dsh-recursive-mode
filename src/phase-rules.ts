@@ -227,6 +227,119 @@ const SECTION_MAP: Record<string, string[]> = {
   ],
 }
 
+/* -------------------------------------------------------------------------- */
+/* T40 — THE PHASE-8 MEMORY WRITE, AS A RULE                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * T40 — `.recursive/memory/`, the plane THIS plugin writes, and the phase-8 step that was prose.
+ *
+ * ⚠ WHY THIS EXISTS, MEASURED. Three completed runs in a live workspace left `.recursive/memory/`
+ * exactly as `bootstrap.ts` scaffolded it: `MEMORY.md` and the skill docs were still the
+ * bootstrap-created placeholders, while run 03's `08-memory-impact.md` had its
+ * "Write the durable ones to memory, with provenance" box TICKED and its `Inputs` line naming
+ * ANOTHER plugin's store (`memory_search` / `memory_status` is dsh-memory, not this plugin). So the
+ * phase declared its memory step done against a system this plugin does not own, and the plugin's
+ * own learning never activated — the owner's words: *"the agent should write to .recursive/memory/
+ * in phase 8, that's a hard requirement that needs to be enforced"*.
+ *
+ * ⚠ THE FIX IS A FACT, NOT A STRONGER SENTENCE. A prose step is ticked by the agent that would have
+ * had to do it, which is exactly what happened. What follows is the same requirement in the form the
+ * workflow can CHECK: a path under the plane, declared in the artifact, whose own text on disk
+ * carries this run's provenance (`Source-Runs`). "The run wrote its durable memory" then stops being
+ * a claim about the run's intentions and becomes a claim about files.
+ *
+ * ⚠ WHY IT IS NOT IN `SECTION_MAP`, deliberately: that map is byte-parity with the canonical
+ * linter's `get_artifact_required_sections` (`tests/phase-rules.parity.spec.ts` pins all twelve
+ * lists), and a section added there would be a parity break dressed up as a feature. The requirement
+ * rides on a section the canonical template ALREADY scaffolds — `## Affected Memory Docs` — plus a
+ * field the plane's own linter already requires, so the artifact shape stays canonical.
+ */
+export const PHASE8_MEMORY_ARTIFACT = '08-memory-impact.md'
+
+/** The plane, repo-relative. The trailing slash is what every guard here tests for. */
+export const MEMORY_PLANE_PREFIX = '.recursive/memory/'
+
+/** The canonical section the declaration goes in — present in every scaffolded phase-8 artifact. */
+export const PHASE8_MEMORY_SECTION = 'Affected Memory Docs'
+
+/**
+ * Where a durable doc may be filed, and the `Type` the memory-plane linter requires for it.
+ *
+ * ⚠ EVERY `dir` IS THE REAL PLANE, `.recursive/memory/…`, AND NOT A `memory/…` RELATIVE FORM. Measured:
+ * `bootstrap.ts` scaffolds the plane under `.recursive/`, `ts-lint.ts` lints it there, and the phase-8
+ * artifact cites it there — while the training trigger's own write seam joins its `memory/…` paths onto
+ * the workspace root, i.e. `<root>/memory/`, a directory that exists in no real workspace (the reader
+ * side of that defect was fixed in `memory.ts`; the writer side is `runtime.ts`'s seam and is reported,
+ * not edited). This table names the location a WRITE must land in, so it names the plane.
+ *
+ * ⚠ `skill` SHARES `pattern`'s Type ON PURPOSE: `/.recursive/memory/skills/patterns/` is where a
+ * promoted skill lesson ships (`bootstrap.ts` scaffolds three docs there), and the linter's allowed
+ * Types are `index|domain|pattern|incident|episode` — there is no `skill` Type to declare.
+ */
+export const MEMORY_DOC_LOCATIONS = {
+  domain: { dir: '.recursive/memory/domains', type: 'domain' },
+  pattern: { dir: '.recursive/memory/patterns', type: 'pattern' },
+  incident: { dir: '.recursive/memory/incidents', type: 'incident' },
+  episode: { dir: '.recursive/memory/episodes', type: 'episode' },
+  skill: { dir: '.recursive/memory/skills/patterns', type: 'pattern' },
+} as const
+
+export type MemoryDocKind = keyof typeof MEMORY_DOC_LOCATIONS
+
+/** The field that makes a doc THIS run's. It is the phase-8 gate's entire discriminator. */
+export const MEMORY_PROVENANCE_FIELD = 'Source-Runs'
+
+/** Where a run that believes it learned nothing can always record what the run was and what it cost. */
+export const MEMORY_ALWAYS_AVAILABLE = '.recursive/memory/episodes/<run-id>.md'
+
+/**
+ * The phase-8 obligation, as data — so the pre-step reminder, the `recursive_phase` payload and the
+ * lock-time gate all describe ONE rule instead of three paraphrases of it.
+ */
+export interface Phase8MemoryWriteRule {
+  /** The artifact that must declare the write. */
+  artifact: string
+  /** The plane the write must land in, repo-relative. */
+  plane: string
+  /** The section the declaration goes in. */
+  section: string
+  /** The field a doc must carry for the write to count as THIS run's. */
+  provenanceField: string
+  /** The doc a run with nothing else to record can always write. */
+  alwaysAvailable: string
+  kinds: readonly MemoryDocKind[]
+  /** One sentence per line the pre-step reminder injects. */
+  summary: string
+  /** The full instruction, for a caller that asks for the phase's rules. */
+  instruction: string
+}
+
+export const PHASE8_MEMORY_WRITE_RULE: Phase8MemoryWriteRule = {
+  artifact: PHASE8_MEMORY_ARTIFACT,
+  plane: MEMORY_PLANE_PREFIX,
+  section: PHASE8_MEMORY_SECTION,
+  provenanceField: MEMORY_PROVENANCE_FIELD,
+  alwaysAvailable: MEMORY_ALWAYS_AVAILABLE,
+  kinds: Object.keys(MEMORY_DOC_LOCATIONS) as MemoryDocKind[],
+  summary: 'HARD: this run must have WRITTEN at least one doc under ' + MEMORY_PLANE_PREFIX
+    + ' before ' + PHASE8_MEMORY_ARTIFACT + ' locks — ' + MEMORY_ALWAYS_AVAILABLE + ' is always available — declared by path under `## '
+    + PHASE8_MEMORY_SECTION + '` and carrying `' + MEMORY_PROVENANCE_FIELD + ': <this-run-id>`; citing a shard this run did not write does not count.',
+  instruction: 'HARD REQUIREMENT, CHECKED AT LOCK: before ' + PHASE8_MEMORY_ARTIFACT + ' locks, this run must have WRITTEN at least one doc under '
+    + MEMORY_PLANE_PREFIX + ' and declared that path under `## ' + PHASE8_MEMORY_SECTION + '`. A declared path counts ONLY when the doc on disk carries `'
+    + MEMORY_PROVENANCE_FIELD + '` naming THIS run, because that is what separates "the run wrote its memory" from "the run cited someone else\'s".'
+    + ' Render the doc with the metadata the memory-plane lint requires (Type, Status, Scope, Owns-Paths, Watch-Paths, ' + MEMORY_PROVENANCE_FIELD
+    + ', Validated-At-Commit, Last-Validated, Tags): ' + MEMORY_ALWAYS_AVAILABLE + ' is always available for a run-local lesson, `.recursive/memory/domains/`,'
+    + ' `.recursive/memory/patterns/` and `.recursive/memory/incidents/` hold generalized knowledge, and `.recursive/memory/skills/patterns/` is where a promoted skill lesson belongs.'
+    + ' A doc missing a required field, or carrying a Type/Status the plane lint rejects, FAILS the memory plane — write it in the canonical shape.'
+    + ' The written path enters the run diff under ' + MEMORY_PLANE_PREFIX + ', which phase 8 OWNS in its Worktree Diff Audit and Requirement Completion Status.',
+}
+
+/** The memory-write rule for an artifact, or null when that phase owes no memory write. */
+export function phase8MemoryWriteRuleFor(fileName: string): Phase8MemoryWriteRule | null {
+  return fileName === PHASE8_MEMORY_ARTIFACT ? PHASE8_MEMORY_WRITE_RULE : null
+}
+
 /**
  * get_artifact_required_sections(file_name, workflow_profile): canonical-parity
  * required section headings for a phase artifact. Defaults to TODO + Coverage
@@ -275,6 +388,14 @@ export interface PhaseRules {
   audited: boolean
   tdd: boolean
   qa: boolean
+  /**
+   * T40 — the memory-write obligation for this phase, or null when it owes none.
+   *
+   * ⚠ IT IS PART OF THIS STRUCTURE, not a parallel table, because `runtime.phaseRules` spreads this
+   * object straight into the `recursive_phase` payload and the pre-step reminder is built from the
+   * same source: a rule that lives here is a rule the agent is actually told, in one place.
+   */
+  memoryWrite: Phase8MemoryWriteRule | null
 }
 
 export function phaseRulesFor(fileName: string, workflowProfile: string = CURRENT_WORKFLOW_PROFILE): PhaseRules {
@@ -285,6 +406,7 @@ export function phaseRulesFor(fileName: string, workflowProfile: string = CURREN
     audited: AUDITED_PHASE_FILES.has(fileName),
     tdd: fileName === '03-implementation-summary.md',
     qa: fileName === '05-manual-qa.md',
+    memoryWrite: phase8MemoryWriteRuleFor(fileName),
   }
 }
 
@@ -304,6 +426,10 @@ export function phaseLintRulesMessage(fileName: string, workflowProfile: string 
     'Audited phases: end with Audit: PASS before setting Coverage/Approval PASS; record Audit Context and Audit Verdict.',
     'TDD (phase 3): declare TDD Mode: strict|pragmatic; strict requires RED + GREEN evidence paths.',
     'QA (phase 5): declare QA Execution Mode: human|agent-operated|hybrid; human/hybrid need user sign-off.',
+    // T40 — the phase-8 memory write is named HERE, once, where every other phase gate is named.
+    // Additive on purpose: the message is only ever asserted with `toContain` (r5-parity.spec.ts),
+    // so a new phase's obligation cannot be mistaken for a regression in an existing one.
+    ...(rules.memoryWrite === null ? [] : ['Memory write (phase 8, HARD): ' + rules.memoryWrite.summary]),
     '</system-reminder>',
   ]
   return lines.join('\n')
@@ -427,7 +553,24 @@ export function phaseBaselineRules(fileName: string): ToolPolicyRule[] {
       pattern: 'write*',
       verdict: 'deny',
       reason: 'phase ' + phase + ' is a documentation phase: writes outside the run tree are denied (the implementation is frozen)',
-      predicate: (_id, args, ctx) => (writesOutsideRunTree(args, ctx) ? { verdict: 'deny' } : null),
+      // ⚠ T40 — PHASE 8 CARRIES ONE CARVE-OUT, AND WITHOUT IT THE HARD REQUIREMENT IS UNSATISFIABLE.
+      //
+      // `.recursive/memory/**` is OUTSIDE `.recursive/run/<runId>/`, so this rule denied the very
+      // write phase 8 exists to make: under the shipped strict default an agent authoring its memory
+      // doc was refused as if it were editing the implementation. MEASURED, not assumed — the rule's
+      // own predicate answers `deny` for `.recursive/memory/...` in the phase whose whole job is that
+      // plane. So phase 8, and only phase 8, admits THIS PLUGIN'S OWN plane:
+      //   - the source tree stays denied (the implementation is frozen, and that is the rule's point);
+      //   - `.recursive/DECISIONS.md` / `.recursive/STATE.md` stay denied here — phases 6 and 7 own
+      //     them, and `writesOwnMemoryPlane` is deliberately narrower than `writesMemoryPlane`;
+      //   - a target that cannot be placed stays denied, because the carve-out must never fail open.
+      // ADVISORY IS UNCHANGED BY THIS: that mode coerces a `deny` into an `ask` and then into an
+      // allow-with-warning anyway, so the carve-out only changes what STRICT refuses.
+      predicate: (_id, args, ctx) => (
+        writesOutsideRunTree(args, ctx) && !(phase === '8' && writesOwnMemoryPlane(args, ctx))
+          ? { verdict: 'deny' }
+          : null
+      ),
     })
   }
 
@@ -479,6 +622,24 @@ function writesMemoryPlane(args: Record<string, unknown>, ctx: ToolPolicyContext
 function memoryPlanePath(abs: string): boolean {
   const normalized = abs.replace(/\\/g, '/')
   return /\/(decisions|state)\.md$/i.test(normalized) || /\/\.recursive\/memory(\/|$)/.test(normalized)
+}
+
+/**
+ * True when the call writes `.recursive/memory/**` — THIS PLUGIN'S OWN plane, and nothing else.
+ *
+ * ⚠ DELIBERATELY NARROWER THAN {@link writesMemoryPlane}, which also matches `DECISIONS.md` and
+ * `STATE.md`: phase 8's carve-out (T40) is about durable memory, not about handing phase 8 the two
+ * planes phases 6-7 own.
+ *
+ * ⚠ AND AN UNRESOLVABLE TARGET IS `false` HERE — the OPPOSITE of every other fail-closed answer in
+ * this file, because this is the PERMISSIVE branch: `true` means "do not deny", so a path the rules
+ * cannot place must not be admitted by it. "We could not tell where this lands" is a reason to
+ * refuse, never a reason to allow.
+ */
+function writesOwnMemoryPlane(args: Record<string, unknown>, ctx: ToolPolicyContext): boolean {
+  const abs = baselineTarget(args, ctx)
+  if (abs === 'unresolvable') return false
+  return /\/\.recursive\/memory(\/|$)/.test(abs.replace(/\\/g, '/'))
 }
 
 /**

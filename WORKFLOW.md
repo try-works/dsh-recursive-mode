@@ -163,11 +163,11 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  R1["recursive-closeout.py --run-id … --phase 04|05|06|07|08"] --> R2{"prerequisites locked?"}
+  R1["the reference's closeout, run per phase 04|05|06|07|08"] --> R2{"prerequisites locked?"}
   R2 -->|no| R3["WARN only —<br/>hard enforcement is at lock time"]
   R2 -->|yes| R4{"phase 08 AND exists<br/>AND locked AND not --force?"}
   R3 --> R4
-  R4 -->|yes| R5["RUN THE PHASE-8 TRAINING TRIGGER<br/>recursive-training-phase8-trigger.py --auto"]
+  R4 -->|yes| R5["RUN THE PHASE-8 TRAINING TRIGGER<br/>recursive_closeout --phase 08 (the re-run)<br/>in-process in training.ts"]
   R4 -->|no| R6{"artifact exists<br/>AND not --force?"}
   R6 -->|yes| R7["no-op: 'exists, not overwriting'<br/>exit 0"]
   R6 -->|no| R8["scaffold + write<br/>(+ preview URL for 05,<br/>non-zero if it cannot parse)"]
@@ -183,7 +183,7 @@ exit 0**; a **locked 08 rerun runs the training trigger**; `--force` overwrites.
 ```mermaid
 flowchart LR
   A["08-memory-impact LOCKED"] --> B{"closeout for 08<br/>run again?"}
-  B -->|yes| C["phase-8 training trigger --auto"]
+  B -->|yes| C["the phase-8 training trigger<br/>(in-process: training.ts)"]
   A2["or 08 re-run through the runtime (T30)"] --> C
   C --> D{"fewer than 2 phase-8-locked runs?"}
   D -->|yes| E["refuse: 'one run is an anecdote' (exit 3)"]

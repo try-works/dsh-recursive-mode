@@ -24,7 +24,19 @@ import { join } from 'node:path'
 // P3b: the counters, passed IN rather than read here, so a caller decides where the evidence comes from.
 import { type FeedbackBook, feedbackBonus } from './memory-feedback.ts'
 
-export const MEMORY_KINDS = ['domains', 'patterns', 'episodes', 'skills'] as const
+/**
+ * ⚠ `training` IS IN THIS LIST BECAUSE IT IS THE KIND THE PLUGIN'S OWN TRAINING PATH WRITES.
+ *
+ * The phase-8 trigger (`training.ts`) writes `memory/training/<task-type>.md` and advertises that path in
+ * `memory/MEMORY.md`; the shipped router (`references/bodies/memory-router.md`) tells an agent to load "the
+ * relevant docs under `/.recursive/memory/training/`". With `training` absent from this list the loader
+ * COULD NOT SEE THE SHARDS THE TRIGGER WROTE — the writer's own output was unreachable by the reader, so
+ * "the plane's next run scores it" (README §10) was not true of exactly the shards training produces.
+ *
+ * `incidents/` and `archive/` stay out deliberately: `archive/` is historical by the router's own definition,
+ * and widening retrieval to `incidents/` is a separate ranking decision that this change does not make.
+ */
+export const MEMORY_KINDS = ['domains', 'patterns', 'episodes', 'training', 'skills'] as const
 
 export type MemoryKind = (typeof MEMORY_KINDS)[number]
 
@@ -193,7 +205,29 @@ export function entryAppliesTo(entry: MemoryEntry): string[] {
 }
 
 /** The registry the loader starts from: the router, not the plane. */
-export const MEMORY_INDEX_FILE = 'memory/MEMORY.md'
+export const MEMORY_INDEX_FILE = '.recursive/memory/MEMORY.md'
+
+/**
+ * Where the plane may live under a workspace root, in PREFERENCE order.
+ *
+ * ⚠ THE MEASURED DEFECT THIS FIXES. `defaultMemoryList` used to join `memory/<kind>/` straight onto the
+ * root it was handed — i.e. `<root>/memory/` — and that directory EXISTS IN NO REAL WORKSPACE. `bootstrap.ts`
+ * scaffolds the plane at `<root>/.recursive/memory/`, `ts-lint.ts` lints it there, and the review bundle reads
+ * it there; this loader alone looked beside it. Measured live on a workspace whose `.recursive/memory/` was
+ * scaffolded and whose `<root>/memory/` did not exist: `selectMemory` reported "the memory plane is empty"
+ * over a plane that was there, every phase of every run — and the training shards `training.ts` writes were
+ * therefore unreachable by the loader that is supposed to score them.
+ *
+ * ⚠ PREFER, THEN FALL BACK — NEVER MERGE. This is the rule `readFeedback` already follows for its own moved
+ * sidecar (`memory-feedback.ts`: `FEEDBACK_FILE` then `LEGACY_FEEDBACK_FILE`): the current location wins, and
+ * the earlier one is consulted ONLY when the current one yields nothing, because two snapshots of one shard
+ * added together would count a shard twice and a duplicated shard would outrank a real one.
+ *
+ * ⚠ AND IT MAKES THE CALLER'S CONVENTION IRRELEVANT. Passing the workspace root resolves
+ * `<root>/.recursive/memory/`; passing `.recursive` itself resolves through the second entry. Both are
+ * accepted, which is what README §6 means by "using `.recursive` as the root is selected again".
+ */
+export const MEMORY_PLANE_BASES = ['.recursive/memory', 'memory'] as const
 
 /** Progressive disclosure defaults, matching the parent (`--max-docs` 3, `--max-items` 10). */
 export const MAX_MEMORY_DOCS = 3
@@ -298,12 +332,19 @@ function defaultMemoryRead(path: string): string | null {
 }
 
 function defaultMemoryList(root: string, kind: string): readonly string[] {
-  const dir = join(root, 'memory', kind)
-  try {
-    return readdirSync(dir)
-      .filter((name) => name.endsWith('.md'))
-      .map((name) => join(dir, name))
-  } catch {
-    return []
+  // Preference order, never merged: see {@link MEMORY_PLANE_BASES}. A kind with no readable shard in the
+  // scaffolded plane falls through to the earlier location, which is how a caller that rooted the plane at
+  // `memory/` directly (and how the training writer's own call site) keeps working.
+  for (const base of MEMORY_PLANE_BASES) {
+    const dir = join(root, base, kind)
+    try {
+      const files = readdirSync(dir)
+        .filter((name) => name.endsWith('.md'))
+        .map((name) => join(dir, name))
+      if (files.length > 0) return files
+    } catch {
+      // An absent or unreadable directory is a missing advantage, not a failed load.
+    }
   }
+  return []
 }

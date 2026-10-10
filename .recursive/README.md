@@ -1,5 +1,14 @@
 # recursive-mode Maintainer Notes
 
+> ⚠ **THIS FILE DESCRIBES THE PARENT `recursive-mode` METHODOLOGY REPO, WHICH IS PYTHON — NOT THIS ONE.**
+> It is committed here as the record of the methodology this plugin ports, and **none of the commands below
+> apply to this repository**: there is no `install-recursive-mode.py`, no `recursive-lock.py`, no
+> `.recursive/scripts/` runtime, and no Python anywhere in the package. The surfaces a reader of THIS repo
+> uses are the TypeScript ones: the `recursive_*` tools (`recursive_phase`, `recursive_init`,
+> `recursive_lock`, `recursive_lint`, `recursive_status`, `recursive_closeout`, …), the `/recursive`
+> command, and `pnpm build` / `pnpm test` / `pnpm typecheck`. Start from `/README.md` for this repo and
+> `/.recursive/RECURSIVE.md` for the workflow.
+
 This file is for maintainers of the `recursive-mode` repository itself.
 
 It is not the canonical workflow spec. The canonical workflow remains:

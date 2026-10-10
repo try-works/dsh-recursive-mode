@@ -1,11 +1,23 @@
 # Training & memory: a TypeScript design (proposal)
 
-**Status:** proposal, not implemented. **Scope:** replace the reference's Python training/loader scripts with a
+**Status:** ⚠ **SHIPPED, AND TYPESCRIPT-ONLY.** The design below was implemented in `src/memory.ts`,
+`src/memory-select.ts`, `src/memory-feedback.ts` and `src/training.ts`, and §1's table is the **measured
+reference implementation this port deliberately does not copy** — six Python scripts from the parent
+methodology repo. **None of them exists in this package and nothing in §1 is an instruction to run one.**
+The live surfaces are the `recursive_phase` tool (which injects the shards that match the run and the
+phase), `/recursive memory "<task>" [--phase <nn>]` (the same selection with its score components), and
+`recursive_closeout --phase 08` for the run-close trigger. There is no `.recursive/scripts/` directory and
+no Python anywhere in the plugin. **Scope:** replace the reference's Python training/loader scripts with a
 first-class TypeScript design inside this plugin — and improve on them rather than port them.
 
 ---
 
 ## 1 · What the reference does (measured, quoted)
+
+⚠ **This section is the PORT'S MEASUREMENT OF THE REFERENCE, kept because it is the evidence the rewrite
+was argued from — not a list of things to run.** Every script below is a Python file of the parent
+methodology repo (`D:\DEV\recursive-mode\skills\recursive-mode\scripts\`); none is shipped here, and the
+paths the reference documents (`.recursive/scripts/`) do not exist in a workspace this plugin scaffolds.
 
 | script | size | what its own header says |
 |---|---|---|

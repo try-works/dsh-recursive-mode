@@ -103,6 +103,23 @@ async function refusalMessage(m: Mount, artifact: string): Promise<string> {
   throw new Error('expected the lock to be refused, but it succeeded: ' + artifact)
 }
 
+/**
+ * The same refusal, WITH THE AGENT `recursive_lock` PASSES (`exec.agent`).
+ *
+ * ⚠ THE AGENT IS NOT INCIDENTAL: `lockArtifact`'s goal block routes through `blockRunToGoal(agent, …)`,
+ * which is a no-op without one (`{ ok: false, reason: 'no agent' }`). A case about the goal block must
+ * therefore call the runtime the way the TOOL calls it, or it would assert the absence of a block and call
+ * it a property.
+ */
+async function refusalWithAgent(m: Mount, artifact: string): Promise<string> {
+  try {
+    await m.ctx.recursive.lockArtifact(RUN, artifact, false, { session: { header: { cwd: m.repo } } })
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+  throw new Error('expected the lock to be refused, but it succeeded: ' + artifact)
+}
+
 describe('the fixture helper is compliant, so these cases cannot pass for the wrong reason', () => {
   it('lintRun over a run holding ONLY the authored artifact passes with zero FAILs', () => {
     const root = mkdtempSync(join(tmpdir(), 'rm-lockgate-proof-'))
@@ -218,6 +235,104 @@ describe('the pre-existing refusals keep their precedence', () => {
       expect(message).toContain('Prerequisite blockers:')
       expect(message).toContain(ARTIFACT)
       expect(message).not.toContain('phase standard')
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  /**
+   * ISSUE 1 — THE TOOL LAYER BLOCKS THE RUN'S GOAL, EXACTLY ONCE.
+   *
+   * `lockArtifact` is one of the TWO layers that refuse an out-of-order lock, and it is the one that has
+   * always coupled its refusal to the durable goal (`blockRunToGoal`, "a gate-block becomes a durable,
+   * UI-visible goal block"). The guard's pre-dispatch refusal now blocks the goal too — from the boundary,
+   * because a policy layer has no goals service — and this case pins the TOOL half of that pair so the two
+   * cannot drift: one refusal, one block, whichever layer produced it.
+   *
+   * ⚠ "NOT TWICE" IS ASSERTED, NOT ARGUED. The fake records the ATTEMPT before validating the transition,
+   * exactly like the live service (whose `block` requires an ACTIVE goal), so a second block of an
+   * already-blocked goal is visible as an attempt and countable as a DURABLE transition. Two refusals of
+   * the same lock therefore leave ONE phase change and a goal that is still blocked.
+   */
+  it('the ordering refusal blocks the run goal exactly once, and a repeat does not block it again', async () => {
+    const m = await mount()
+    const goal = { id: 'g1', revision: 1, objective: 'recursive-run:' + RUN + ' · active', phase: 'active' as const }
+    const store: {
+      current?: { id: string; revision: number; objective: string; phase: string }
+      blocks: Array<{ code: string; message: string }>
+      transitions: string[]
+    } = { current: goal, blocks: [], transitions: [] }
+    try {
+      m.ctx.recursive.attachGoals({
+        get: () => store.current as never,
+        create: () => { throw new Error('the tool path never creates a goal') },
+        block: (_agent: unknown, ref: { id: string; revision: number }, reason: { code: string; message: string }) => {
+          store.blocks.push(reason)
+          if (store.current?.phase !== 'active') throw new Error('goal is not active, so it cannot be blocked')
+          store.transitions.push('blocked')
+          store.current = { ...store.current, phase: 'blocked', revision: ref.revision + 1 }
+          return store.current as never
+        },
+        pause: () => { throw new Error('not used') },
+        resume: () => { throw new Error('not used') },
+        complete: () => { throw new Error('not used') },
+        clear: () => { throw new Error('not used') },
+      } as never)
+
+      const first = await refusalWithAgent(m, NEXT)
+      expect(first).toContain('Prerequisite blockers:')
+      expect(store.blocks, 'the tool refused the lock and the goal was not blocked').toHaveLength(1)
+      expect(store.blocks[0].code).toBe('prerequisite-blockers')
+      expect(store.blocks[0].message).toContain('monotonic lock-order')
+      expect(store.blocks[0].message).toContain(ARTIFACT)
+      expect(store.transitions.filter((t) => t === 'blocked')).toHaveLength(1)
+      expect(store.current?.phase).toBe('blocked')
+
+      // The SAME refusal again: the attempt is made (visible), the durable transition is NOT repeated.
+      const second = await refusalWithAgent(m, NEXT)
+      expect(second).toContain('Prerequisite blockers:')
+      expect(store.transitions.filter((t) => t === 'blocked'), 'the goal was blocked twice').toHaveLength(1)
+      expect(store.current?.phase).toBe('blocked')
+      expect(store.blocks.length).toBe(2)
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  /**
+   * …AND THE BLOCK IS THE TOOL'S, WHICH NEEDS THE LIVE AGENT.
+   *
+   * ⚠ FOUND WHILE WRITING THIS CASE, and worth stating because it is a property of the production path
+   * rather than of the test: `lockArtifact`'s goal block is a no-op without an agent
+   * (`blockRunToGoal` returns `{ ok: false, reason: 'no agent' }`), and `recursive_lock` is what supplies
+   * it (`exec.agent`). So the case above passes the agent exactly as the tool does, and this one asserts
+   * the difference out loud: the SAME refusal, with no agent, refuses the lock and blocks nothing. Without
+   * this pair, "the tool blocks the goal" could be a claim about a code path no caller reaches.
+   */
+  it('the tool path blocks the goal only when it has the live agent — as the recursive_lock tool supplies', async () => {
+    const m = await mount()
+    const store = { blocks: 0 }
+    try {
+      m.ctx.recursive.attachGoals({
+        get: () => ({ id: 'g1', revision: 1, objective: 'recursive-run:' + RUN + ' · active', phase: 'active' }),
+        create: () => { throw new Error('not used') },
+        block: () => { store.blocks += 1; return undefined as never },
+        pause: () => { throw new Error('not used') },
+        resume: () => { throw new Error('not used') },
+        complete: () => { throw new Error('not used') },
+        clear: () => { throw new Error('not used') },
+      } as never)
+
+      // No agent -> the ordering refusal still happens, and no block is attempted.
+      const withoutAgent = await refusalMessage(m, NEXT)
+      expect(withoutAgent).toContain('Prerequisite blockers:')
+      expect(store.blocks, 'a lock with no agent must not attempt a goal block').toBe(0)
+
+      // The agent the TOOL passes -> the block is attempted.
+      const withAgent = await m.ctx.recursive.lockArtifact(RUN, NEXT, false, { session: { header: { cwd: m.repo } } })
+        .then(() => 'LOCKED', (error: unknown) => (error instanceof Error ? error.message : String(error)))
+      expect(withAgent).toContain('Prerequisite blockers:')
+      expect(store.blocks, 'the tool path did not block the goal when it had the agent').toBe(1)
     } finally {
       await m.dispose()
     }

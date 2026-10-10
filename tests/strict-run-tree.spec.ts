@@ -69,7 +69,7 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -78,6 +78,7 @@ import {
 import { phaseNumberForArtifact, resolveFrom, withPhaseBaseline } from '../src/phase-rules.ts'
 import { evaluateToolPolicy, loadToolPolicyFile, toolPolicyPath } from '../src/policy-globs.ts'
 import { PHASE_SEQUENCE, getLockStatus, lockHashFromContent } from '../src/lock.ts'
+import { resolveRunDir } from '../src/run.ts'
 import { readGuardDecisions } from '../src/guard-log.ts'
 import { laterPhaseContent, requirementsContent } from '../src/init-templates.ts'
 import * as plugin from '../src/index.ts'
@@ -722,5 +723,206 @@ describe('live path — the same two verdicts through the mounted plugin', () =>
     } finally {
       await ctx.fiber.dispose()
     }
+  })
+})
+
+/**
+ * ISSUE 2 — THE GUARD JUDGED THE WRONG RUN.
+ *
+ * MEASURED before this fix, with two runs on disk: run-b had `00-requirements.md` LOCKED and `01-as-is.md`
+ * DRAFT, so locking it in run-b was LEGAL; run-a was the mtime-newest run with `00-requirements.md` DRAFT.
+ * `recursive_lock {runId: 'run-b', artifact: '01-as-is.md'}` was REFUSED with run-A's blocker
+ * (`monotonic lock-order: … 00-requirements.md (DRAFT)`), and the guard-decision record said `runId: run-a`
+ * while the gate-block ask said `artifact: 01-as-is.md` — one refusal naming two runs.
+ *
+ * WHY: the guard resolved the run from the FILESYSTEM (`resolveRunDir` — the active/newest run) while the
+ * TOOL resolves it from `args.runId`. Under `advisory` the deny was coerced to an allow-with-warning and the
+ * tool refused on its own terms, which is why the strict default is what made it bite.
+ *
+ * WHAT IS PINNED HERE, per rule, deliberately:
+ *   - `lock-order` (`recursive_lock*`): the run the CALL NAMES wins. It is the run the tool acts on, so the
+ *     guard must not answer for another run's prerequisites.
+ *   - `locked-write`: no run is resolved at all — the rule reads the TARGET's own `Status:` — so no run id
+ *     can move it. Asserted, so a future "resolve the run" change there has to argue with a test.
+ *   - `phase-order`: the ACTIVE run keeps winning, and a `runId` argument cannot re-point it. A write tool
+ *     declares no run id, so honouring one would hand a caller a way to escape the active run's ordering;
+ *     the rule's cross-run abstention is asserted as the deliberate behaviour it is documented to be.
+ *
+ * A caller-supplied id is a NAME, validated through the same `runIdProblem` gate the run-id-shaped tools
+ * use, and the last case proves an unusable one cannot move the guard's read: the escape target WOULD
+ * allow the lock, and the guard still refuses from the active run's tree.
+ *
+ * WHAT WOULD MAKE THESE CASES PASS VACUOUSLY: a fixture where run-a and run-b are the same directory, or
+ * where the two runs' `00-requirements.md` have the SAME status (so "judged the named run" and "judged the
+ * active run" produce one verdict). Both are guarded against explicitly: the runs are asserted distinct,
+ * the filesystem's own resolver is asserted to name run-a, and each allow/deny is paired with a
+ * counterfactual on the OTHER run that lands on the opposite verdict.
+ */
+describe('ISSUE 2 — the run the CALL names wins for lock tools, and only for lock tools', () => {
+  const ACTIVE_RUN = 'run-a'
+  const OTHER_RUN = 'run-b'
+
+  /** A minimal DRAFT artifact: enough for `getLockStatus` to classify it DRAFT. */
+  function draftArtifact(runId: string): string {
+    return 'Run: `/.recursive/run/' + runId + '/`\nPhase: `00 Requirements`\nStatus: `DRAFT`\n\n## TODO\n\n- [ ] x\n'
+  }
+
+  /** One run tree under a shared root, with the named files written. */
+  function runTree(root: string, runId: string, files: Record<string, string>): Run {
+    const runDir = join(root, '.recursive', 'run', runId)
+    mkdirSync(runDir, { recursive: true })
+    for (const [name, content] of Object.entries(files)) writeFileSync(join(runDir, name), content, 'utf8')
+    return { root, runDir, runId }
+  }
+
+  /**
+   * ISSUE 2's fixture: TWO runs, and run-a is the one the FILESYSTEM calls active. The ordering is STAMPED
+   * (`utimesSync`) and then read back through `resolveRunDir` — the very resolver `index.ts` uses — because
+   * an unstamped pair ties and the winner would depend on unspecified directory order.
+   */
+  function twoRuns(): { root: string; active: Run; other: Run } {
+    const root = mkdtempSync(join(tmpdir(), 'rm-two-runs-'))
+    tempRoots.push(root)
+    // run-b is created first so run-a is newer even before the stamp; both hold a DRAFT `00-requirements.md`
+    // (the ILLEGAL case), and each case locks the one it needs.
+    const other = runTree(root, OTHER_RUN, {
+      '00-requirements.md': draftArtifact(OTHER_RUN),
+      '01-as-is.md': draftArtifact(OTHER_RUN),
+      '08-memory-impact.md': draftArtifact(OTHER_RUN),
+    })
+    const active = runTree(root, ACTIVE_RUN, {
+      '00-requirements.md': draftArtifact(ACTIVE_RUN),
+      '01-as-is.md': draftArtifact(ACTIVE_RUN),
+      '08-memory-impact.md': draftArtifact(ACTIVE_RUN),
+    })
+    const future = new Date(Date.now() + 60_000)
+    utimesSync(active.runDir, future, future)
+    expect(resolveRunDir(root)?.runId, 'precondition: the filesystem names run-a as the active run').toBe(ACTIVE_RUN)
+    // The two runs must be different directories, or "judged the named run" would be unfalsifiable.
+    expect(active.runDir).not.toBe(other.runDir)
+    return { root, active, other }
+  }
+
+  /** The guard's verdict for one `recursive_lock` call, from the guard's own entry point. */
+  function lockGuard(root: string, activeRunId: string, args: Record<string, unknown>): ToolGuardDecision {
+    return evaluateToolGuard({ name: 'recursive_lock', arguments: args }, root, activeRunId, 'strict')
+  }
+
+  it('(a) a LEGAL lock on a NON-ACTIVE run is ALLOWED — the guard judges the run the call names', () => {
+    const { root, other } = twoRuns()
+    // run-b's `00-requirements.md` LOCKED: with `01-as-is.md` the only other artifact present, its
+    // prerequisite set is exactly that one artifact, so locking `01-as-is.md` in run-b is legal.
+    lockOnDisk(other, '00-requirements.md')
+
+    const legal = lockGuard(root, ACTIVE_RUN, { runId: OTHER_RUN, artifact: '01-as-is.md' })
+    expect(legal.kind, 'a legal lock in run-b was refused: ' + reasonOf(legal)).toBe('allow')
+    expect(legal.runId, 'the decision must name the run it judged').toBe(OTHER_RUN)
+
+    // THE COUNTERFACTUAL on the same tree, so the allow above cannot be a guard that stopped refusing
+    // out-of-order locks: the identical call aimed at the ACTIVE run IS refused, with run-a's blocker.
+    const ontoActive = lockGuard(root, ACTIVE_RUN, { runId: ACTIVE_RUN, artifact: '01-as-is.md' })
+    expect(ontoActive.kind).toBe('deny')
+    expect(ontoActive.rule).toBe('lock-order')
+    expect(reasonOf(ontoActive)).toContain('00-requirements.md (DRAFT)')
+    expect(ontoActive.runId).toBe(ACTIVE_RUN)
+  })
+
+  it('(b) an ILLEGAL lock on a NON-ACTIVE run is refused, and the refusal NAMES THAT RUN', () => {
+    const { root } = twoRuns()
+    const denied = lockGuard(root, ACTIVE_RUN, { runId: OTHER_RUN, artifact: '01-as-is.md' })
+    expect(denied.kind).toBe('deny')
+    expect(denied.rule).toBe('lock-order')
+    const reason = reasonOf(denied)
+    expect(reason).toContain('monotonic lock-order')
+    // run-b's blocker, from run-b's tree.
+    expect(reason).toContain('00-requirements.md (DRAFT)')
+    // ⚠ THE ASSERTION THIS ISSUE EXISTS FOR: the refusal names the run it READ.
+    expect(reason, 'the refusal does not name the run it evaluated').toContain(OTHER_RUN)
+    expect(reason, 'the refusal names a run it did NOT evaluate').not.toContain(ACTIVE_RUN)
+    // The decision agrees with its own sentence, and the gate-block payload agrees with both: one refusal,
+    // one run — the record and the ask can no longer disagree, because both carry this.
+    expect(denied.runId).toBe(OTHER_RUN)
+    const ask = (denied as { ask?: { artifact: string; blocked: string } }).ask
+    expect(ask, 'the strict lock-order refusal carried no ask').toBeDefined()
+    expect(ask!.artifact).toBe('01-as-is.md')
+    expect(ask!.blocked).toBe(reason)
+    expect(ask!.blocked).toContain(OTHER_RUN)
+  })
+
+  it('(c) a PATH-SHAPED runId cannot point the guard at another tree', () => {
+    const { root } = twoRuns()
+    // An ESCAPE target that would ALLOW the lock — a directory outside the run layer holding a LOCKED
+    // `00-requirements.md`. If a caller-supplied id could move the guard's read, this is the tree it would
+    // read, and the verdict would flip to `allow`. It must not.
+    const escape = join(root, 'elsewhere')
+    mkdirSync(escape, { recursive: true })
+    writeFileSync(join(escape, '00-requirements.md'), draftArtifact('escape'), 'utf8')
+    writeFileSync(join(escape, '01-as-is.md'), draftArtifact('escape'), 'utf8')
+    lockOnDisk({ root, runDir: escape, runId: 'escape' }, '00-requirements.md')
+    // Precondition, ASSERTED: the escape tree really is a tree that would allow this lock.
+    expect(getLockStatus(join(escape, '00-requirements.md'))).toBe('LOCKED')
+
+    const unusable: Array<[string, string]> = [
+      ['a relative path with a `..` segment', '../elsewhere'],
+      ['an absolute, drive-qualified path', escape],
+      ['a nested path', 'elsewhere/run'],
+      ['a padded-then-path-shaped id', ' ../elsewhere '],
+    ]
+    for (const [what, runId] of unusable) {
+      const decision = lockGuard(root, ACTIVE_RUN, { runId, artifact: '01-as-is.md' })
+      expect(decision.runId, what + ': an unusable runId moved the guard').toBe(ACTIVE_RUN)
+      expect(decision.kind, what + ': the guard did not judge the active run').toBe('deny')
+      expect(reasonOf(decision), what).toContain(ACTIVE_RUN)
+      expect(reasonOf(decision), what).not.toContain('elsewhere')
+    }
+
+    // CONTROL — the same id SHAPE is honoured when it is a NAME, so the refusals above are the validation
+    // and not a guard that ignores `args.runId` entirely.
+    const named = lockGuard(root, ACTIVE_RUN, { runId: OTHER_RUN, artifact: '01-as-is.md' })
+    expect(named.runId).toBe(OTHER_RUN)
+  })
+
+  it("(d) a WRITE cannot re-point the phase-order rule by naming a run in an argument", () => {
+    const { root, active, other } = twoRuns()
+    // The active run is at phase 0 (its `00-requirements.md` is DRAFT), so writing its LAST phase is the
+    // ordering violation the rule exists to refuse. The `runId` argument names the OTHER run — a write tool
+    // declares no such parameter, so honouring it would be an escape hatch out of the active run's order.
+    const escapeAttempt = evaluateToolGuard(
+      { name: 'write', arguments: { file_path: relativeArtifact(active, PHASE_EIGHT), content: 'x', runId: OTHER_RUN } },
+      root, ACTIVE_RUN, 'strict',
+    )
+    expect(escapeAttempt.kind, 'a runId argument re-pointed the phase-order rule: ' + reasonOf(escapeAttempt)).toBe('deny')
+    expect(escapeAttempt.rule).toBe('phase-order')
+    expect(escapeAttempt.runId).toBe(ACTIVE_RUN)
+
+    // …and the SAME argument on a write into the other run's tree neither re-points nor denies: another
+    // run's tree is the documented ABSTENTION of this rule (it is about THIS run's sequence), which is the
+    // active-run behaviour the write rules rely on and which this fix deliberately leaves alone.
+    const otherRunWrite = evaluateToolGuard(
+      { name: 'write', arguments: { file_path: relativeArtifact(other, PHASE_EIGHT), content: 'x', runId: ACTIVE_RUN } },
+      root, ACTIVE_RUN, 'strict',
+    )
+    expect(otherRunWrite.kind, 'another run\'s tree must keep the documented abstention: ' + reasonOf(otherRunWrite)).toBe('allow')
+    expect(otherRunWrite.runId, 'the active run still governs a write').toBe(ACTIVE_RUN)
+  })
+
+  it('(e) the locked-artifact rule resolves no run at all, so no runId can move it', () => {
+    const { root, other } = twoRuns()
+    lockOnDisk(other, '00-requirements.md')
+    // A write to the OTHER run's LOCKED artifact, with a `runId` naming the active run: the refusal comes
+    // from the target's own `Status:`, which is why this rule needed no change in this fix.
+    const decision = evaluateToolGuard(
+      { name: 'write', arguments: { file_path: relativeArtifact(other, '00-requirements.md'), content: 'x', runId: ACTIVE_RUN } },
+      root, ACTIVE_RUN, 'strict',
+    )
+    expect(decision.kind).toBe('deny')
+    expect(decision.rule).toBe('locked-write')
+    expect(reasonOf(decision)).toContain('locked-artifact write denial')
+    // CONTROL — the same file while it is NOT locked is allowed, so the deny above is the lock status and
+    // not a blanket refusal of another run's tree.
+    expect(evaluateToolGuard(
+      { name: 'write', arguments: { file_path: relativeArtifact(other, '01-as-is.md'), content: 'x' } },
+      root, ACTIVE_RUN, 'strict',
+    ).kind).toBe('allow')
   })
 })

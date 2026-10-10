@@ -2437,49 +2437,32 @@ Approval: PASS
 
 Before locking (or when a lock verification fails unexpectedly), lint the run artifacts for required header fields, required section headings, and TODO completion rules:
 
-```powershell
-# Python (cross-platform):
-python ./.agents/skills/recursive-mode/scripts/lint-recursive-run.py --run-id "<run-id>"
-# Or, when running from this repo:
-python ./.recursive/scripts/lint-recursive-run.py --run-id "<run-id>"
-python3 ./.agents/skills/recursive-mode/scripts/lint-recursive-run.py --run-id "<run-id>"
-python3 ./.recursive/scripts/lint-recursive-run.py --run-id "<run-id>"
+```text
+# One artifact (defaults to the run's current phase). `mode: "summary"` returns a few
+# findings plus the true totals; `full` (default) returns up to 200 per list. When a list
+# is clipped, `elided` says how many and how to see the rest.
+recursive_lint  { "runId": "<run-id>", "artifact": "<artifact>.md", "mode": "summary" }
 
-# Treat WARN as FAIL
-python ./.agents/skills/recursive-mode/scripts/lint-recursive-run.py --run-id "<run-id>" --strict
-python ./.recursive/scripts/lint-recursive-run.py --run-id "<run-id>" --strict
-python3 ./.agents/skills/recursive-mode/scripts/lint-recursive-run.py --run-id "<run-id>" --strict
-python3 ./.recursive/scripts/lint-recursive-run.py --run-id "<run-id>" --strict
+# Treat WARN as FAIL is not a flag here: `errors` are the failures, `warnings` are not,
+# and both lists come back with their true `failCount`/`warnCount`.
 
-# Lint specific run
-.\.agents\skills\recursive-mode\scripts\lint-recursive-run.ps1 -RunId "<run-id>"
-# Or, when running from this repo:
-.\scripts\lint-recursive-run.ps1 -RunId "<run-id>"
-
-# Treat WARN as FAIL
-.\.agents\skills\recursive-mode\scripts\lint-recursive-run.ps1 -RunId "<run-id>" -Strict
-.\scripts\lint-recursive-run.ps1 -RunId "<run-id>" -Strict
+# The same read, from the slash-command surface
+/recursive status <run-id>
 ```
+
+This plugin is TypeScript and runs the linter in-process: there is no `lint-recursive-run.py`/`.ps1` to call, and no `.recursive/scripts/` to call it from.
 
 ## Locking Commands
 
 Preferred:
 
-```powershell
-# Python (cross-platform)
-python ./.agents/skills/recursive-mode/scripts/recursive-lock.py --run-id "<run-id>" --artifact "<artifact>.md"
-# Or, when running from this repo:
-python ./.recursive/scripts/recursive-lock.py --run-id "<run-id>" --artifact "<artifact>.md"
-python3 ./.agents/skills/recursive-mode/scripts/recursive-lock.py --run-id "<run-id>" --artifact "<artifact>.md"
-python3 ./.recursive/scripts/recursive-lock.py --run-id "<run-id>" --artifact "<artifact>.md"
-
-# PowerShell
-.\.agents\skills\recursive-mode\scripts\recursive-lock.ps1 -RunId "<run-id>" -Artifact "<artifact>.md"
-# Or, when running from this repo:
-.\scripts\recursive-lock.ps1 -RunId "<run-id>" -Artifact "<artifact>.md"
+```text
+# Lock one artifact once its gates pass. It refuses a lock whose gates or whose earlier
+# phases are unmet, and writes Status: LOCKED, LockedAt and LockHash.
+recursive_lock  { "runId": "<run-id>", "artifact": "<artifact>.md" }
 ```
 
-The lock command is the primary supported path. It must refuse to lock artifacts whose required gates or lint-critical structure are still invalid.
+The lock tool is the primary supported path. It refuses to lock artifacts whose required gates or lint-critical structure are still invalid.
 
 Manual fallback for hash computation only:
 
@@ -2521,34 +2504,16 @@ sed '/^LockHash:/d' .recursive/run/<run-id>/<artifact>.md | tr -d '\r' | sha256s
 
 ### Automated Verification
 
-Use the provided script to verify all locks in a run:
+Use the plugin's own tool to verify all locks in a run — there is no verifier script:
 
-```bash
-# Verify specific run
-python ./.agents/skills/recursive-mode/scripts/verify-locks.py --run-id "<run-id>"
-# Or, when running from this repo:
-python ./.recursive/scripts/verify-locks.py --run-id "<run-id>"
-python3 ./.agents/skills/recursive-mode/scripts/verify-locks.py --run-id "<run-id>"
-python3 ./.recursive/scripts/verify-locks.py --run-id "<run-id>"
+```text
+# One run: the phase table and per-artifact lock state. A LockHash that no longer matches
+# its content is reported as TAMPERED, named against the receipt it was locked under.
+recursive_status  { "runId": "<run-id>" }
 
-# Fix incorrect hashes (use with caution)
-python ./.agents/skills/recursive-mode/scripts/verify-locks.py --run-id "<run-id>" --fix
-# Or, when running from this repo:
-python ./.recursive/scripts/verify-locks.py --run-id "<run-id>" --fix
-python3 ./.agents/skills/recursive-mode/scripts/verify-locks.py --run-id "<run-id>" --fix
-python3 ./.recursive/scripts/verify-locks.py --run-id "<run-id>" --fix
-```
-
-```powershell
-# Verify specific run
-.\.agents\skills\recursive-mode\scripts\verify-locks.ps1 -RunId "<run-id>"
-# Or, when running from this repo:
-.\scripts\verify-locks.ps1 -RunId "<run-id>"
-
-# Fix incorrect hashes (use with caution)
-.\.agents\skills\recursive-mode\scripts\verify-locks.ps1 -RunId "<run-id>" -Fix
-# Or, when running from this repo:
-.\scripts\verify-locks.ps1 -RunId "<run-id>" -Fix
+# There is deliberately no `--fix`. Re-hashing a changed artifact would erase the only
+# evidence that it changed, so the mismatch is reported and the decision (restore the
+# content, or record an addendum) stays with the agent.
 ```
 
 ### Manual Verification

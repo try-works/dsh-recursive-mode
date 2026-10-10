@@ -27,11 +27,15 @@ describe('R3 — partial-scaffold repair (upsert semantics, TS-only)', () => {
       for (const rel of [
         '.recursive/RECURSIVE.md', '.recursive/AGENTS.md', '.recursive/STATE.md', '.recursive/DECISIONS.md',
         '.recursive/memory/MEMORY.md', '.recursive/memory/skills/SKILLS.md',
-        '.recursive/config/recursive-router.json', '.recursive/scripts',
+        '.recursive/config/recursive-router.json',
         '.codex/AGENTS.md', '.agent/PLANS.md', '.cursorrules', 'CLAUDE.md', '.github/copilot-instructions.md',
       ]) {
         expect(existsSync(join(repo, rel)), rel).toBe(true)
       }
+      // ⚠ AND `.recursive/scripts/` IS DELIBERATELY NOT REPAIRED INTO EXISTENCE. The scaffold used to
+      // create it EMPTY while two shipped documents pointed into it; the repair path must not put the
+      // trap back, so this asserts the absence rather than the presence it used to require.
+      expect(existsSync(join(repo, '.recursive', 'scripts'))).toBe(false)
 
       // user content untouched
       expect(readFileSync(join(repo, '.recursive', 'memory', 'patterns', 'user-pattern.md'), 'utf8')).toContain('keep me')
@@ -42,7 +46,7 @@ describe('R3 — partial-scaffold repair (upsert semantics, TS-only)', () => {
     } finally { rmSync(repo, { recursive: true, force: true }) }
   })
 
-  it('removes stale .py from an existing workspace .recursive/scripts/', () => {
+  it('removes stale .py from an existing workspace .recursive/scripts/, then the emptied directory', () => {
     const repo = mkdtempSync(join(tmpdir(), 'repair-'))
     try {
       // stale python-era scripts dir
@@ -53,9 +57,28 @@ describe('R3 — partial-scaffold repair (upsert semantics, TS-only)', () => {
       bootstrapScaffold(repo)
 
       // stale .py/.ps1 removed (bootstrap does not copy them; the repair path
-      // drops python-era artifacts so the scaffold is TS-only)
+      // drops python-era artifacts so the scaffold is TS-only) …
       expect(existsSync(join(repo, '.recursive', 'scripts', 'lint-recursive-run.py'))).toBe(false)
       expect(existsSync(join(repo, '.recursive', 'scripts', 'recursive-status.ps1'))).toBe(false)
+      // … AND the directory goes with them once it is empty. Leaving it behind is the same trap the
+      // scaffold used to create: a documented-but-gone script path, with a directory to make it look real.
+      expect(existsSync(join(repo, '.recursive', 'scripts'))).toBe(false)
+    } finally { rmSync(repo, { recursive: true, force: true }) }
+  })
+
+  it('leaves a .recursive/scripts/ directory that still holds the USER’s own files', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'repair-'))
+    try {
+      mkdirSync(join(repo, '.recursive', 'scripts'), { recursive: true })
+      writeFileSync(join(repo, '.recursive', 'scripts', 'lint-recursive-run.py'), 'print(1)\n', 'utf8')
+      writeFileSync(join(repo, '.recursive', 'scripts', 'my-own-helper.mjs'), 'export const keep = true\n', 'utf8')
+
+      bootstrapScaffold(repo)
+
+      // The cleanup deletes .py/.ps1 and NOTHING else, and a directory it did not empty is the user's.
+      expect(existsSync(join(repo, '.recursive', 'scripts', 'lint-recursive-run.py'))).toBe(false)
+      expect(readFileSync(join(repo, '.recursive', 'scripts', 'my-own-helper.mjs'), 'utf8')).toContain('keep')
+      expect(existsSync(join(repo, '.recursive', 'scripts'))).toBe(true)
     } finally { rmSync(repo, { recursive: true, force: true }) }
   })
 

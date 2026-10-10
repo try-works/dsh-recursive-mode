@@ -188,6 +188,103 @@ describe('enforcement.ts — gates + config (R3/R4/R7/R8)', () => {
 })
 
 /**
+ * ISSUE 2 (b), AT THE LAYER THAT DECIDES IT — the refusal and the decision are about ONE run.
+ *
+ * The measured defect: a lock naming run-b was judged against run-a's tree (the guard resolved the run from
+ * the filesystem) and the refusal said `00-requirements.md (DRAFT)` — run-a's blocker — with no run named
+ * anywhere in the sentence. These cases pin the two halves of the fix at the guard's own entry point:
+ *
+ *   - the DECISION carries the run the guard resolved (`runId`), on an allow as well as on a refusal, so
+ *     the layer that logs it cannot attribute the answer to a different run;
+ *   - the REFUSAL names that run, and the gate-block ask built from it is still the SHARED builder's output
+ *     (`buildGateBlockAsk(artifact, reason)`) — no new field, so the guard's refusal and the lock tool's
+ *     refusal keep one payload shape.
+ *
+ * WHAT WOULD MAKE THESE PASS VACUOUSLY: a fixture in which both runs produce the same blocker. The
+ * counterfactual below asserts the OPPOSITE verdict for the same call aimed at the active run, so "judged
+ * the named run" and "judged the active run" cannot be confused for one another.
+ */
+describe('ISSUE 2 — the guard decides about the run the CALL names, and says which run that was', () => {
+  /** A minimal DRAFT artifact, enough for `getLockStatus` to classify it DRAFT. */
+  function draftArtifact(): string {
+    return 'Run: `/.recursive/run/x/`\nPhase: `00 Requirements`\nStatus: `DRAFT`\n\n## TODO\n\n- [ ] x\n'
+  }
+
+  /**
+   * Two runs under one root: `run-b`'s `00-requirements.md` LOCKED (so locking its `01-as-is.md` is LEGAL)
+   * and `run-a`'s DRAFT (so the same call aimed at run-a is REFUSED).
+   */
+  function twoRuns(lockOther = true): { root: string; otherRunDir: string } {
+    const root = mkdtempSync(join(tmpdir(), 'rm-enf-two-'))
+    const activeDir = join(root, '.recursive', 'run', 'run-a')
+    const otherRunDir = join(root, '.recursive', 'run', 'run-b')
+    mkdirSync(activeDir, { recursive: true })
+    mkdirSync(otherRunDir, { recursive: true })
+    writeFileSync(join(activeDir, '00-requirements.md'), draftArtifact(), 'utf8')
+    writeFileSync(join(activeDir, '01-as-is.md'), draftArtifact(), 'utf8')
+    const content = 'Run: run-b\nPhase: `00 Requirements`\nStatus: LOCKED\nCoverage: PASS\nApproval: PASS\n## TODO\n- [x] d\n'
+    const trailer = 'LockedAt: 2026-01-01T00:00:00Z\nLockHash: ' + '0'.repeat(64) + '\n'
+    writeFileSync(
+      join(otherRunDir, '00-requirements.md'),
+      lockOther
+        ? content + 'LockedAt: 2026-01-01T00:00:00Z\nLockHash: ' + lockHashFromContent(content + trailer) + '\n'
+        : draftArtifact(),
+      'utf8',
+    )
+    expect(getLockStatus(join(otherRunDir, '00-requirements.md')), 'precondition: run-b\'s phase 0 has the status this case is about')
+      .toBe(lockOther ? 'LOCKED' : 'DRAFT')
+    writeFileSync(join(otherRunDir, '01-as-is.md'), draftArtifact(), 'utf8')
+    return { root, otherRunDir }
+  }
+
+  it('honours the run a LOCK call names — and names it in the decision and in the refusal', () => {
+    const { root } = twoRuns()
+    // LEGAL: run-b's prerequisite is locked, so the caller's run is the one that decides this.
+    const legal = evaluateToolGuard(
+      { name: 'recursive_lock', arguments: { runId: 'run-b', artifact: '01-as-is.md' } }, root, 'run-a', 'strict',
+    )
+    expect(legal.kind, 'a legal lock in run-b was refused: ' + JSON.stringify(legal)).toBe('allow')
+    expect(legal.runId).toBe('run-b')
+
+    // ILLEGAL in run-b (its `00-worktree.md` is ABSENT but its `01-as-is.md` is DRAFT) — the point is the
+    // same call aimed at the ACTIVE run: it is refused, with the blocker of the run it named.
+    const illegal = evaluateToolGuard(
+      { name: 'recursive_lock', arguments: { runId: 'run-a', artifact: '01-as-is.md' } }, root, 'run-a', 'strict',
+    )
+    expect(illegal.kind).toBe('deny')
+    const reason = (illegal as { reason: string }).reason
+    expect(reason).toContain('monotonic lock-order')
+    expect(reason).toContain('00-requirements.md (DRAFT)')
+    expect(reason, 'the refusal does not name the run it read').toContain('[run: run-a]')
+    expect(illegal.runId).toBe('run-a')
+
+    // AND A CALL THAT NAMES NO RUN KEEPS THE ACTIVE RUN — the pre-existing behaviour every write-side rule
+    // and every lock without a runId relies on.
+    const unnamed = evaluateToolGuard({ name: 'recursive_lock', arguments: { artifact: '01-as-is.md' } }, root, 'run-a', 'strict')
+    expect(unnamed.kind).toBe('deny')
+    expect(unnamed.runId).toBe('run-a')
+    expect((unnamed as { reason: string }).reason).toContain('[run: run-a]')
+  })
+
+  it('a refusal about a NAMED run carries the same shared gate-block payload, built from its own sentence', () => {
+    const { root } = twoRuns(false)
+    const d = evaluateToolGuard(
+      { name: 'recursive_lock', arguments: { runId: 'run-b', artifact: '01-as-is.md' } }, root, 'run-a', 'strict',
+    )
+    expect(d.kind).toBe('deny')
+    const reason = (d as { reason: string }).reason
+    expect(reason).toContain('[run: run-b]')
+    // ⚠ ONE BUILDER, AND NO NEW FIELD: the run is named INSIDE the sentence, so the payload stays exactly
+    // `buildGateBlockAsk(artifact, reason)` — the object `recursive_lock` attaches to its own refusal.
+    const ask = (d as { ask?: ReturnType<typeof buildGateBlockAsk> }).ask
+    expect(ask, 'the strict named-run refusal carried no ask').toBeDefined()
+    expect(ask).toEqual(buildGateBlockAsk('01-as-is.md', reason))
+    expect(ask!.blocked).toContain('[run: run-b]')
+    expect(renderGateBlockAsk(ask!)).toContain('recursive_ask gate=gate-block artifact=01-as-is.md')
+  })
+})
+
+/**
  * The tamper ADMISSION test — the guard used to be blind to one spelling of one
  * path, measured rather than theorised.
  *

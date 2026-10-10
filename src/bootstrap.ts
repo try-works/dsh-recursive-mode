@@ -2,16 +2,18 @@
  * Idempotent scaffold installer (R3). TS port of install-recursive-mode.py's
  * core: bootstrap the FULL canonical /.recursive/ control plane + cross-tool
  * bridges byte-identically (RECURSIVE.md marker-wrapped, AGENTS.md, STATE/
- * DECISIONS, memory routers + shards, config/recursive-router.json, .gitignore,
- * vendored runtime scripts copied into .recursive/scripts/), plus the
- * agent/session-start Stage B (new vs resume) workspace-scoped to the session's
- * control-plane root (R1).
+ * DECISIONS, memory routers + shards, config/recursive-router.json, .gitignore),
+ * plus the agent/session-start Stage B (new vs resume) workspace-scoped to the
+ * session's control-plane root (R1).
+ *
+ * ⚠ NO `.recursive/scripts/` IS CREATED, and a legacy one is removed once it is empty — see the block in
+ * the scaffold below for the measurement that decided it.
  *
  * Templates + bodies + runtime scripts are SHIPPED package files under
  * references/ (never inlined TS string literals) and resolved relative to this
  * module (package install location), never process.cwd().
  */
-import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync, readFileSync, rmSync, rmdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -224,15 +226,21 @@ export function bootstrapScaffold(root: string): BootstrapResult {
     '.recursive/memory/skills/issues/.gitkeep', '.recursive/memory/skills/patterns/.gitkeep', '.recursive/run/.gitkeep',
   ]) noteFile(rel, '')
 
-  // Runtime scripts: TS-only scaffold (R2). No .py/.ps1 are vendored; the
-  // plugin's lint/lock/status/init run in-process via TS tools, so the
-  // scaffold carries an empty .recursive/scripts/ dir (kept for canonical
-  // tree-shape parity with the golden fixture).
-  noteDir('.recursive/scripts')
-  // R3 (run 09): TS-only repair — drop python-era artifacts from an EXISTING
-  // workspace's .recursive/scripts/ (the pre-0.1.6 scaffold vendored 29 .py +
-  // .ps1 wrappers; those are no longer shipped or needed). Deletes only
-  // .py/.ps1 under scripts/; never touches user content elsewhere.
+  // Runtime scripts: TS-ONLY, AND THE EMPTY DIRECTORY IS NO LONGER CREATED.
+  //
+  // ⚠ WHY IT GONE. It used to be scaffolded EMPTY — no .py/.ps1 is vendored, because lint/lock/status/
+  // closeout all run in-process as TS tools — while two shipped documents pointed INTO it: the `CLAUDE.md`
+  // memory pointers at `.recursive/scripts/recursive-training-loader.py`, and the canonical `RECURSIVE.md`
+  // at `.recursive/scripts/recursive-lock.py` / `verify-locks.py`. An empty directory that shipped documents
+  // send an agent into is a TRAP, not tree-shape parity: the agent follows the documented path, finds
+  // nothing, and the memory plane those documents promised never loads. Measured in three live runs — the
+  // directory was empty in every one, and no run ever locked a phase. Nothing in this package reads or
+  // executes anything from it; the only code that ever touched it is the legacy cleanup below.
+  //
+  // ⚠ THE CLEANUP STAYS, AND NOW FINISHES THE JOB. The pre-0.1.6 scaffold vendored 29 .py + .ps1 wrappers
+  // into real workspaces, so those are still deleted wherever they are found — and the directory is then
+  // removed when it is EMPTY, because leaving it behind is the same trap for the next agent. A directory
+  // still holding anything else is that user's and is left untouched.
   {
     const scriptsDir = join(recursiveRoot, 'scripts')
     if (existsSync(scriptsDir)) {
@@ -240,6 +248,14 @@ export function bootstrapScaffold(root: string): BootstrapResult {
         if (name.endsWith('.py') || name.endsWith('.ps1')) {
           rmSync(join(scriptsDir, name), { force: true })
         }
+      }
+      // ⚠ `rmdirSync`, NOT `rmSync({ recursive: false })`: measured — the latter throws `ERR_FS_EISDIR`
+      // on a directory, and a silently caught error here would leave exactly the empty directory this
+      // block exists to remove. A spec asserts the directory is GONE, so the wrong call cannot hide.
+      try {
+        if (readdirSync(scriptsDir).length === 0) rmdirSync(scriptsDir)
+      } catch {
+        // A directory that cannot be removed is not a scaffold failure, and never a reason to stop.
       }
     }
   }

@@ -16,7 +16,7 @@ Control-plane docs are not memory docs:
 - Read this file before loading any other memory docs.
 - Load only the memory docs relevant to the current task.
 - If the task may benefit from prior recursive-mode experiential learnings, use this index to identify the relevant docs under `/.recursive/memory/training/` and `/.recursive/memory/domains/`.
-- The optional `recursive-training-sync.py` helper is read-only; it prints startup guidance about what to read, but does not modify `MEMORY.md` or the memory plane.
+- The plugin loads this plane **in-process, in TypeScript**: the `recursive_phase` tool returns the shards that match the run and the phase in play, and `/recursive memory "<task>" [--phase <nn>]` prints the same selection with the score component behind every shard and a reason for every shard it left out. There is no `recursive-training-loader`/`recursive-training-sync` script to run and no `.recursive/scripts/` helper in this plugin.
 - If the task plans delegated review, subagent help, review bundles, smoke-harness portability work, or capability-sensitive execution, read `/.recursive/memory/skills/SKILLS.md` and then load the relevant skill-memory shards.
 - If Phase 8 will need to promote durable lessons, first capture run-local skill usage in the run artifact and only then promote generalized conclusions into skill-memory shards.
 - Prefer `Status: CURRENT` docs for planning and execution.

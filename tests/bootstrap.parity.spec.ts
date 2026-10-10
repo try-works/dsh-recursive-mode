@@ -61,14 +61,14 @@ describe('R3/R2 — canonical scaffold parity (bootstrap vs TS-only golden)', ()
     } finally { rmSync(repo, { recursive: true, force: true }) }
   })
 
-  it('writes RECURSIVE.md marker-wrapped (canonical 110,543 B body)', () => {
+  it('writes RECURSIVE.md marker-wrapped (canonical 111,588 B body)', () => {
     repo = mkdtempSync(join(tmpdir(), 'bootstrap-parity-'))
     try {
       bootstrapScaffold(repo)
       const content = readFileSync(join(repo, '.recursive', 'RECURSIVE.md'), 'utf8')
       expect(content.startsWith('# RECURSIVE.md\n\n<!-- RECURSIVE-MODE-CANONICAL:START -->')).toBe(true)
       expect(content.endsWith('<!-- RECURSIVE-MODE-CANONICAL:END -->\n')).toBe(true)
-      expect(Buffer.byteLength(content, 'utf8')).toBe(110543)
+      expect(Buffer.byteLength(content, 'utf8')).toBe(111588)
     } finally { rmSync(repo, { recursive: true, force: true }) }
   })
 
@@ -96,13 +96,23 @@ describe('R3/R2 — canonical scaffold parity (bootstrap vs TS-only golden)', ()
     } finally { rmSync(repo, { recursive: true, force: true }) }
   })
 
-  it('scaffold .recursive/scripts/ is TS-only (no .py/.ps1)', () => {
+  /**
+   * ⚠ THE CONTRACT INVERTED DELIBERATELY, AND THE REASON IS THE DEFECT. This used to assert that
+   * `.recursive/scripts/` EXISTS and is empty — the scaffold created it for "tree-shape parity" while
+   * the plugin vendored nothing into it. Two shipped documents then pointed INTO that empty directory
+   * (the `CLAUDE.md` memory pointers at `recursive-training-loader.py`, the canonical `RECURSIVE.md` at
+   * `recursive-lock.py`), so every agent in every workspace was sent to a path that is not there.
+   * Measured in three live runs: the directory was empty in each, and not one phase ever locked.
+   *
+   * An empty directory nothing needs is not parity, it is a trap; the assertion is now the absence, and
+   * it is STRICTER than the one it replaces — "no .py/.ps1 under scripts/" was satisfiable by an empty
+   * directory, "no scripts/ at all" is not.
+   */
+  it('does NOT create .recursive/scripts/ — the empty directory two documents used to point into', () => {
     repo = mkdtempSync(join(tmpdir(), 'bootstrap-parity-'))
     try {
       bootstrapScaffold(repo)
-      expect(existsSync(join(repo, '.recursive', 'scripts'))).toBe(true)
-      const got = walkTree(join(repo, '.recursive', 'scripts'))
-      expect(got.size).toBe(0)
+      expect(existsSync(join(repo, '.recursive', 'scripts'))).toBe(false)
     } finally { rmSync(repo, { recursive: true, force: true }) }
   })
 

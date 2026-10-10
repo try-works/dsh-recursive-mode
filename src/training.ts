@@ -22,12 +22,31 @@
  * ⚠ SUPERSEDE, NEVER DELETE. An update appends a revision and a removal appends a tombstone, so the
  * history of a learning stays readable; and a PINNED entry is untouchable by every automatic path.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+// T40: the phase-8 rule lives in the RULES module and the plane's contract lives in the LINTER, so
+// neither is restated here. A writer that validated against its own copy of the linter's field list
+// would be free to disagree with the linter about what a valid memory doc is.
+import {
+  MEMORY_ALWAYS_AVAILABLE,
+  MEMORY_DOC_LOCATIONS,
+  MEMORY_PLANE_PREFIX,
+  MEMORY_PROVENANCE_FIELD,
+  PHASE8_MEMORY_ARTIFACT,
+  PHASE8_MEMORY_SECTION,
+  type MemoryDocKind,
+} from './phase-rules.ts'
+import {
+  MEMORY_ALLOWED_STATUSES,
+  MEMORY_ALLOWED_TYPES,
+  MEMORY_REQUIRED_FIELDS,
+  getMdFieldValue,
+  hasHeaderField,
+} from './ts-lint.ts'
 
 /** The artifact whose lock marks a run as complete enough to learn from. */
-export const PHASE8_ARTIFACT = '08-memory-impact.md'
+export const PHASE8_ARTIFACT = PHASE8_MEMORY_ARTIFACT
 
 /** The parent's exit codes, kept as names so a caller cannot mistake one failure for the other. */
 export const TRAINING_EXIT = {
@@ -308,13 +327,30 @@ export function runPhase8Trigger(
  *
  * ⚠ ONE ITEM PER RUN IS NAMED, so a reader can trace a learning back to the run that produced it —
  * and the group is never presented as more evidence than it is.
+ *
+ * ⚠ T40 — AND IT NOW CARRIES THE PLANE'S METADATA HEADER, which it did not before. `memory/domains/
+ * <subsystem>.md` is a doc the memory-plane lint validates like any other, and this renderer wrote a
+ * bare `# Learnings:` heading — so the plugin's own cross-run extraction produced a doc its own
+ * `lint_memory_plane` FAILS for nine missing fields. The extraction was right and its output shape was
+ * wrong, which is exactly the kind of defect a write surface exists to prevent.
  */
-export function renderGroupShard(group: TrainingGroup): string {
+export function renderGroupShard(group: TrainingGroup, options: { lastValidated?: string } = {}): string {
+  const runs = [...new Set(group.items.map((item) => item.runId))]
   const lines = [
+    ...renderMemoryMetadata({
+      type: 'domain',
+      status: 'CURRENT',
+      scope: 'Learnings extracted for subsystem ' + group.subsystem + ' (' + group.mode + ') from ' + runs.length + ' run(s).',
+      sourceRuns: runs,
+      validatedAtCommit: 'extracted-at-run-close',
+      lastValidated: options.lastValidated ?? isoSeconds(),
+      tags: [group.subsystem, group.mode],
+    }).trimEnd().split('\n'),
+    '',
     '# Learnings: ' + group.subsystem,
     '',
     '- Mode: ' + group.mode,
-    '- Runs: ' + group.runs + ' (' + [...new Set(group.items.map((item) => item.runId))].join(', ') + ')',
+    '- Runs: ' + group.runs + ' (' + runs.join(', ') + ')',
     '',
   ]
   for (const item of group.items) {
@@ -501,8 +537,20 @@ export function taskTypeShardPath(mode: TrainingGroup['mode']): string {
   return 'memory/training/' + mode + '.md'
 }
 
-export function renderTaskTypeShard(groups: readonly TrainingGroup[]): string {
+/** T40: same metadata-header reason as {@link renderGroupShard} — see the note there. */
+export function renderTaskTypeShard(groups: readonly TrainingGroup[], options: { lastValidated?: string } = {}): string {
+  const runs = [...new Set(groups.flatMap((group) => group.items.map((item) => item.runId)))]
   const lines = [
+    ...renderMemoryMetadata({
+      type: 'pattern',
+      status: 'CURRENT',
+      scope: 'Training shards extracted under mode ' + groups[0].mode + ', one section per subsystem group.',
+      sourceRuns: runs,
+      validatedAtCommit: 'extracted-at-run-close',
+      lastValidated: options.lastValidated ?? isoSeconds(),
+      tags: ['training', groups[0].mode],
+    }).trimEnd().split('\n'),
+    '',
     '# Training shards: ' + groups[0].mode,
     '',
     'Groups extracted under this mode, one section each. Learning happens through files, not model mutation.',
@@ -562,4 +610,584 @@ export function extractAndGroup(
   if (!outcome.ok) return { outcome, items: [], groups: [] }
   const items = parseExtractorItems(outcome.payload)
   return { outcome, items, groups: groupLearnings(items, options.isWinner ?? (() => true)) }
+}
+
+/* -------------------------------------------------------------------------- */
+/* T40 — THE PHASE-8 WRITE SURFACE, AND THE GATE THAT PROVES IT HAPPENED      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * T40 — THE PLUGIN'S OWN WAY TO WRITE `.recursive/memory/`.
+ *
+ * ⚠ WHY A WRITE SURFACE AND NOT ANOTHER PARAGRAPH OF INSTRUCTIONS. The memory plane's shape is not a
+ * convention an author can guess: a durable doc must carry nine metadata fields, its `Type` must be
+ * one of five, and the plane's own lint FAILs the whole run when one is missing. Measured against the
+ * live workspace, the plane held NOTHING but the bootstrap placeholders — so the practical choice was
+ * between an agent hand-rolling a doc that fails the plane lint and no doc at all. This renders the
+ * canonical shape, stamps the provenance the phase-8 gate reads back, replaces the shard's line in
+ * the registry, and refuses to write a doc its own linter would reject.
+ *
+ * ⚠ WHAT IS DELIBERATE, DECIDED HERE RATHER THAN LEFT TO A CALLER:
+ *
+ *   - ATOMIC. `writeFileSync` to a sibling temp name, then a rename over the target. A memory doc is
+ *     read by the loader and linted by the plane, and a torn write is worse than a missing one: a
+ *     half-written doc is a FAILED lint that names a file nobody wrote, and there is no way to tell it
+ *     from a real one afterwards.
+ *   - PROVENANCE-CARRYING. `Source-Runs` names the run, and it is not decoration: it is the entire
+ *     discriminator between "the run wrote its memory" and "the run cited a shard that already
+ *     existed", which is the distinction the phase-8 gate turns on. It is also why the run id is
+ *     stamped from the CALL rather than trusted per-doc.
+ *   - DEDUPLICATED, IDEMPOTENTLY. Writing the same doc again from the same run is a no-op that SAYS
+ *     so (`UNCHANGED`), because phase 8 closeout runs more than once — the training trigger's own
+ *     reason for existing is the re-run — and a re-run must not duplicate a lesson or rewrite a doc
+ *     byte-differently for no reason.
+ *   - REFUSED WHEN THE ENTRY ALREADY EXISTS, unless the caller supersedes explicitly. Another run's
+ *     shard is that run's evidence; silently overwriting it destroys provenance for a shard the plane
+ *     could not restore. `supersede: true` is the deliberate path, and it ARCHIVES the previous
+ *     revision under `memory/archive/` first — supersede, never delete, the same discipline the
+ *     counters and the registry already follow.
+ *   - AND NOTHING IS INVENTED. An empty scope or body, an unknown kind, a slug that is not a name, or
+ *     a doc the linter would reject all come back as typed results with `written: false` — "zero
+ *     writes" is a property a test asserts by listing the tree, not a promise in a comment.
+ *
+ * ⚠ THIS WRITES THIS PLUGIN'S MEMORY AND NOTHING ELSE. It never calls, wraps or delegates to another
+ * plugin's memory tools: the plane it touches is the `.recursive/memory/` tree this plugin scaffolds
+ * and lints, reached through this repo's own paths.
+ */
+export interface MemoryDocSpec {
+  kind: MemoryDocKind
+  /** The run that wrote it. Stamped into `Source-Runs`, which is what the phase-8 gate reads back. */
+  runId: string
+  /** Filename stem (`03-ambientcss-redesign`). Sanitised: a slug is a NAME, never a path. */
+  slug: string
+  /** Defaults to the slug. */
+  title?: string
+  /** What the doc is about, in one sentence — the field a later run ranks on. */
+  scope: string
+  /** The lesson itself. Empty is REFUSED rather than padded: an invented lesson is not memory. */
+  body: string
+  status?: string
+  ownsPaths?: readonly string[]
+  watchPaths?: readonly string[]
+  tags?: readonly string[]
+  /** The commit the doc was validated against. Defaults to a token NAMING the run (see below). */
+  validatedAtCommit?: string
+  /** ISO timestamp. Defaults to the moment of the write, which is measured rather than invented. */
+  lastValidated?: string
+  parent?: string
+  /**
+   * Runs that contributed BEFORE this one, kept in `Source-Runs` when this write replaces a doc.
+   * Set by the writer on a supersede/update; a caller may set it, and the union is what keeps a
+   * replaced revision's history readable.
+   */
+  priorRuns?: readonly string[]
+}
+
+export interface MemoryWriteOptions {
+  /**
+   * Replace a shard ANOTHER RUN owns, by archiving it under `memory/archive/` first. Default false:
+   * the write is REFUSED and the refusal names both remedies.
+   */
+  supersede?: boolean
+  /** The clock, injected so the caller (and a test) decides what "now" is. */
+  now?: () => Date
+}
+
+export type MemoryWriteCode = 'WRITTEN' | 'UPDATED' | 'UNCHANGED' | 'REFUSED' | 'INVALID'
+
+export interface MemoryWriteResult {
+  code: MemoryWriteCode
+  /** Repo-relative path (`memory/episodes/<slug>.md`); EMPTY only when no path could be resolved. */
+  path: string
+  /** True only for `WRITTEN` and `UPDATED`. */
+  written: boolean
+  /** Where a superseded revision was archived, when that happened. */
+  archived: string | null
+  /** Always says what happened — a silent refusal is a lost work item. */
+  reason: string
+}
+
+/** `2026-10-10T08:39:59Z` — the lock fields' own timestamp shape, and the docs' `Last-Validated` one. */
+export function isoSeconds(now: Date = new Date()): string {
+  return now.toISOString().replace(/\.\d{3}Z$/, 'Z')
+}
+
+/** A slug is a FILE NAME: no separator, no traversal, no extension, no leading dot. */
+export function sanitizeMemorySlug(slug: string): string {
+  return slug
+    .trim()
+    .replace(/\.md$/i, '')
+    .replace(/[\\/]+/g, '-')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^[.\-]+/, '')
+    .replace(/[.\-]+$/, '')
+}
+
+/** The repo-relative path a doc gets, or null when the kind or the slug cannot name one. */
+export function memoryDocRelativePath(kind: MemoryDocKind, slug: string): string | null {
+  const location = MEMORY_DOC_LOCATIONS[kind]
+  if (location === undefined) return null
+  const clean = sanitizeMemorySlug(slug)
+  if (clean === '') return null
+  return location.dir + '/' + clean + '.md'
+}
+
+function bullets(values: readonly string[] | undefined): string[] {
+  return (values ?? []).map((value) => '- `' + value.replace(/`/g, "'") + '`')
+}
+
+/**
+ * The metadata header every durable doc carries: the nine fields `lint_memory_doc` requires, in the
+ * order the SHIPPED docs use them (`Owns-Paths:` / `Watch-Paths:` / `Tags:` stand bare when empty,
+ * which is what the workspace's own promoted docs do and what `has_header_field` accepts).
+ *
+ * ⚠ A BACKTICK INSIDE A FIELD VALUE IS REPLACED, NOT ESCAPED, because these values are read back by
+ * a line-based field reader: a stray backtick would end the value early and leave the rest of the
+ * sentence in the doc as if it were a field.
+ */
+export function renderMemoryMetadata(input: {
+  type: string
+  status: string
+  scope: string
+  sourceRuns: readonly string[]
+  validatedAtCommit: string
+  lastValidated: string
+  ownsPaths?: readonly string[]
+  watchPaths?: readonly string[]
+  tags?: readonly string[]
+  parent?: string
+}): string {
+  const lines = [
+    'Type: `' + input.type + '`',
+    'Status: `' + input.status + '`',
+    'Scope: `' + input.scope.replace(/`/g, "'") + '`',
+    'Owns-Paths:',
+    ...bullets(input.ownsPaths),
+    'Watch-Paths:',
+    ...bullets(input.watchPaths),
+    MEMORY_PROVENANCE_FIELD + ':',
+    ...bullets(input.sourceRuns),
+    'Validated-At-Commit: `' + input.validatedAtCommit.replace(/`/g, "'") + '`',
+    'Last-Validated: `' + input.lastValidated.replace(/`/g, "'") + '`',
+    'Tags:',
+    ...bullets(input.tags),
+  ]
+  if (input.parent !== undefined && input.parent.trim() !== '') lines.push('Parent: `' + input.parent.replace(/`/g, "'") + '`')
+  return lines.join('\n') + '\n'
+}
+
+/**
+ * Render the whole doc: the canonical header, then the title, then the lesson.
+ *
+ * ⚠ `Validated-At-Commit` DEFAULTS TO A TOKEN THAT NAMES THE RUN, NOT A SHA. A run writing its own
+ * lesson has no commit to be validated against yet, and a placeholder SHA would be a fabricated fact
+ * in the one field a reader uses to decide whether the lesson still holds. The shipped generic docs
+ * use the same convention (`generic-repository-guidance`).
+ */
+export function renderMemoryDoc(spec: MemoryDocSpec, options: { lastValidated?: string } = {}): string {
+  const location = MEMORY_DOC_LOCATIONS[spec.kind]
+  const sourceRuns = [...new Set([spec.runId, ...(spec.priorRuns ?? [])])].filter((run) => run.trim() !== '')
+  const header = renderMemoryMetadata({
+    type: location.type,
+    status: spec.status ?? 'CURRENT',
+    scope: spec.scope,
+    sourceRuns,
+    validatedAtCommit: spec.validatedAtCommit ?? 'written-by-run-' + spec.runId,
+    lastValidated: spec.lastValidated ?? options.lastValidated ?? isoSeconds(),
+    ownsPaths: spec.ownsPaths,
+    watchPaths: spec.watchPaths,
+    tags: spec.tags,
+    parent: spec.parent,
+  })
+  return header + '\n# ' + (spec.title ?? spec.slug) + '\n\n' + spec.body.trim() + '\n'
+}
+
+/**
+ * The problems that would make the memory plane FAIL this doc — checked with the LINTER'S own field
+ * list, allowed Types and allowed Statuses, so this cannot accept a doc the plane rejects.
+ */
+export function memoryDocProblems(content: string): string[] {
+  const problems: string[] = []
+  const missing = MEMORY_REQUIRED_FIELDS.filter((field) => !hasHeaderField(content, field))
+  if (missing.length > 0) problems.push('missing required memory metadata field(s): ' + missing.join(', '))
+  const type = (getMdFieldValue(content, 'Type') ?? '').toLowerCase()
+  if (!MEMORY_ALLOWED_TYPES.has(type)) {
+    problems.push("Type '" + type + "' is not one the memory plane accepts (expected one of: " + [...MEMORY_ALLOWED_TYPES].sort().join(', ') + ')')
+  }
+  const status = (getMdFieldValue(content, 'Status') ?? '').toUpperCase()
+  if (!MEMORY_ALLOWED_STATUSES.has(status)) {
+    problems.push("Status '" + status + "' is not one the memory plane accepts (expected one of: " + [...MEMORY_ALLOWED_STATUSES].sort().join(', ') + ')')
+  }
+  return problems
+}
+
+function unquoteMemoryValue(value: string): string {
+  const trimmed = value.trim()
+  for (const quote of ['`', '"', "'"]) {
+    if (trimmed.length >= 2 && trimmed.startsWith(quote) && trimmed.endsWith(quote)) {
+      return trimmed.slice(1, -1).trim()
+    }
+  }
+  return trimmed
+}
+
+/**
+ * The values of a list field (`Source-Runs:`), inline or as bullets.
+ *
+ * ⚠ THE BLOCK ENDS AT THE FIRST BLANK LINE, HEADING OR NEW FIELD, and that strictness is the point:
+ * the alternative is a parser that reads an unrelated bullet list further down the document as
+ * provenance — and provenance is the one thing here that must never be guessed.
+ */
+export function parseMemoryListField(content: string, fieldName: string): string[] {
+  const fieldRe = new RegExp('^[ \\t]*(?:[-*][ \\t]+)?' + fieldName + ':[ \\t]*(.*)$')
+  const values: string[] = []
+  let inField = false
+  for (const line of content.replace(/\r\n/g, '\n').split('\n')) {
+    const field = fieldRe.exec(line)
+    if (field !== null) {
+      inField = true
+      const inline = unquoteMemoryValue(field[1])
+      if (inline !== '') values.push(inline)
+      continue
+    }
+    if (!inField) continue
+    const item = /^[ \t]*[-*][ \t]+(.+)$/.exec(line)
+    if (item !== null) {
+      const value = unquoteMemoryValue(item[1])
+      if (value !== '') values.push(value)
+      continue
+    }
+    // A blank line, a heading or the next field ends the block — see the note above: reading further
+    // would let an unrelated list elsewhere in the doc become provenance.
+    break
+  }
+  return values
+}
+
+/** The runs a doc's `Source-Runs` names. EXACT matches: `run-1` is not `run-10`. */
+export function memoryDocProvenance(content: string): string[] {
+  return parseMemoryListField(content, MEMORY_PROVENANCE_FIELD)
+}
+
+function readTextOrNull(path: string): string | null {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Write bytes so a reader sees either the old file or the new one, never a mixture: a sibling temp
+ * name, then a rename over the target.
+ */
+function writeTextAtomic(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const temp = path + '.tmp-' + process.pid.toString(36) + '-' + Date.now().toString(36)
+  try {
+    writeFileSync(temp, content, 'utf8')
+    renameSync(temp, path)
+  } catch (err) {
+    try {
+      rmSync(temp, { force: true })
+    } catch {
+      // A leftover temp file is a wart; the write failure is the news, and swallowing it here would be
+      // the only way to lose it.
+    }
+    throw err
+  }
+}
+
+/** The task-type token a shard's registry line carries, from the directory it lives in. */
+export function taskTypeForMemoryPath(path: string): string {
+  // The plane is spelled BOTH ways in this codebase — `.recursive/memory/…` (the scaffolded plane, the
+  // linter, the phase-8 artifact) and the trigger's older `memory/…` (its call site joins that onto the
+  // workspace root) — so the token is derived from the directory NAME and is insensitive to the base.
+  const normalized = path.replace(/\\/g, '/').replace(/^\.recursive\//, '')
+  for (const [kind, location] of Object.entries(MEMORY_DOC_LOCATIONS)) {
+    if (normalized.startsWith(location.dir.replace(/^\.recursive\//, '') + '/')) return kind
+  }
+  const training = /^memory\/training\/(.+)\.md$/.exec(normalized)
+  return training === null ? 'memory' : training[1]
+}
+
+/**
+ * Write ONE durable doc, atomically, with provenance — and refuse rather than guess.
+ *
+ * The four decided behaviours (see {@link MemoryDocSpec}'s block comment): atomic, provenance-carrying,
+ * idempotent for the same run, and refused when another run owns the path unless `supersede` is
+ * explicit — in which case the previous revision is ARCHIVED first, so nothing is ever deleted.
+ */
+export function writeMemoryDoc(root: string, spec: MemoryDocSpec, options: MemoryWriteOptions = {}): MemoryWriteResult {
+  const path = memoryDocRelativePath(spec.kind, spec.slug)
+  if (path === null) {
+    return {
+      code: 'INVALID',
+      path: '',
+      written: false,
+      archived: null,
+      reason: "kind '" + String(spec.kind) + "' has no location in the memory plane, or the slug is empty, so NOTHING was written",
+    }
+  }
+  if (spec.scope.trim() === '' || spec.body.trim() === '') {
+    return {
+      code: 'INVALID',
+      path,
+      written: false,
+      archived: null,
+      reason: 'Scope and body are both required and neither may be empty: a doc whose lesson nobody wrote is not memory, so NOTHING was written',
+    }
+  }
+  const content = renderMemoryDoc(spec, options.now === undefined ? {} : { lastValidated: isoSeconds(options.now()) })
+  const problems = memoryDocProblems(content)
+  if (problems.length > 0) {
+    return {
+      code: 'INVALID',
+      path,
+      written: false,
+      archived: null,
+      reason: 'the rendered doc would FAIL the memory-plane lint (' + problems.join('; ') + '), so NOTHING was written',
+    }
+  }
+
+  const absolute = join(root, path)
+  const existing = readTextOrNull(absolute)
+  if (existing === null) {
+    writeTextAtomic(absolute, content)
+    return { code: 'WRITTEN', path, written: true, archived: null, reason: 'wrote ' + path + ' with ' + MEMORY_PROVENANCE_FIELD + ' naming ' + spec.runId }
+  }
+
+  const owners = memoryDocProvenance(existing)
+  if (owners.includes(spec.runId)) {
+    if (existing === content) {
+      return {
+        code: 'UNCHANGED',
+        path,
+        written: false,
+        archived: null,
+        reason: path + ' is already written by ' + spec.runId + ' byte-for-byte, so this write was a no-op (phase 8 closeout re-runs, and a re-run must not duplicate a lesson)',
+      }
+    }
+    // ⚠ THIS RUN MAY CORRECT ITS OWN DOC. Refusing here would make a typo unfixable by the only party
+    // entitled to fix it, so the doc is replaced — and the Source-Runs of every earlier contributor
+    // are carried forward rather than dropped with the old revision.
+    const updatedContent = renderMemoryDoc({ ...spec, priorRuns: [...owners, ...(spec.priorRuns ?? [])] }, options.now === undefined ? {} : { lastValidated: isoSeconds(options.now()) })
+    writeTextAtomic(absolute, updatedContent)
+    return { code: 'UPDATED', path, written: true, archived: null, reason: 'replaced ' + path + ', which this run already owned, keeping every earlier ' + MEMORY_PROVENANCE_FIELD + ' entry' }
+  }
+
+  if (options.supersede !== true) {
+    return {
+      code: 'REFUSED',
+      path,
+      written: false,
+      archived: null,
+      reason: path + ' already exists and its ' + MEMORY_PROVENANCE_FIELD + ' names ' + owners.join(', ') + ' rather than ' + spec.runId
+        + ', so it was NOT overwritten: pass supersede to replace it (the previous revision is ARCHIVED, never deleted), or file this lesson under a distinct slug',
+    }
+  }
+
+  // Supersede: ARCHIVE FIRST. A crash between the two writes leaves the previous revision readable in
+  // the archive and the original still in place — recoverable, and never a deleted learning.
+  const archived = 'memory/archive/' + basename(path).replace(/\.md$/, '') + '.' + sanitizeMemorySlug(owners[0] ?? 'unknown') + '.md'
+  writeTextAtomic(join(root, archived), existing)
+  writeTextAtomic(absolute, renderMemoryDoc({ ...spec, priorRuns: [...owners, ...(spec.priorRuns ?? [])] }, options.now === undefined ? {} : { lastValidated: isoSeconds(options.now()) }))
+  return { code: 'WRITTEN', path, written: true, archived, reason: 'superseded ' + path + ' (previous revision archived at ' + archived + ') with ' + MEMORY_PROVENANCE_FIELD + ' naming ' + spec.runId }
+}
+
+export interface RunMemoryWriteResult {
+  /** Repo-relative paths actually written (`WRITTEN` or `UPDATED`), in order. */
+  writes: string[]
+  results: MemoryWriteResult[]
+  /** The registry write (`memory/MEMORY.md`), or null when nothing was written. */
+  registry: MemoryWriteResult | null
+  /** What happened, INCLUDING the failure sentence — a caller must not have to infer it. */
+  reason: string
+}
+
+/**
+ * T40 — THE PHASE-8 CALL: write this run's durable docs and register them.
+ *
+ * ⚠ THE RUN ID COMES FROM THE ARGUMENT, NOT FROM EACH SPEC. A spec that named a different run would
+ * write provenance the phase-8 gate then refuses — a doc claiming a write this run did not make —
+ * and the caller would be left holding a file that blocks its own lock. One run per call removes
+ * that possibility instead of documenting it.
+ *
+ * ⚠ THE REGISTRY IS REFRESHED ONLY WHEN SOMETHING WAS WRITTEN, because the failure paths must write
+ * NOTHING (the module's standing contract) and because a registry refreshed over an unchanged plane
+ * is a claim that something changed. `updateMemoryRegistry` is reused rather than reimplemented: a
+ * shard's line is REPLACED, never duplicated, and a shard is never removed.
+ *
+ * ⚠ AND IT IS THE PLANE'S REGISTRY, `.recursive/memory/MEMORY.md` — the file `MEMORY_INDEX_FILE`
+ * names and the same one `bootstrap.ts` marker-upserts. The trigger's older `memory/MEMORY.md` is read
+ * as a FALLBACK so a registry the previous call site wrote is not silently discarded, and it is never
+ * written to: two registries in one workspace would be two answers to "what does this plane hold".
+ */
+export function writeRunMemory(
+  root: string,
+  runId: string,
+  specs: readonly MemoryDocSpec[],
+  options: MemoryWriteOptions = {},
+): RunMemoryWriteResult {
+  if (specs.length === 0) {
+    return {
+      writes: [],
+      results: [],
+      registry: null,
+      reason: 'no memory docs were supplied, so NOTHING was written — phase 8 requires at least one, and ' + MEMORY_ALWAYS_AVAILABLE + ' is always available',
+    }
+  }
+  const results = specs.map((spec) => writeMemoryDoc(root, { ...spec, runId }, options))
+  const writes = results.filter((result) => result.written).map((result) => result.path)
+  if (writes.length === 0) {
+    return {
+      writes,
+      results,
+      registry: null,
+      reason: 'NOTHING was written: ' + results.map((result) => result.code + ' ' + (result.path === '' ? '(no path)' : result.path) + ' — ' + result.reason).join('; '),
+    }
+  }
+  const registryPath = '.recursive/memory/MEMORY.md'
+  const existing = readTextOrNull(join(root, registryPath)) ?? readTextOrNull(join(root, 'memory/MEMORY.md')) ?? ''
+  const updated = updateMemoryRegistry(existing, writes.map((path) => ({ path, taskType: taskTypeForMemoryPath(path) })))
+  const changed = updated !== existing
+  if (changed) writeTextAtomic(join(root, registryPath), updated)
+  return {
+    writes,
+    results,
+    registry: {
+      code: changed ? 'WRITTEN' : 'UNCHANGED',
+      path: registryPath,
+      written: changed,
+      archived: null,
+      reason: changed
+        ? 'registered ' + writes.length + ' shard(s) in ' + registryPath + ' (a shard\'s line is REPLACED, never duplicated, and never removed)'
+        : registryPath + ' already registered every shard this call wrote',
+    },
+    reason: 'wrote ' + writes.length + ' memory doc(s): ' + writes.join(', '),
+  }
+}
+
+/** Every `.recursive/memory/**` path a text declares, in the absolute or repo-relative spelling. */
+export function phase8MemoryRefs(text: string): string[] {
+  const found = new Set<string>()
+  const absolute = /(?:^|[\s(`'"<[])\/?\.recursive\/memory\/[A-Za-z0-9._@\-/]*\.md/g
+  const relative = /(?:^|[\s(`'"<[])(memory\/(?:domains|patterns|incidents|episodes|training|skills|archive)\/[A-Za-z0-9._@\-/]*\.md)/g
+  let match: RegExpExecArray | null
+  while ((match = absolute.exec(text)) !== null) {
+    found.add(match[0].replace(/^[\s(`'"<[]/, '').replace(/^\/+/, ''))
+  }
+  while ((match = relative.exec(text)) !== null) {
+    found.add(MEMORY_PLANE_PREFIX + match[1].slice('memory/'.length))
+  }
+  return [...found].sort()
+}
+
+export interface Phase8MemoryEvidence {
+  ok: boolean
+  /** Paths under the plane the artifact declares, repo-relative to the repo root (sorted, deduped). */
+  declared: string[]
+  /** Declared paths that exist on disk. */
+  existing: string[]
+  /** Declared paths whose own text carries THIS run's provenance: the writes that COUNT. */
+  written: string[]
+  reason: string
+}
+
+/**
+ * T40 — THE CHECKABLE FACT BEHIND "the run wrote its durable memory".
+ *
+ * Three conditions, and each one exists because of a way the claim could be made without the work
+ * being done: the artifact DECLARES a path under the plane (not prose about memory in general); the
+ * path EXISTS (a declaration is not a write); and the doc on disk carries `Source-Runs` naming THIS
+ * run (a shard the run merely read, or one an earlier run wrote, is not this run's memory).
+ *
+ * ⚠ WHAT IT CANNOT TELL, stated rather than hidden: WHEN the doc was written. A run that wrote a
+ * memory doc before phase 8 and cites it here passes — and the phase 6/7 baselines deny memory-plane
+ * writes outright (`phaseBaselineRules`), so within this workflow the only phase that can produce
+ * such a doc is 8. The check is about the FACT existing at lock time, not about the clock.
+ */
+export function phase8MemoryEvidence(
+  root: string,
+  runId: string,
+  artifactText: string,
+  readText: (path: string) => string | null = readTextOrNull,
+): Phase8MemoryEvidence {
+  const declared = phase8MemoryRefs(artifactText)
+  if (declared.length === 0) {
+    return { ok: false, declared, existing: [], written: [], reason: 'the artifact declares no path under ' + MEMORY_PLANE_PREFIX + ' at all' }
+  }
+  const existing: string[] = []
+  const written: string[] = []
+  for (const path of declared) {
+    const text = readText(join(root, path))
+    if (text === null) continue
+    existing.push(path)
+    if (memoryDocProvenance(text).includes(runId)) written.push(path)
+  }
+  if (written.length > 0) {
+    return {
+      ok: true,
+      declared,
+      existing,
+      written,
+      reason: written.length + ' declared memory doc(s) carry ' + MEMORY_PROVENANCE_FIELD + ' naming ' + runId + ': ' + written.join(', '),
+    }
+  }
+  if (existing.length === 0) {
+    return {
+      ok: false,
+      declared,
+      existing,
+      written,
+      reason: 'the artifact declares ' + declared.length + ' path(s) under ' + MEMORY_PLANE_PREFIX + ' (' + declared.join(', ') + '), but none of them exists, so no memory doc was written',
+    }
+  }
+  return {
+    ok: false,
+    declared,
+    existing,
+    written,
+    reason: 'the artifact declares ' + existing.length + ' existing memory doc(s) (' + existing.join(', ') + '), but none carries ' + MEMORY_PROVENANCE_FIELD + ' naming run ' + runId + ' — citing a shard this run did not write is not a write',
+  }
+}
+
+/**
+ * T40 — THE REFUSAL, as a sentence, or null when the run may lock.
+ *
+ * ⚠ THE MESSAGE NAMES THE REMEDY, not only the fault. A refusal that says "no memory doc" leaves the
+ * agent to guess a format it cannot guess (nine fields, five allowed Types, a provenance list), which
+ * is how the step became a ticked box in the first place.
+ */
+export function phase8MemoryRefusal(
+  root: string,
+  runId: string,
+  artifactText: string,
+  readText: (path: string) => string | null = readTextOrNull,
+): string | null {
+  const evidence = phase8MemoryEvidence(root, runId, artifactText, readText)
+  if (evidence.ok) return null
+  return 'locking ' + PHASE8_ARTIFACT + ' requires this run to have WRITTEN a doc under ' + MEMORY_PLANE_PREFIX + ': ' + evidence.reason
+    + '. Write one (memory/episodes/' + runId + '.md is always available), declare its path under `## ' + PHASE8_MEMORY_SECTION
+    + '`, and give the doc `' + MEMORY_PROVENANCE_FIELD + ': ' + runId + '` — then retry the lock.'
+}
+
+/**
+ * T40 — THE LOCK-TIME ENTRY POINT: the refusal for the artifact being locked, or null.
+ *
+ * ⚠ THIS EXISTS SO THE GATE IS ONE LINE AT ITS CALL SITE. The decision (declared → exists → carries
+ * this run's provenance) belongs in this module with the write surface that produces it; `lockArtifact`
+ * should have to say only WHICH artifact it is locking, not how a memory doc is recognised. A caller
+ * that has to reproduce the rule would be a second copy of it.
+ *
+ * ⚠ AND A MISSING ARTIFACT IS NOT THIS GATE'S REFUSAL. `lockArtifact` already refuses an absent
+ * artifact before any gate can run, and returning a memory refusal for a file that does not exist
+ * would replace "the artifact is missing" with a sentence about memory — a misleading diagnosis in
+ * exchange for nothing.
+ */
+export function phase8MemoryLockRefusal(root: string, runId: string, artifact: string): string | null {
+  if (artifact !== PHASE8_ARTIFACT) return null
+  const artifactText = readTextOrNull(join(root, '.recursive', 'run', runId, PHASE8_ARTIFACT))
+  if (artifactText === null) return null
+  return phase8MemoryRefusal(root, runId, artifactText)
 }

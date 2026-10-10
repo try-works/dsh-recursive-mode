@@ -168,16 +168,23 @@ function runToolGuard(
   const guardMode = recursive.enforcementConfig.toolGuards
   const decision = evaluateToolGuard(exec as never, root, runId, guardMode)
   const coerced = coerceAskToDecision(decision, guardMode)
+  // ⚠ ISSUE 2 (b) — THE RECORD FOLLOWS THE RUN THE GUARD ACTUALLY READ, not the one the filesystem calls
+  // active. The guard resolves the run per call (a lock call that names a run is judged against THAT run's
+  // tree — see `resolveGuardRunId`), so logging the active run here would attribute a rule's answer to a run
+  // it never looked at: measured before this fix as `runId: "run-a"` on a refusal whose blockers came from
+  // run-b. `runId` (the active run) remains the fallback for a hand-built decision, which is the
+  // pre-existing behaviour.
+  const evaluatedRunId = decision.runId ?? runId
   const final: ToolGuardDecision = coerced === decision
     ? decision
-    : { ...coerced, rule: decision.rule, transition: decision.transition }
+    : { ...coerced, rule: decision.rule, transition: decision.transition, runId: evaluatedRunId }
   // T15 (C/D): every decision is logged — allows included — so the rolling trace shows
   // what the guard decided AND why, not only refusals. File-backed evidence in the
   // control-plane config dir: zero session-event emission.
   if (root) {
     const record: GuardDecisionRecord = {
       at: new Date().toISOString(),
-      runId,
+      runId: evaluatedRunId,
       tool: (exec as { name?: string } | null)?.name ?? '',
       kind: final.kind,
       rule: final.rule ?? 'none',
@@ -194,6 +201,66 @@ function runToolGuard(
     appendGuardDecision(root, record)
   }
   return final
+}
+
+/**
+ * ISSUE 1 — THE GOAL BLOCK, FROM THE LAYER THAT REFUSED.
+ *
+ * WHERE THIS BELONGS, decided from the code rather than assumed: the GUARD CANNOT DO THIS ITSELF.
+ * `evaluateToolGuard` is a pure policy layer — it takes an exec, a worktree root, a run id and a mode, and
+ * it has no goals service, no live agent and no runtime handle; it is also called from a dry-run preview
+ * (`src/recursive_preview.tool.ts`), where a side effect would be a lie about a call that never happened.
+ * The ONE place where a guard refusal becomes real is the `tools/pre-execute` listener below: it holds the
+ * runtime (which owns `blockRunToGoal` and the late-attached goals service), the live agent from the exec
+ * payload, and the decision itself — and it is the same boundary that already renders the refusal's ask
+ * into the caller's text (FU-7). So this is called there, and nowhere else.
+ *
+ * WHY IT IS NEEDED AT ALL. `lockArtifact` blocks the run's goal when its OWN ordering check refuses
+ * (`runtime.ts`, the `Prerequisite blockers:` branch). Under the strict default the guard refuses an
+ * out-of-order lock BEFORE DISPATCH, so `lockArtifact` never runs, its block never happens, and the run was
+ * told it was blocked while the goal machinery was not — the goal stayed armed and kept driving rounds
+ * through a refused gate.
+ *
+ * ⚠ WHY THIS CANNOT DOUBLE-BLOCK. The two block sites are on MUTUALLY EXCLUSIVE branches of one call:
+ * this one runs only when the guard DENIED (so the tool is never dispatched), and the tool's own block runs
+ * only when the guard let the call through to `lockArtifact`. One refusal, one dispatch decision, one
+ * block. A repeat of the SAME refused call re-enters this branch, and the second block is refused by the
+ * goal service itself (`block` requires an ACTIVE goal; an already-blocked goal is not active), which is
+ * swallowed here exactly as the tool path swallows it — the goal stays blocked, and it is not blocked
+ * twice.
+ *
+ * ⚠ THE TRIGGER IS THE ASK, NOT THE RULE LABEL — the same trigger FU-7 uses, for the same reason: an ask is
+ * present exactly when the refusal was DECIDED FROM REAL ORDERING BLOCKERS (`PolicyDecision.blockers` read
+ * from disk), which includes a policy FILE whose `recursive_lock*` deny carries no label (its `rule` reads
+ * `none`). Gating on the label instead would silently skip the goal block in every repo that ships a policy
+ * file — the shipped default here.
+ *
+ * ⚠ AND IT IS THE LOCK ORDERING REFUSAL ONLY. The phase-order WRITE rule refuses a write ahead of the
+ * active phase, and it has NO tool-layer counterpart that blocks a goal — `lockArtifact` is the only
+ * tool-side blocker in the plugin. Blocking a goal on it would be a NEW behaviour, not the consistency this
+ * fix is for: the defect was one refusal with two layers disagreeing, not a rule that should start
+ * blocking.
+ */
+function blockGoalOnGuardRefusal(
+  recursive: RecursiveRuntime,
+  exec: unknown,
+  decision: ToolGuardDecision,
+  activeRunId: string,
+): void {
+  if (decision.kind !== 'deny' || decision.ask === undefined) return
+  const agent = (exec as { agent?: { session?: { header?: { cwd?: string } } } } | null)?.agent ?? null
+  // Best-effort, exactly like the tool path: the run's filesystem state is the source of truth and a goal
+  // projection that cannot be written must never turn a refusal into a different refusal.
+  try {
+    recursive.blockRunToGoal(agent, decision.runId ?? activeRunId, {
+      // The SAME code the tool path uses, because it is the same gate: a caller reading a blocked goal
+      // cannot tell which layer refused, and must not have to.
+      code: 'prerequisite-blockers',
+      message: decision.reason ?? 'the lock was refused: its prerequisites are unmet',
+    })
+  } catch {
+    /* best-effort */
+  }
 }
 
 export function apply(ctx: Context, config?: RecursiveModeConfig) {
@@ -527,6 +594,11 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
         // and what the decision carries cannot drift; the plain reason stays first and intact, so a
         // caller that ignores the ask still gets the rule name and the blocking artifact.
         if (final.kind === 'deny') {
+          // ⚠ ISSUE 1 — THE GUARD-REFUSED LOCK BLOCKS THE RUN'S GOAL, HERE, because this is the layer that
+          // made the refusal: the tool is never dispatched, so `lockArtifact`'s own goal block cannot run.
+          // Called BEFORE the ask is rendered into the sentence so the durable `blockedReason` is the plain
+          // refusal, not the refusal plus its option list. See `blockGoalOnGuardRefusal`.
+          blockGoalOnGuardRefusal(recursive, exec, final, runId)
           return final.ask === undefined
             ? final
             : { ...final, reason: final.reason + ' ' + renderGateBlockAsk(final.ask) }

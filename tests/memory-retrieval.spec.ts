@@ -112,7 +112,11 @@ describe('T14 — reading the plugin’s own memory layer', () => {
   })
 
   it('names the kinds it knows, so the layout is not discovered by shell', () => {
-    expect([...MEMORY_KINDS]).toEqual(['domains', 'patterns', 'episodes', 'skills'])
+    // ⚠ `training` IS PART OF THE LAYOUT, not an addition to it: `bootstrap.ts` scaffolds
+    // `.recursive/memory/training/`, the shipped router documents it as a shard kind, and the phase-8
+    // trigger writes `memory/training/<task-type>.md` and registers that path in `MEMORY.md`. Leaving it
+    // out of this list made the trigger's own output unreadable by the plugin's loader.
+    expect([...MEMORY_KINDS]).toEqual(['domains', 'patterns', 'episodes', 'training', 'skills'])
   })
 })
 

@@ -327,6 +327,40 @@ describe('T16 — the absent-file fallback reproduces today\'s behaviour', () =>
     expect(d.kind).toBe('deny')
     expect(d.reason).toContain('monotonic lock-order')
   })
+
+  /**
+   * ISSUE 2 (b) AT THE PURE LAYER — the refusal names the run whose directory it read.
+   *
+   * The guard resolves WHICH run to read one layer up (`resolveGuardRunId`, `enforcement.ts`); what this
+   * rule owns is the SENTENCE, and the sentence is where the two-runs-in-one-payload defect was visible:
+   * blockers read from one run's directory, no run named, so a reader had to cross-reference the guard log
+   * to find out which tree the answer was about. `ctx.runId` is that answer, carried in by the caller.
+   *
+   * ⚠ AND IT IS NOT INVENTED WHEN THE CALLER HAS NO RUN CONTEXT: a pure policy call with no `runId` gets
+   * exactly the sentence it always got, because a fabricated run name in a refusal is a worse lie than an
+   * unnamed one.
+   */
+  it('names the run it read in the lock-order refusal, and invents none when there is no run context', () => {
+    const repo = repoWithPolicy(null)
+    const runDir = join(repo, '.recursive', 'run', 'r2')
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, '00-requirements.md'), 'Run: r2\nPhase: 0\nStatus: DRAFT\n', 'utf8')
+    const loaded = loadToolPolicyFile(repo)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) return
+
+    const named = evaluateToolPolicy(loaded.policy, 'recursive_lock', { artifact: '01-as-is.md' }, { args: { artifact: '01-as-is.md' }, runDir, runId: 'r2', worktreeRoot: repo })
+    expect(named.kind).toBe('deny')
+    expect(named.reason).toContain('monotonic lock-order')
+    expect(named.reason).toContain('00-requirements.md (DRAFT)')
+    expect(named.reason, 'the refusal does not name the run it read').toContain('[run: r2]')
+
+    // No run context -> the pre-existing sentence, byte for byte, with no `[run: …]` suffix at all.
+    const unnamed = evaluateToolPolicy(loaded.policy, 'recursive_lock', { artifact: '01-as-is.md' }, { args: { artifact: '01-as-is.md' }, runDir, worktreeRoot: repo })
+    expect(unnamed.kind).toBe('deny')
+    expect(unnamed.reason).not.toContain('[run:')
+    expect(named.reason).toBe(unnamed.reason + ' [run: r2]')
+  })
 })
 
 describe('T16 — the shipped policy file (repo self-check)', () => {

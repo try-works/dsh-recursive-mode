@@ -461,7 +461,8 @@ const OV_NODES = ['00-requirements.md', '00-worktree.md', '01-as-is.md', '01.5-r
   '02-to-be-plan.md', '03-implementation-summary.md', '03.5-code-review.md', '04-test-summary.md',
   '05-manual-qa.md', '06-decisions-update.md', '07-state-update.md', '08-memory-impact.md']
 check('8.11.1 the overview draws all twelve phase nodes',
-  OV_NODES.filter((f) => !OVL.includes('node ' + f)), [])
+  OV_NODES.filter((f) => !OVL.includes('node ' + f)).length === 0,
+  OV_NODES.filter((f) => !OVL.includes('node ' + f)).join(', '))
 /* THE 16 EDGES. Written out here as [from, to] pairs, derived by hand from
    `getPhaseExpectedInputArtifactNames` — so this list is an INDEPENDENT expectation. */
 const OV_EDGES = [
@@ -474,27 +475,46 @@ const OV_EDGES = [
   ['03.5-code-review.md', '04-test-summary.md'], ['06-decisions-update.md', '07-state-update.md'],
   ['EVERY PRESENT ARTIFACT', '06-decisions-update.md'], ['EVERY PRESENT ARTIFACT', '08-memory-impact.md'],
 ]
-const ovEdgeRuns = OVL.filter((l) => /^(lane|spine) .+ -> .+$/.test(String(l)) || /^wildcard stub /.test(String(l)))
+const ovEdgeRuns = OVL.filter((l) => /^(lane|spine) .+ -> .+$/.test(String(l)) || /^wildcard stub /.test(l))
+/**
+ * ⚠ NINE OF THE CHECKS IN THIS SECTION USED TO HAND A NUMBER WHERE A BOOLEAN BELONGS, and a
+ * checker that cannot fail is not a check. `check(label, ok)` passes whenever `ok` is truthy — and
+ * `7` is truthy, and so is an EMPTY ARRAY — so "sixteen edges, one run each" was green against any
+ * count at all, and "one lane run per forward, non-adjacent edge" was green against an expectation
+ * that is itself wrong. Each check below now compares what its own label says it compares, and the
+ * two wrong expectations are corrected rather than preserved:
+ *   · the derived edge set has SEVEN forward non-adjacent edges, not eight;
+ *   · the two CONDITIONAL edges are adjacent pairs, so they are SPINE runs, and what makes them
+ *     conditional on the page is the dash — checked as a class in the emitted svg;
+ *   · TWO phases carry a human gate (00-requirements: run-start, 05-manual-qa: qa-signoff);
+ *     03-implementation-summary declares tdd-mode as a gate, not as a phase-level human decision.
+ * The chart satisfies every one of them, before and after the rewrite.
+ */
+const missEdges = OV_EDGES.filter(([a, b]) => {
+  if (a === 'EVERY PRESENT ARTIFACT') return !OVL.includes('wildcard stub ' + b)
+  const i = OV_NODES.indexOf(a), j = OV_NODES.indexOf(b)
+  return !OVL.includes((j - i === 1 ? 'spine ' : 'lane ') + a + ' -> ' + b)
+})
 check('8.11.2 THE OVERVIEW DRAWS ALL SIXTEEN DERIVED EDGES, ONE RUN EACH (drawn ' + ovEdgeRuns.length + ')',
-  ovEdgeRuns.length, OV_EDGES.length)
+  ovEdgeRuns.length === OV_EDGES.length, 'expected ' + OV_EDGES.length + ', drew ' + ovEdgeRuns.length)
 check('8.11.2 every one of the sixteen is drawn, by endpoint',
-  OV_EDGES.filter(([a, b]) => {
-    if (a === 'EVERY PRESENT ARTIFACT') return !OVL.includes('wildcard stub ' + b)
-    const i = OV_NODES.indexOf(a), j = OV_NODES.indexOf(b)
-    return !OVL.includes((j - i === 1 ? 'spine ' : 'lane ') + a + ' -> ' + b)
-  }), [])
+  missEdges.length === 0, missEdges.map(([a, b]) => a + ' -> ' + b).join(', '))
 /* THE INTERACTION TYPES, as shapes. */
 check('8.11.3 MULTI-INPUT: five nodes carry the dashed fan-in border, and they are the five that read more than one artifact',
-  [ovCount(/ dg-box-fan"/), OV_NODES.filter((f) => !OVL.includes('node ' + f)).length], [5, 0])
+  (OVERVIEW.svg.match(/dg-box-fan/g) || []).length === 5 && OV_NODES.filter((f) => !OVL.includes('node ' + f)).length === 0,
+  'fan borders ' + (OVERVIEW.svg.match(/dg-box-fan/g) || []).length + ', of 12 nodes')
 check('8.11.3 every node states its own fan-in in words, so the count is not carried by the border alone',
-  OVL.filter((l) => /^fan-in \d|^no upstream artifact|^reads every present/.test(String(l))).length >= 12, true)
-check('8.11.3 CONDITIONAL: eight lane runs for the eight forward, non-adjacent edges — and the two conditional ones are among them',
-  ovCount(/^lane /), 8)
-check('8.11.3 the two conditional edges are drawn at all (a missing one would leave seven lanes)',
-  ['lane 01.5-root-cause.md -> 02-to-be-plan.md', 'lane 03.5-code-review.md -> 04-test-summary.md']
-    .filter((l) => !OVL.includes(l)), [])
+  OVL.filter((l) => /^fan-in \d|^no upstream artifact|^reads every present/.test(String(l))).length >= 12)
+check('8.11.3 CONDITIONAL: SEVEN lane runs, one per forward NON-ADJACENT input edge',
+  ovCount(/^lane .+ -> .+$/) === 7, 'drew ' + ovCount(/^lane .+ -> .+$/))
+check('8.11.3 the two conditional edges are drawn at all, as spine runs',
+  OVL.includes('spine 01.5-root-cause.md -> 02-to-be-plan.md') && OVL.includes('spine 03.5-code-review.md -> 04-test-summary.md'))
+check('8.11.3 exactly two runs and two arrowheads carry the conditional dash',
+  (OVERVIEW.svg.match(/dg-line-cond/g) || []).length === 2 && (OVERVIEW.svg.match(/dg-head-cond/g) || []).length === 2,
+  'dashed runs ' + (OVERVIEW.svg.match(/dg-line-cond/g) || []).length + ', dashed heads ' + (OVERVIEW.svg.match(/dg-head-cond/g) || []).length)
 check('8.11.4 WILDCARD: a thick stub into each wildcard phase and a rail that spans the row',
-  ovCount(/^wildcard stub /), 2)
+  ovCount(/^wildcard stub /) === 2 && (OVERVIEW.svg.match(/dg-line-wide/g) || []).length === 2,
+  'stubs ' + ovCount(/^wildcard stub /) + ', thick runs ' + (OVERVIEW.svg.match(/dg-line-wide/g) || []).length)
 check('8.11.4 the wildcard rail is as wide as the twelve-node row',
   (() => {
     const rail = OV.boxes.find((b) => b[5] === 'the wildcard input rail')
@@ -503,22 +523,80 @@ check('8.11.4 the wildcard rail is as wide as the twelve-node row',
     const left = Math.min(...nodes.map((n) => n[1])), right = Math.max(...nodes.map((n) => n[1] + n[3]))
     return Math.abs(rail[1] - left) < 1 && Math.abs(rail[1] + rail[3] - right) < 1
   })(), true)
-check('8.11.5 HUMAN DECISION: one amber marker above each phase a person must answer (3)',
-  ovCount(/^human decision marker /), 3)
+check('8.11.5 HUMAN DECISION: one amber marker for each phase a person must answer (2)',
+  ovCount(/^human decision marker /) === 2, 'drew ' + ovCount(/^human decision marker /))
 check('8.11.5 each marker carries its own diamond',
-  ovCount(/^decision diamond /), 3)
+  ovCount(/^decision diamond /) === 2, 'drew ' + ovCount(/^decision diamond /))
 check('8.11.6 REFUSAL: one band under each of the twelve phases',
-  ovCount(/^refusal band /), 12)
+  ovCount(/^refusal band /) === 12, 'drew ' + ovCount(/^refusal band /))
 check('8.11.7 SEQUENCE ORDER: the four adjacent pairs with no input edge are drawn as their own shape',
-  ovCount(/^sequence link /), 4)
-check('8.11.8 BACK-EDGE: two arcs, each a riser + a shelf + a drop + an entry arrowhead',
-  [ovCount(/^reopen (riser|shelf|drop)$/), ovCount(/^reopen head /), ovCount(/^revise (riser|shelf|drop)$/), ovCount(/^revise head /)],
-  [3, 1, 3, 1])
+  ovCount(/^sequence link /) === 4 && (OVERVIEW.svg.match(/dg-line-seq/g) || []).length === 4,
+  'links ' + ovCount(/^sequence link /) + ', dotted runs ' + (OVERVIEW.svg.match(/dg-line-seq/g) || []).length)
+check('8.11.8 BACK-EDGE: two arcs, each a riser + a shelf + a drop and a violet entry arrowhead',
+  ovCount(/^reopen (riser|shelf|drop)/) === 3 && ovCount(/^reopen head /) === 1
+  && ovCount(/^revise (riser|shelf|drop)/) === 3 && ovCount(/^revise head /) === 1
+  && (OVERVIEW.svg.match(/dg-head-loop/g) || []).length === 3,
+  'reopen ' + ovCount(/^reopen (riser|shelf|drop)/) + '/head ' + ovCount(/^reopen head /)
+  + ', revise ' + ovCount(/^revise (riser|shelf|drop)/) + '/head ' + ovCount(/^revise head /)
+  + ', violet heads ' + (OVERVIEW.svg.match(/dg-head-loop/g) || []).length)
 check('8.11.8 each back-edge arrowhead enters a node EARLIER in the sequence than the node it left',
-  [OVL.includes('reopen head 02-to-be-plan.md'), OVL.includes('revise head 03.5-code-review.md')], [true, true])
+  OVL.includes('reopen head 02-to-be-plan.md') && OVL.includes('revise head 03.5-code-review.md'))
 check('8.11.9 CROSS-RUN: the loop is drawn as a return path with an arrowhead, not as a sentence',
-  [ovCount(/^cross-run return (run|drop|foot)$/), ovCount(/^cross-run return head$/), ovCount(/^cross-run card: /)],
-  [3, 1, 3])
+  ovCount(/^cross-run return (run|drop|foot)$/) === 3 && ovCount(/^cross-run return head$/) === 1
+  && ovCount(/^cross-run card: /) === 3,
+  'return marks ' + ovCount(/^cross-run return (run|drop|foot)$/) + ', heads ' + ovCount(/^cross-run return head$/)
+  + ', cards ' + ovCount(/^cross-run card: /))
+/* ==========================================================================
+   8.12 THE COMPOSITION BUDGETS — the invariant that was missing
+   ==========================================================================
+
+   WHY THIS SECTION EXISTS. The overview was 2854 units wide inside a reading column that gives a
+   chart 1141 units at a 1280px window, so a reader opening the page saw FIVE of the twelve phases;
+   it also carried a 148-unit band of empty height under its title with one marker floating alone in
+   it, and the refusal bands sat 134 units below their own nodes, reading as a detached strip. Every
+   check in this file was green: nothing compared the chart's SIZE with the box it lands in, or its
+   ink with its own frame.
+
+   The numbers are stated HERE, independently of the generator, which states them again in
+   `OVERVIEW_LIMITS` — two scripts that agree because they measure the same file, not because they
+   share a mistake:
+
+     · WIDTH 1130 units at a 1280px viewport. The SVG space the page gives a chart is measured in
+       headless Chromium at 1141 units at 1280x900 and 1216 at 1440 (where the reading column is at
+       its 1340px cap); the budget is the smaller less eleven units of slack, so a padding token
+       change cannot silently push the chart into a horizontal scroll.
+     · HEIGHT 780 units. 900px of window, less the 108px sticky tab strip and a 12px margin: the
+       chart has to be ONE picture in the frame the owner screenshots it in.
+     · MAX EMPTY BAND 48 units. The tallest run of the frame's height holding no ink at all. This is
+       the one that catches a floating marker or a detached strip, and it is deliberately NOT the
+       drawing's bounding box: a bounding box cannot see a hole in the middle of itself, which is
+       exactly how a chart with 24% of its height empty passed everything for a round.
+     · The frame may not be padded either: its height stays within 5% of the drawing's own height. */
+const OV_LIMITS = { MIN_VIEWPORT_W: 1280, WIDTH_BUDGET: 1130, HEIGHT_BUDGET: 780, MAX_EMPTY_BAND: 48 }
+const emptyBandOf = (L) => {
+  const [ox, oy, w, h] = L.viewBox
+  const spans = L.boxes.map((b) => [Math.max(oy, b[2]), Math.min(oy + h, b[2] + b[4])])
+    .filter(([a, b]) => b > a).sort((a, b) => a[0] - b[0])
+  let worst = 0, reach = oy
+  for (const [a, b] of spans) {
+    if (a > reach) worst = Math.max(worst, a - reach)
+    reach = Math.max(reach, b)
+  }
+  return Math.round(Math.max(worst, oy + h - reach) * 100) / 100
+}
+const ovInk = OV.boxes.reduce((acc, b) => [Math.min(acc[0], b[2]), Math.max(acc[1], b[2] + b[4])], [Infinity, -Infinity])
+const ovEmpty = emptyBandOf(OV)
+check('8.12 THE OVERVIEW FITS THE COLUMN IT IS READ IN — ' + OV_LIMITS.WIDTH_BUDGET + ' units at a '
+  + OV_LIMITS.MIN_VIEWPORT_W + 'px viewport',
+  OV.viewBox[2] <= OV_LIMITS.WIDTH_BUDGET, 'this chart is ' + OV.viewBox[2] + ' units wide')
+check('8.12 THE OVERVIEW IS ONE PICTURE IN A 1440x900 WINDOW — under ' + OV_LIMITS.HEIGHT_BUDGET + ' units tall',
+  OV.viewBox[3] <= OV_LIMITS.HEIGHT_BUDGET, 'this chart is ' + OV.viewBox[3] + ' units tall')
+check('8.12 THE OVERVIEW HAS NO EMPTY BAND TALLER THAN ' + OV_LIMITS.MAX_EMPTY_BAND + ' UNITS — measured ' + ovEmpty,
+  ovEmpty <= OV_LIMITS.MAX_EMPTY_BAND, 'the tallest band holding no ink is ' + ovEmpty + ' units')
+check('8.12 the overview frame is not padded: its height is within 5% of the drawing it holds',
+  OV.viewBox[3] <= Math.round((ovInk[1] - ovInk[0]) * 1.05 * 100) / 100,
+  'frame ' + OV.viewBox[3] + ', ink ' + Math.round((ovInk[1] - ovInk[0]) * 100) / 100)
+
 /* AND THE PROSE IS GONE. The overview carries a title, a one-line lede, a signpost and the chart —
    nothing else above the picture. This is the invariant the OWNER asked for in words: "you are just
    adding more and more text above the workflow instead of making the workflow a real proper

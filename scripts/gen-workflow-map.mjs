@@ -2142,7 +2142,7 @@ ${tabs.map((t, i) => `    <button role="tab" id="tab-${t.id}" aria-controls="pan
 <section class="panel is-active" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
   <div class="panel-head">
     <h2>The workflow, as a graph</h2>
-    <p class="lede">Twelve phase artifacts in <code>PHASE_SEQUENCE</code> order, and every one of the ${EDGES.length} directed input edges between them, drawn. The chart scrolls sideways; its own legend is at the bottom of the picture. ${cite(SRC.seq + ', ' + SRC.inputMap)}</p>
+    <p class="lede">Twelve phase artifacts in <code>PHASE_SEQUENCE</code> order, and every one of the ${EDGES.length} directed input edges between them, drawn. The whole graph is on this screen — twelve phases on two rows, every edge drawn between them, and the picture's own legend at the bottom. ${cite(SRC.seq + ', ' + SRC.inputMap)}</p>
     <p class="note">The facts this view used to carry as prose — what the <span class="tag tag-may-be-absent">${BADGE_MAY_BE_ABSENT}</span> badge means, the two optionality declarations, what the drawing deliberately leaves out — are in <a href="#tab-notes">Notes &amp; caveats</a>, and the per-phase detail is on the <a href="#tab-overview">twelve phase views</a>.</p>
   </div>
 
@@ -2290,7 +2290,7 @@ ${PHASES.map(phaseRow).join('\n')}
 
   <div class="callout">
     <strong>How to read the chart's own marks.</strong> A <b>solid</b> arrow is a REQUIRED input. A <b>dashed</b> arrow is CONDITIONAL: the linter pushes that artifact only when it exists on disk (<code>present.has(…)</code>), so the edge is real but optional. A <b>thick</b> arrow comes off the rail under the row: that input is <em>every present artifact in the run except itself</em>, which is why phases 06 and 08 have eleven possible sources and no single required one. A <b>dotted</b> link is the SEQUENCE ORDER and carries no input edge at all — two adjacent pairs have none, and drawing them as solid arrows would claim an edge the linter does not declare. A node with a <b>dashed border</b> reads more than one upstream artifact, and every node states its own fan-in in words. ${cite(SRC.inputMap + ', ' + SRC.inputFilter + ', ' + SRC.lintWildcard06 + ', ' + SRC.lintWildcard08)}
-    <br><br><b>The chart is wider than the reading column, and it scrolls — deliberately.</b> Twelve artifact names cannot be abbreviated without losing the names the rest of this page cites, so the chart keeps its own coordinate system and scrolls sideways in one strip rather than squeezing its labels. Every arrow in it is also a row in the table below, and the table is the complete form.
+    <br><br><b>The twelve phases are on TWO rows, and the whole graph is on screen at once.</b> Row 1 reads left to right and row 2 right to left, joined at the boundary by a thick <b>spine</b> arrow — the same 03-implementation-summary → 03.5-code-review edge the linter declares, drawn as the one stroke that fits in a single column. The chart is 1128 units wide, so it does not scroll sideways at any window from 1280px up; below that the wrapper still scrolls in one strip rather than squeezing twelve artifact names, which cannot be abbreviated without losing the names the rest of this page cites. Every arrow in it is also a row in the table below, and the table is the complete form.
   </div>
 
   <h3 id="graph-edges">Every edge, in full</h3>
@@ -2751,8 +2751,8 @@ ${PHASES.map(phaseDetail).join('\n')}
 
   <h3 style="margin-top:var(--sp-6)">NOT verified — stated rather than filled in</h3>
   <ul class="refuse-list">
-    <li><span class="g-shape g-shape-refuse">MEASURED ELSEWHERE</span><span><b>The rendered pixels — measured in a separate headless pass, NOT by this generator.</b> Two charts now ship, and both were rendered in headless Chromium (the Playwright build on this machine) at <b>eight viewport widths</b> — 360, 480, 600, 768, 820, 1024, 1440 and 1920 px — with every panel un-hidden, and the glyph boxes were compared pairwise: <b>0 text-on-text overlaps</b> in both charts and across the whole page at every width (text-NODE rects via a DOM Range, so a <code>&lt;code&gt;</code> inside a paragraph is not miscounted as an overlap with its own parent), <b>0</b> labels crossing a card they do not belong to, every chart rendering at <b>scale 1.0000</b> (never rescaled by its box, despite being 2.1x wider than the reading column), and <b>no horizontal page overflow at any width</b> (the page measures 15 px NARROWER than the viewport, from the scrollbar). The worst measured label overhang was <b>+0.04 px and 0.00 px</b> (overview, learning loop) — measured against the reserved box with the real glyph advance of <b>0.5493 em</b> against the declared 0.602. ⚠ THE HARNESS FOR THIS PASS IS NOT PART OF THIS REPOSITORY (it is a throwaway CDP script, kept out of the tree) and <code>--verify</code> does not re-run it, so treat these as a dated measurement rather than a standing check — which is why the generator and the two checkers carry the arithmetic invariants instead.</span></li>
-    <li><span class="g-shape g-shape-refuse">MEASURED, AND NOT WHAT YOU MIGHT EXPECT</span><span><b>The two back-edge arrowheads are 8x5 units, and at the chart's own scale that is 8x5 pixels.</b> They are verified as GEOMETRY — the manifest places each one on its target node's bottom edge, one column gap to the left, and <code>check-workflow-map.mjs</code> fails if either moves — but a reader looking at the whole chart sees the violet arcs and their labels rather than the two arrowheads. That is a fact about the size of an arrowhead on a 2854-unit canvas, not a defect, and it is written down here rather than discovered by the owner.</span></li>
+    <li><span class="g-shape g-shape-refuse">MEASURED ELSEWHERE</span><span><b>The rendered pixels — measured in a separate headless pass, NOT by this generator.</b> Two charts now ship, and both were rendered in headless Chromium (the Playwright build on this machine) at <b>eight viewport widths</b> — 360, 480, 600, 768, 820, 1024, 1440 and 1920 px — with every panel un-hidden, and the glyph boxes were compared pairwise: <b>0 text-on-text overlaps</b> in both charts and across the whole page at every width (text-NODE rects via a DOM Range, so a <code>&lt;code&gt;</code> inside a paragraph is not miscounted as an overlap with its own parent), <b>0</b> labels crossing a card they do not belong to, every chart rendering at <b>scale 1.0000</b> (never rescaled by its box), and <b>no horizontal page overflow at any width</b> (the page measures 15 px NARROWER than the viewport, from the scrollbar). ⚠ THAT PASS MEASURED THE ONE-ROW CHART, WHICH WAS 2854 UNITS WIDE AND SCROLLED SIDEWAYS. The two-row chart was re-measured the same way at 1280x900 and 1440x900: the overview renders at its own 1128 units, <b>its wrapper reports scrollWidth === clientWidth at both widths</b> (it no longer scrolls sideways at all above 1280), the page still has no horizontal overflow, and the overview's manifest carries <b>0 text-on-text overlaps</b> — a relation the generator now REFUSES to emit rather than one this pass had to look for, because two lane labels were once laid on the same point while every invariant stayed green. The worst measured label overhang was <b>+0.04 px and 0.00 px</b> (overview, learning loop) — measured against the reserved box with the real glyph advance of <b>0.5493 em</b> against the declared 0.602. ⚠ THE HARNESS FOR THIS PASS IS NOT PART OF THIS REPOSITORY (it is a throwaway CDP script, kept out of the tree) and <code>--verify</code> does not re-run it, so treat these as a dated measurement rather than a standing check — which is why the generator and the two checkers carry the arithmetic invariants instead.</span></li>
+    <li><span class="g-shape g-shape-refuse">MEASURED, AND NOT WHAT YOU MIGHT EXPECT</span><span><b>The two back-edge arrowheads are 8x5 units, and at the chart's own scale that is 8x5 pixels.</b> They are verified as GEOMETRY — the manifest places each one on its target node's bottom edge, one column gap to the left, and <code>check-workflow-map.mjs</code> fails if either moves — but a reader looking at the whole chart sees the violet arcs and their labels rather than the two arrowheads. That is a fact about the size of an arrowhead on a 1128-unit canvas, not a defect, and it is written down here rather than discovered by the owner.</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Keyboard and screen-reader behaviour.</b> The tablist's roles, <code>aria-selected</code>, roving tabindex and <code>aria-controls</code> targets are asserted against the markup, and the arrow-key handler is present in the source — but no assistive technology ran this page, so "the arrow keys work" and "the tab order reads correctly" are NOT demonstrated here.</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Per-phase "inputs" beyond the artifact list.</b> The scaffold writes a generic <code>- (list upstream artifacts re-read for this phase)</code> placeholder for every later phase, so there is no per-phase PROSE list of inputs in the code to transcribe. What IS in the code is <code>getPhaseExpectedInputArtifactNames</code>, and that is what the input column shows — plus the file-level sources a phase names (git state, DECISIONS.md, STATE.md, the memory plane). ${cite(SRC.tplLater + ', ' + SRC.inputMap)}</span></li>
     <li><span class="g-shape g-shape-refuse">UNVERIFIED</span><span><b>Which hooks fire in a given real session.</b> The page states which seam each listener attaches to and what it does; it does not claim a particular live run took a particular path, and it makes no claim about run outcomes.</span></li>
@@ -3039,6 +3039,20 @@ function makeEngine() {
       // cannot hide one: it is three orders of magnitude below the smallest of them.
       const EPS = 0.05
       if (ix <= EPS || iy <= EPS) continue
+      /**
+       * ⚠ A TEXT BOX IS NOT A CONTAINER, AND THIS IS THE ONE HOLE THE ORIGINAL RULE HAD.
+       * "A box may contain another box" is what lets a card hold its own label and the strip
+       * hold its twelve nodes. But when BOTH boxes are text, containment is not a structure —
+       * it is one LABEL drawn through another, which is illegible on the page and which the
+       * engine used to wave through: two lane labels were laid at the same point and every
+       * check stayed green while the two names printed on top of each other. Text may be held
+       * by a box or a rule; it may never be held by other text.
+       */
+      if (kind === 'text' && o.kind === 'text') {
+        throw new Error('diagram: TEXT ON TEXT — "' + label + '" ' + JSON.stringify([b.x, b.y, b.w, b.h])
+          + ' is drawn over "' + o.label + '" ' + JSON.stringify([o.x, o.y, o.w, o.h])
+          + ' by ' + round(ix) + 'x' + round(iy) + ' units: a label is not a container')
+      }
       const nested = holds(o, b) || holds(b, o)
       if (nested) {
         // Declared in [contained, container] order, whichever way round it is: a box
@@ -3223,498 +3237,629 @@ ${api.svgParts.map((s) => '      ' + s).join('\n')}
 /* ---- CHART 1: the overview — THE WHOLE GRAPH, ON THE VIEW A READER OPENS ---- */
 
 /**
- * MERGED, NOT SIDE BY SIDE. This chart used to be the twelve nodes in a row and nothing
- * else: the ${EDGES.length} directed edges lived on a second tab, and three paragraphs of
- * prose sat above the picture explaining what the picture was not showing. The owner read
- * that three times and said the obvious thing — adding more text above a row of boxes is
- * not a diagram of a workflow. So the overview and the phase graph are now ONE chart, and
- * it is the primary content of the view a reader lands on:
+ * ⚠ TWO ROWS OF SIX, AND THIS IS THE ONE THING THE PREVIOUS VERSION GOT WRONG.
  *
- *   · the twelve nodes in PHASE_SEQUENCE order (the only linear thing left);
- *   · every one of the ${EDGES.length} directed edges drawn — 11 required, 2 conditional
- *     ("when present", dashed), 2 wildcard (the rail, thick), 1 that carries no edge and
- *     is drawn as the dotted SEQUENCE-ORDER link so the difference is visible;
- *   · the fan-in of each node in words, and a dashed BORDER on the five nodes that read
- *     more than one upstream artifact — the shape that distinguishes a graph from a chain;
- *   · a human-decision marker above every node where a person must answer (3 of them);
- *   · a refusal band under every node a guard rule can refuse (8 guard rules, 9 nodes);
- *   · the BACKWARD edges as two violet arcs that leave their target's left edge and
- *     re-enter a node to its LEFT — so "backwards" is a direction on the canvas;
- *   · the CROSS-RUN loop as the rightmost node's output returning from below into the
- *     NEXT run's phase entry, in its own band, with the same violet arc language.
+ * The overview used to be twelve nodes in ONE row. It was 2854 units wide inside a reading
+ * column that measures 1141-1216 units, so a reader opening the page saw five of the twelve
+ * phases and had to scroll sideways to discover the other seven. Every invariant in this file
+ * was green while that shipped, because nothing ever compared the chart's width with the width
+ * of the box it lands in. THE WHOLE POINT OF AN OVERVIEW IS TO SEE THE WHOLE WORKFLOW, so the
+ * sequence wraps onto two rows of six, and the chart is 1128 units wide — narrower than the
+ * 1141 units the page gives it at a 1280px window (measured in headless Chromium, not derived
+ * from the token arithmetic) and narrower than the 1216 it gives it at 1440.
  *
- * WHAT IS *NOT* HERE. No paragraph explaining the picture. The facts the prose carried
- * moved to the Notes view and the phase/original views they belong to; the rule applied
- * is: if a sentence explains what the picture should show, the picture is wrong.
+ * HOW THE WRAP READS. Row 1 runs left to right (00-requirements .. 03-implementation-summary)
+ * and row 2 runs RIGHT TO LEFT (03.5-code-review .. 08-memory-impact), the way a wrapped line
+ * of text snakes back on itself. That is not a decoration: it is the only arrangement of
+ * six-plus-six in which the row boundary lands on a pair that can be drawn as ONE VERTICAL
+ * ARROW. The last phase of row 1 and the first of row 2 are joined by a real derived input edge
+ * (a spine edge, not a sequence-order pair), so the wrap is a short solid arrow straight down a
+ * single column — and the reader is told two things at once: where the sequence continues, and
+ * that the continuation is a dependency rather than an accident of layout.
+ *
+ * The alternative — both rows reading left to right — was worked out on paper and refused by
+ * arithmetic. The wrap edge would then run from column 5 of row 1 to column 0 of row 2, and a
+ * run long enough to cross the whole canvas passes over the source stubs of every other edge
+ * (which descend from row 1) AND the target stubs of every other edge (which descend into row
+ * 2), so it is crossed by all of them: four crossings instead of one.
+ *
+ * ⚠ AND THERE IS EXACTLY ONE CROSSING, DECLARED RATHER THAN HIDDEN. 02-to-be-plan reads the
+ * code review (column 4 of row 1 -> column 5 of row 2) and 03-implementation-summary reads the
+ * test summary (column 5 -> column 4): the two arrows swap columns, so they cross, like two
+ * one-way streets between the same pair of junctions. The bridge is declared to the engine
+ * (`reserve(..., inside)`) and re-derived by `check-workflow-map.mjs`, which accepts a declared
+ * pair only when it is a real containment or a touch within ONE stroke width — so the
+ * declaration cannot hide a collision, it can only state "these two strokes meet, here, on
+ * purpose". Every other pair of edges in this chart is drawn without crossing anything.
+ *
+ * WHAT THE LAYOUT KEEPS FROM THE ONE-ROW VERSION. Every one of the ${EDGES.length} directed edges is still
+ * drawn, one run each, in the same five shapes: a solid arrow for a required input, a dashed one
+ * for a conditional input, a dotted one for sequence order with no input edge at all, a thick one
+ * off the wildcard rail, and a violet arc for the two BACKWARD edges. The wildcard rail still
+ * spans the node row exactly. The dashed fan-in border still marks the phases that read more than
+ * one upstream artifact, and every node still states its own fan-in in words.
+ *
+ * WHAT MOVED, AND WHY. The human-decision markers used to float in a band 196 units above the
+ * node row, and the refusal bands sat 134 units below their own node — a detached strip that read
+ * as a legend rather than as a mark on a phase. Both are attached now: the amber marker sits
+ * three units above the node it annotates, and the hatched refusal band is the node's own next
+ * line, three units under its bottom edge. The vertical extent follows the content.
+ * `OVERVIEW_LIMITS` below states the width, height and empty-space budgets, and both `--verify`
+ * and `check-workflow-map.mjs` assert them against the emitted manifest.
  */
 function drawOverview(api) {
-  const { PAD, LINE_PAD, CLS, FS, tw, lh, round, card, textEl, rule, ruleH, ruleV, head, block, blockPara } = api
+  const { PAD, LINE_PAD, CLS, FS, tw, lh, round, card, textEl, ruleH, ruleV, head, block } = api
 
-  /* ---- geometry ---------------------------------------------------------- */
-  const GUTTER = 70          // holds the two backward risers (x=16, x=32) and the cross-run return (x=20)
-  const NODE_GAP = 48        // holds the dotted sequence link
-  const HEAD_L = 8
-  const SEQ_HALF = 4
+  /* ======================= 1. THE GRID =================================== */
+  const GUTTER = 40           // the left margin: the cross-run return arc lives in it, and nothing else
+  const COLS = 6
+  const NODE_GAP = 22         // the arrow between two adjacent boxes lives in this gap
+  const HEAD_L = 8            // the arrowhead, along the line
+  const SEQ_HALF = 4          // the arrowhead, across the line
+  const ANNOT_GAP = 3         // the refusal band sits this close under its node
+  const MARK_GAP = 3          // the human marker sits this close above its node
+  const LANE_STEP = 22        // one lane's run plus the label row under it
+  const LABEL_H = lh(FS[CLS.s])
+  const humanCol = (file) => (file === '05-manual-qa.md' ? 'qa-signoff'
+    : file === '03-implementation-summary.md' ? 'tdd-mode' : 'run-start')
+
   const short = (file) => file.replace(/\.md$/, '')
   const idxOf = Object.fromEntries(PHASES.map((p, i) => [p.file, i]))
+  const rowOf = (i) => Math.floor(i / COLS)
+  /**
+   * WHICH CANVAS COLUMN A PHASE SITS IN. Row 1 is written left to right; row 2 is written back
+   * the other way, so 03.5-code-review — the first phase of row 2 — lands in the SAME column as
+   * 03-implementation-summary, the last of row 1, and the row boundary is one vertical arrow
+   * rather than a run across the canvas. See the header for why that is a forced choice.
+   */
+  const colOf = (i) => (rowOf(i) === 0 ? i % COLS : COLS - 1 - (i % COLS))
 
-  const NODE_W = Math.ceil(Math.max(...PHASES.map((p) => tw(short(p.file), FS[CLS.t]))) + 2 * PAD + 4)
-  const NODE_H = Math.round(7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1 + lh(FS[CLS.s]) + 7)
+  /* The two lines every node carries under its name, and the widest of them, which is what sets
+     the node's width. The name itself may wrap at a hyphen; these two may not, because they are
+     the rows that make the twelve boxes a grid rather than a ragged shelf. */
+  const phaseLine = (p) => 'phase ' + p.phaseN + ' — ' + PURPOSES[p.file].label
+  const OTHER_W = Math.max(...PHASES.map((p) => Math.max(tw(phaseLine(p), FS[CLS.s]), tw(fanInText(p.file), FS[CLS.s]))))
+  const NODE_W = Math.ceil(OTHER_W + 2 * PAD)
+  const NAME_SLOT = round(lh(FS[CLS.t]) + 1)
+  const NODE_H = round(6 + 2 * NAME_SLOT + lh(FS[CLS.s]) + 1 + lh(FS[CLS.s]) + 6)
   const PITCH = NODE_W + NODE_GAP
-  const nodeX = (i) => round(GUTTER + i * PITCH)
-  const rowW = PHASES.length * NODE_W + (PHASES.length - 1) * NODE_GAP
+  const colX = (c) => round(GUTTER + c * PITCH)
+  const nodeX = (i) => colX(colOf(i))
+  const nodeRight = (i) => round(nodeX(i) + NODE_W)
+  const rowW = COLS * NODE_W + (COLS - 1) * NODE_GAP
+  const GRID_R = round(GUTTER + rowW)
+  /**
+   * THE RIGHT-HAND CHANNEL IS NOT DECORATION. The reopen arc leaves the last node of row 2
+   * through its right edge and climbs back to row 1 in this margin, which is the one vertical
+   * line on the canvas that crosses nothing at all: everything else is inside the grid.
+   */
+  const RISER_X = round(GRID_R + 9)
+  const W = Math.ceil(GRID_R + 24)
 
-  /* ---- the edges, classified -------------------------------------------- */
-  const edgesOf = (file) => EDGES.filter((e) => e.to === file)
+  /** The node's name, split at a hyphen when it cannot fit on one line. */
+  const NAME_W = NODE_W - 2 * PAD
+  const nameLinesOf = (file) => {
+    const n = short(file)
+    if (tw(n, FS[CLS.t]) <= NAME_W) return [n]
+    for (let k = n.lastIndexOf('-'); k > 0; k = n.lastIndexOf('-', k - 1)) {
+      const a = n.slice(0, k), b = n.slice(k + 1)
+      if (tw(a, FS[CLS.t]) <= NAME_W && tw(b, FS[CLS.t]) <= NAME_W) return [a, b]
+    }
+    throw new Error('overview chart: the node label "' + n + '" does not fit in ' + NAME_W
+      + ' units and cannot be split at a hyphen — widen the grid or shorten the name')
+  }
+  const NAMES = Object.fromEntries(PHASES.map((p) => [p.file, nameLinesOf(p.file)]))
+  for (const p of PHASES) {
+    if (NAMES[p.file].length > 2) throw new Error('overview chart: ' + p.file + ' needs more than two name lines')
+    if (p.human && NAMES[p.file].length > 1) throw new Error('overview chart: ' + p.file + ' has both a human marker and a two-line name')
+  }
+
+  /* ======================= 2. THE EDGES, CLASSIFIED ====================== */
+  /* The LABEL vocabulary is the derived edge kind, exactly as it was: an edge between two
+     adjacent phases is a `spine`, anything else is a `lane`, and the wildcard branch is a
+     `wildcard stub`. Both checkers build the sixteen expected labels from the linter's own input
+     map and compare them with what the chart says it drew, so the drawing may change shape but
+     the words may not. */
   const spine = []
   const lanes = []
   const wild = []
-  const seqOnly = []
   for (const edge of EDGES) {
     if (edge.kind === 'wildcard') { wild.push(edge); continue }
     const s = idxOf[edge.from], t = idxOf[edge.to]
-    if (s === undefined) throw new Error('overview chart: unknown edge source ' + edge.from)
-    // The routing assumes every edge runs LEFT TO RIGHT in PHASE_SEQUENCE. It is asserted
-    // rather than assumed: an edge that ran backwards would put its run under its own
-    // source node, which is the one shape this layout cannot draw. The BACKWARD edges of
-    // the workflow are not input edges at all — they are routed separately, below.
-    if (!(s < t)) {
-      throw new Error('overview chart: edge ' + edge.from + ' -> ' + edge.to + ' does not run forward in PHASE_SEQUENCE')
-    }
+    if (s === undefined || t === undefined) throw new Error('overview chart: unknown edge endpoint ' + edge.from + ' -> ' + edge.to)
+    if (!(s < t)) throw new Error('overview chart: edge ' + edge.from + ' -> ' + edge.to + ' does not run forward in PHASE_SEQUENCE')
     if (t - s === 1) spine.push(edge)
-    else lanes.push({ edge, s, t })
+    else lanes.push(edge)
   }
+  const seqOnly = []
   for (let i = 0; i + 1 < PHASES.length; i++) {
     if (!spine.some((e) => idxOf[e.from] === i)) seqOnly.push(i)
   }
-  /* THE PAIRS THAT ARE ADJACENT AND NOT CONNECTED. Four of them, measured from the derived
-     edge set rather than written down: 00-worktree→01-as-is, 04-test-summary→05-manual-qa,
-     05-manual-qa→06-decisions-update and 07-state-update→08-memory-impact. They are exactly
-     the places where the SEQUENCE ORDER and the DEPENDENCY GRAPH disagree, which is the
-     whole reason this page draws edges at all — so the count is asserted in both directions
-     (no pair is missed, no dotted link is drawn over a pair that does have an edge). */
   if (seqOnly.length !== 4) {
     throw new Error('overview chart: expected exactly 4 adjacent pairs with no input edge, got ' + seqOnly.length
       + ' — spine: ' + spine.map((e) => e.from + '->' + e.to).join(', '))
   }
-
-  const [upper, lower] = graphBands(lanes)
-  const HINGE = 17 // keep in step with graphBands' caller below: lanes it may share a band with
-  void HINGE
-
-  /* ---- vertical bands, top to bottom ------------------------------------
-     ⚠ THE LANE BANDS AND THE NODE BAND DO NOT OVERLAP, and that is arithmetic rather than
-     taste. The first lane on either side sits LANE_GAP clear of the node row's OWN edge, and
-     the distance is measured from that edge — the first version measured the lower band from
-     the row's TOP, which put every lower lane's run inside the nodes and made every lane
-     label land on the node to its left. The engine caught it twice (a run 6x5 units inside
-     its own source node, then a label 40x6.8 units inside the node beside it); the fix is to
-     measure from the edge the lane is on, which is what makes the two bands disjoint by
-     construction rather than by luck.
-     LANE_GAP is 22 against the spine's 16-unit gap: the two are deliberately unequal, so a lane's
-     label row can never line up with a spine arrowhead. */
-  const LANE_GAP = 22
-  const MARK_H = Math.round(lh(FS[CLS.s]) + 2)
-  const MARK_BOT = -18
-  const MARK_TOP = round(MARK_BOT - MARK_H)
-  const LANE_STEP = 22
-  const LABEL_H = lh(FS[CLS.s])
-  const upperTop = upper.length === 0 ? 0 : round(-LANE_GAP - (upper.length - 1) * LANE_STEP - LANE_GAP - LABEL_H)
-  const TITLE_H = lh(FS[CLS.a]) + 14
-  const titleTop = round(upperTop - TITLE_H)
-
-  let y = -titleTop
-  const rowTop = round(y)
-  const rowBottom = round(rowTop + NODE_H)
-  const laneY = (band, k) => (band === 'upper'
-    ? round(rowTop - LANE_GAP - k * LANE_STEP)
-    : round(rowBottom + LANE_GAP + k * LANE_STEP))
-
-  /* ---- the bands below the node row, in the order they are drawn ---------
-     ⚠ THE VERTICAL ORDER OF THE FOUR BANDS BELOW THE ROW IS FORCED, NOT CHOSEN, and each step of it
-     was found by a refusal from the engine rather than by taste:
-       1. the LOWER LANES first, because their labels occupy a band of their own;
-       2. the WILDCARD RAIL next, because a rail placed under the lanes' labels paints over them;
-       3. the REFUSAL BANDS next, because they are the node's own mark and belong near it;
-       4. the BACK-EDGE SHELVES last, under all three.
-     A back edge's drop therefore passes through the rail's band, which is why the rail is reserved
-     BEFORE the arcs and the drop is declared as the rail's own contained ink. */
-  const laneLowest = lower.length === 0 ? rowBottom : laneY('lower', lower.length - 1)
-  const railTop = round(laneLowest + LANE_GAP + LINE_PAD + LABEL_H + 6)
-  const railH = NODE_H
-  const railBottom = round(railTop + railH)
-  const railX = nodeX(0)
-  /* The refusal band: the node's second shape, one text row high, right under the row. */
-  const refusalH = Math.round(2 * PAD + LABEL_H)
-  const refusalTop = round(railBottom + 10)
-  const BACK_GAP = 26
-  const b1Y = round(refusalTop + refusalH + BACK_GAP)    // backward edge 1: reopen
-  const b2Y = round(b1Y + 2 * LINE_PAD + LABEL_H + 8)    // backward edge 2: REVISE
-  const crossTop = round(b2Y + 2 * LINE_PAD + LABEL_H + 14)
-
-  /* SPINE EDGE — an adjacent pair that IS an input: a solid arrow in the gap, exactly the
-     width the gap has, so it can collide with nothing. */
-  /* ⚠ TWO GAPS CARRY NO SPINE ARROW, AND THAT IS A DECISION, NOT AN OMISSION. A back edge
-     re-enters its target node THROUGH the gap before that node, at the row's own centre — the
-     one line available in a 48-unit gap that the spine arrowhead also occupies. Both arrows
-     claim the same few units: the engine refused it (a 4x5-unit intersection between the back
-     edge's arrowhead and the spine's). The back edge keeps the gap, because it is the mark no
-     other view carries; what the sequence loses there is two arrowHEADS in gaps that still
-     show the dotted order link, and the input edge itself is still drawn as the lane and as a
-     table row. The gaps are named from the to-artifact, so a re-routed back edge moves them. */
-  const backEdgeEntries = new Set(['02-to-be-plan.md', '03.5-code-review.md'])
-  const spineRuns = new Map()
-  for (const edge of spine) {
-    const i = idxOf[edge.from]
-    const cxm = round(rowTop + NODE_H / 2)
-    const start = round(nodeX(i) + NODE_W + 2)
-    const tip = round(nodeX(i + 1) - 2)
-    const dash = edge.kind === 'conditional'
-    const run = ruleH(start, cxm, round(tip - HEAD_L - start), dash ? 'dg-line-cond' : 'dg-line', 'spine ' + edge.from + ' -> ' + edge.to)
-    if (!backEdgeEntries.has(edge.to)) {
-      head([[tip, cxm], [tip - HEAD_L, cxm - SEQ_HALF], [tip - HEAD_L, cxm + SEQ_HALF]], dash ? 'dg-head-cond' : 'dg-head', 'spine head ' + edge.to, run)
-    }
-    spineRuns.set(edge.to, run)
+  /* ⚠ THE PHYSICAL CLASSIFICATION, ALSO ASSERTED. The canvas has two rows, so every edge is
+     either inside one row or across the boundary — and the counts below are facts about this
+     edge set on a six-plus-six grid, not preferences. If the source ever grows an edge that
+     breaks one of them, the generator stops instead of drawing a picture whose arithmetic no
+     longer holds. */
+  const sameRow = (e) => rowOf(idxOf[e.from]) === rowOf(idxOf[e.to])
+  const crossSpines = spine.filter((e) => !sameRow(e))
+  const rowSpines = spine.filter(sameRow)
+  const crossLanes = lanes.filter((e) => !sameRow(e))
+  const rowLanes = lanes.filter(sameRow)
+  if (PHASES.length !== 2 * COLS) throw new Error('overview chart: the grid is ' + COLS + ' columns and the run is ' + PHASES.length + ' phases')
+  if (crossSpines.length !== 1 || rowSpines.length !== 6) {
+    throw new Error('overview chart: expected exactly one spine edge across the row boundary and six inside the rows, got '
+      + crossSpines.length + ' + ' + rowSpines.length)
   }
-
-  /* THE WILDCARD RAIL — one edge shape with eleven possible sources, drawn as a rail.
-     ⚠ DRAWN BEFORE THE BACK EDGES, AND THAT ORDER IS THE ROUTING. A back edge's drop leaves its
-     source node's bottom edge and has to reach a shelf BELOW this band, and the rail spans the whole
-     row — so there is no column for the drop to slip down and no way round it. With the rail
-     reserved FIRST, the drop must say so: it is declared as the rail's own contained ink, a
-     geometric fact (the rail is 58 units tall and the drop passes clean through it) that
-     `check-workflow-map.mjs` re-derives. Reserved the other way round, the engine refuses the pair
-     outright with a 5x58-unit intersection — which is how this order was found. */
-  const rail = card(railX, railTop, rowW, railH, 'dg-box-rail', 'the wildcard input rail')
-  /* ⚠ THE RAIL'S OWN TEXT IS PLACED AT THE FAR END OF THE ROW, and that is a decision about the
-     READER, not about the layout. The chart is 2854 units wide in a 1340-unit column, so a reader
-     scrolls it: text at the rail's LEFT edge is off-frame the moment they scroll right to look at
-     the wildcard phases the rail is about — the label was invisible in exactly the view that needs
-     it. Placed against the right edge, it is visible in the right-hand view AND in the left one up
-     to the node row's width. The box is still reserved from the rail's left edge, so the
-     containment arithmetic is unchanged. */
-  const railTextX = round(railX + rowW - Math.max(
-    tw(`EVERY PRESENT ARTIFACT EXCEPT ITSELF — the wildcard input, declared by ${wild.length} phases`, FS[CLS.t]),
-    tw(`RUN_ARTIFACT_SEQUENCE.filter(a => present.has(a) && a !== thisFile) — ${WILDCARD_SOURCES} possible sources, and NO single one of them is required`, FS[CLS.s]),
-    tw(`Drawn as ONE rail with ${wild.length} thick arrows rather than as ${wild.length * WILDCARD_SOURCES} lines, because a bundle of eleven into one node is the picture that stops being readable.`, FS[CLS.s]),
-  ) - PAD)
-  textEl(railTextX, round(railTop + 7), CLS.t,
-    `EVERY PRESENT ARTIFACT EXCEPT ITSELF — the wildcard input, declared by ${wild.length} phases`, rail)
-  textEl(railTextX, round(railTop + 7 + lh(FS[CLS.t]) + 1), CLS.s,
-    `RUN_ARTIFACT_SEQUENCE.filter(a => present.has(a) && a !== thisFile) — ${WILDCARD_SOURCES} possible sources, and NO single one of them is required`, rail)
-  textEl(railTextX, round(railTop + 7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1), CLS.s,
-    `Drawn as ONE rail with ${wild.length} thick arrows rather than as ${wild.length * WILDCARD_SOURCES} lines, because a bundle of eleven into one node is the picture that stops being readable.`, rail)
-  for (const edge of wild) {
-    const x = round(nodeX(idxOf[edge.to]) + NODE_W / 2)
-    head([[x, rowBottom], [x - SEQ_HALF, rowBottom + HEAD_L], [x + SEQ_HALF, rowBottom + HEAD_L]], 'dg-head-wide', 'wildcard head ' + edge.to)
-    ruleV(x, round(rowBottom + HEAD_L), round(railTop - rowBottom - HEAD_L), 'dg-line-wide', 'wildcard stub ' + edge.to)
+  if (rowLanes.length !== 3 || crossLanes.length !== 4) {
+    throw new Error('overview chart: expected 3 lanes inside a row and 4 across the boundary, got ' + rowLanes.length + ' + ' + crossLanes.length)
   }
+  const wrap = crossSpines[0]
+  if (idxOf[wrap.from] !== COLS - 1 || idxOf[wrap.to] !== COLS) {
+    throw new Error('overview chart: the row boundary must fall on the spine edge ' + PHASES[COLS - 1].file
+      + ' -> ' + PHASES[COLS].file + ', not on ' + wrap.from + ' -> ' + wrap.to)
+  }
+  const laneOf = (from, to) => {
+    const e = lanes.find((x) => x.from === from && x.to === to)
+    if (!e) throw new Error('overview chart: no lane ' + from + ' -> ' + to)
+    return e
+  }
+  const L02 = laneOf(PHASES[0].file, PHASES[2].file)   // 00-requirements -> 01-as-is
+  const L04 = laneOf(PHASES[0].file, PHASES[4].file)   // 00-requirements -> 02-to-be-plan
+  const L24 = laneOf(PHASES[2].file, PHASES[4].file)   // 01-as-is -> 02-to-be-plan
+  const L46 = laneOf(PHASES[4].file, PHASES[6].file)   // 02-to-be-plan -> 03.5-code-review
+  const L47 = laneOf(PHASES[4].file, PHASES[7].file)   // 02-to-be-plan -> 04-test-summary
+  const L48 = laneOf(PHASES[4].file, PHASES[8].file)   // 02-to-be-plan -> 05-manual-qa
+  const L57 = laneOf(PHASES[5].file, PHASES[7].file)   // 03-implementation-summary -> 04-test-summary
+  void crossLanes
 
-  /* ---- the BACKWARD edges, as direction on the canvas --------------------
-     WHAT A BACK EDGE IS, AND WHY IT LOOKS LIKE THIS. Every other arrow in this chart points right
-     (the input edges) or down (into a node). The two back edges point at a node that is EARLIER in
-     PHASE_SEQUENCE than the node they leave, and the picture says so with no words at all: each one
-     leaves its source node's bottom edge, drops into the column gap beside it, runs LEFT along a
-     shelf of its own under the row, turns up a riser at the far left, and re-enters its target from
-     the LEFT with the arrowhead pointing right.
+  /* ======================= 3. THE VERTICAL STACK ========================= */
+  /* Every band is measured from the one above it, so the height of the chart follows its
+     content: nothing sits at a chosen y, and a band that grows pushes the rest down. */
+  const MARK_H = round(LABEL_H + 2)                       // the amber marker, one text line tall
+  const MARK_BAND = round(MARK_H + MARK_GAP)              // the strip above a row a marker may occupy
+  const ANNOT_H = Math.round(2 * PAD + LABEL_H)           // the refusal band, one text line tall
+  const TOP_LEVELS = 4                                   // 0->2, 2->4, 0->4, and the reopen's return run
+  const MID_LEVELS = 3                                   // 4->6, 4->8, 5->7 (the other two cross vertically)
 
-     ⚠ THE ROUTE IS FORCED, AND EVERY ALTERNATIVE WAS REFUSED BY THE ENGINE RATHER THAN BY TASTE.
-     The obvious routing — enter the target along the node row's own centre line, in the gap before
-     it — cannot be drawn. That line is the one band in the row that is completely occupied:
-       · the gap before a node carries that node's SPINE arrow (the reserved box of a rule reaches
-         2.5 units past its endpoints);
-       · each node's top edge carries the lane stubs that come down into it and, in the same gap,
-         the arrowheads that land on it;
-       · a wildcard node's bottom edge carries the rail stub;
-       · and any vertical stub crossing the LANE BAND is crossed by the lane runs, which all leave
-         their source at the same x — so there is no free column between the row and the bands.
-     The engine refused each of those in turn (a 4x5-unit intersection with a spine arrowhead, a
-     5x5 with a lane run, a 5x190 with a lane run). What is left is BELOW: the shelf. It travels
-     under the nodes in the empty band between the row and the wildcard rail, where the only things
-     it can meet are the lane drops, and those are placed in column gaps the entry stubs avoid.
+  let y = 0
+  const titleY = y
+  y = round(y + lh(FS[CLS.a]) + 8)
 
-     ⚠ TWO RISERS, AND THE PAIR IS NESTED ON PURPOSE. Both risers stand in the far-left gutter and
-     both reach the row, so they cross the shelves — the REVISE riser (x=24) stands inside the
-     REOPEN shelf's own span, and the reopen riser (x=6) stands under it. Each is DECLARED as
-     contained by the box it passes through, which is a geometric fact the checker re-derives
-     (`holds`), not an exemption widened to fit. The alternative — one shared riser — puts two
-     labels and two entry stubs on one stem, which is the "one arrow for two different loops"
-     picture the owner rejected. */
-  const RESERVE_X = 6    // the reopen riser: left of everything
-  const REVISE_X = 24    // the REVISE riser: inside the reopen shelf's own x-span
+  const topTop = y
+  const topY = (k) => round(topTop + (TOP_LEVELS - 1 - k) * LANE_STEP)
+  y = round(topTop + TOP_LEVELS * LANE_STEP + 10)
+
+  const rowATop = round(y + MARK_BAND)
+  const rowABottom = round(rowATop + NODE_H)
+  const annotATop = round(rowABottom + ANNOT_GAP)
+  y = round(annotATop + ANNOT_H + 8)
+
+  const midTop = y
+  const midY = (k) => round(midTop + k * LANE_STEP)
+  y = round(midTop + MID_LEVELS * LANE_STEP + 8)
+
+  const rowBTop = round(y + MARK_BAND)
+  const rowBBottom = round(rowBTop + NODE_H)
+  const annotBTop = round(rowBBottom + ANNOT_GAP)
+  y = round(annotBTop + ANNOT_H + 8)
+
+  /* ⚠ THE REVISE LOOP LIVES BETWEEN ROW 2 AND THE WILDCARD RAIL, and both of its verticals stand
+     in the FREE COLUMN at the right-hand end of a node — the part of the node's own footprint
+     that its refusal band does not occupy. That is what keeps the loop from crossing the rail at
+     all: it never goes below it. */
+  const reviseShelfY = round(y + 14)
+  y = round(reviseShelfY + 16)
+
+  const railTop = y
+  const railH = Math.round(2 * PAD + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1 + lh(FS[CLS.s]))
+  y = round(railTop + railH + 14)
+
+  /* ======================= 4. TWO HELPERS THAT NEED THE METRIC =========== */
   /**
-   * The x-ranges of the twelve node boxes, half-resolution: the entry search runs BEFORE the nodes
-   * are drawn (a back edge's routing decides where its arrowhead goes, and the nodes' own stubs have
-   * to be placed with that decision known), so the nodes are reserved here as geometry rather than
-   * left out of the collision test — leaving them out is exactly how an arrowhead ends up 2 units
-   * inside the node it points at.
+   * Is this candidate box free of everything reserved so far? ⚠ NO CONTAINMENT EXEMPTION HERE,
+   * and that is deliberately stricter than the engine's rule. The engine allows a box inside a box
+   * — that is how a card holds its label — but a LABEL inside another LABEL is not a structure, it
+   * is one name printed through another. A search that treated containment as free laid two lane
+   * labels at the same point and every invariant stayed green, so the search is stricter than the
+   * gate: a candidate must not touch anything at all.
    */
-  const nodeBox = (i) => ({ x: round(nodeX(i)), y: rowTop, w: NODE_W, h: NODE_H })
-  /**
-   * Does a candidate box fit, given the nodes plus everything the chart has already reserved? A box
-   * an existing box CONTAINS is fine — the engine declares the nesting and the checker re-derives it
-   * — and a box that merely TOUCHES another is fine too. Anything else is a stroke through a stroke.
-   */
-  const fits = (a) => {
-    const all = PHASES.map((_, i) => nodeBox(i)).concat(api.boxes)
-    return all.every((o) => {
-      const ix = Math.min(a.x + a.w, o.x + o.w) - Math.max(a.x, o.x)
-      const iy = Math.min(a.y + a.h, o.y + o.h) - Math.max(a.y, o.y)
-      if (ix <= 0.05 || iy <= 0.05) return true
-      return a.x >= o.x && a.x + a.w <= o.x + o.w && a.y >= o.y && a.y + a.h <= o.y + o.h
-    })
-  }
-  /**
-   * The column an ENTRY ARROWHEAD lands in, SOLVED rather than chosen: the rightmost x inside the
-   * target's own column gap, past the gutter, where an arrowhead's reserved box — head-width,
-   * head-height, sitting just under the node's bottom edge — intersects nothing already reserved.
-   * A routing that cannot silently rot is the point: move a lane and this throws instead of
-   * drawing through a stroke. */
-  const freeEntryX = (targetIdx, shelfY) => {
-    /* ⚠ THE HEAD MUST CLEAR THE NODE, NOT MERELY THE COLUMN. An arrowhead's reserved box is a
-       rectangle around a triangle, so a head centred one half-width inside the gap still reaches
-       into the node it points at — the engine caught exactly that (a 2x8-unit intersection with the
-       node's own box). The scan therefore stops at the last column whose head box ends strictly
-       before the node begins, and it scans LEFT from there. */
-    const hi = round(nodeX(targetIdx) - 2 * SEQ_HALF - 2)
-    const lo = round(nodeX(targetIdx) - NODE_GAP + 2)
-    for (let x = hi; x >= lo; x -= 1) {
-      if (fits({ x: round(x - SEQ_HALF), y: round(shelfY - HEAD_L), w: 2 * SEQ_HALF, h: HEAD_L })) return x
-    }
-    throw new Error('overview chart: no free column for a back-edge entry into node ' + targetIdx)
-  }
-  /**
-   * ONE BACK EDGE. Five boxes, and every one of them is reserved:
-   *   · RISER  — in the gutter, from the shelf up to the row;
-   *   · SHELF  — the horizontal stroke under the row, from the riser to the entry column;
-   *   · DROP   — from the source node's bottom edge down to the shelf, in the column gap beside it;
-   *   · HEAD   — the entry arrowhead, pointing UP into the target's bottom edge.
-   * ⚠ AND NO ENTRY STUB: the arrowhead itself spans the gap between the shelf and the node, so a
-   * stub there would be ink drawn through the lane runs and the rail stubs for nothing. Its two
-   * ends are the shelf's level and the node's own bottom edge.
-   */
-  const arc = (node, riserX, laneYv, label, dropX, riserParent, what) => {
-    const nIdx = idxOf[node]
-    const ex = freeEntryX(nIdx, laneYv)
-    const riser = ruleV(riserX, round(rowTop + NODE_H / 2), round(laneYv - (rowTop + NODE_H / 2)), 'dg-line-loop', what + ' riser ' + node, riserParent)
-    const shelf = ruleH(Math.min(riserX, ex), laneYv, round(Math.abs(ex - riserX)), 'dg-line-loop', what + ' shelf ' + node, riser)
-    /* The DROP passes clean through the wildcard rail's band, so it is declared as the rail's own
-       contained ink — the rail was reserved first for exactly this reason. ⚠ SPLIT AT THE RAIL'S
-       EDGES: "contained by" means the whole box is inside, and a 189-unit drop cannot be inside a
-       58-unit rail. Two segments, each of which IS inside the band it crosses, and their shared
-       endpoint is a touch the engine already tolerates. */
-    const dropLo = Math.max(laneYv, round(railBottom + LINE_PAD))
-    ruleV(dropX, rowBottom, round(Math.min(railTop - LINE_PAD, dropLo) - rowBottom), 'dg-line-loop', what + ' drop ' + node, rail)
-    if (dropLo < laneYv) {
-      ruleV(dropX, dropLo, round(laneYv - dropLo), 'dg-line-loop', what + ' drop below the rail ' + node, rail)
-    }
-    head([[ex, rowBottom], [ex - SEQ_HALF, rowBottom - HEAD_L], [ex + SEQ_HALF, rowBottom - HEAD_L]], 'dg-head-loop', what + ' head ' + node)
-    /* ⚠ THE LABEL IS PLACED, NOT GUESSED, AND IT IS PLACED UNDER THE SHELF IT NAMES. A label is the
-       one annotation an arrowhead cannot cover, so it must clear the other arc's riser — which
-       stands in the gutter, the very place the text would otherwise start. So the search begins to
-       the RIGHT of the gutter and walks right along the shelf until a slot is free of every box
-       already reserved; the shelf's own span bounds it, and a label that cannot fit throws rather
-       than landing on a stroke. */
-    const w = tw(label, FS[CLS.s])
-    const labelY = round(laneYv + 2 * LINE_PAD + 2)
-    let labelX = null
-    for (let x = round(GUTTER + 2); x + w <= ex - 4; x += 2) {
-      if (fits({ x, y: labelY, w, h: LABEL_H })) { labelX = x; break }
-    }
-    if (labelX === null) throw new Error('overview chart: no free slot for the back-edge label "' + label + '"')
-    textEl(labelX, labelY, CLS.s, label)
-    return { riser, shelf, ex }
-  }
-  /* ⚠ THE REOPEN ARC IS DRAWN FIRST BECAUSE THE OTHER ARC'S RISER DECLARES AGAINST ITS SHELF. That
-     is the whole ordering constraint: an exemption can only name a box that already exists. The two
-     back edges cross each other at exactly two places, and each crossing is declared by the arc
-     that PRECEDES it: the REVISE riser is the reopen shelf's own contained ink, and the reopen
-     entry stub contains the REVISE shelf. Transposing these two calls makes the generator throw
-     rather than draw a stroke through a stroke — which is the point of declaring crossings. */
-  const back = {
-    reopen: arc('02-to-be-plan.md', RESERVE_X, b1Y, 'reopen → back to DRAFT, downstream receipts invalidated', round(nodeX(6) + NODE_W + 12), undefined, 'reopen'),
-  }
-  /* The reopen shelf spans the gutter, so the REVISE riser stands inside it: declared here as the
-     shelf's own contained ink, which is a geometric fact (`holds`) the checker re-derives. The two
-     arcs cross exactly once — here — and this is the arc that says so. */
-  back.revise = arc('03.5-code-review.md', REVISE_X, b2Y, 'REVISE → repair, then re-submit', round(nodeX(8) + NODE_W + 12), back.reopen.shelf, 'revise')
-  if (process.env.DG_DEBUG) console.error('[dg] entries reopen=' + back.reopen.ex + ' revise=' + back.revise.ex + ' rowTop=' + rowTop + ' rowBottom=' + rowBottom + ' b1Y=' + b1Y + ' b2Y=' + b2Y + ' railTop=' + railTop)
-  if (!(back.revise.ex > back.reopen.ex)) throw new Error('overview chart: the REVISE entry must lie to the right of the reopen entry, or their shelves cross')
-
-  /* ---- BAND 1: the title — ONE line, and it says what the picture is ----- */
-  textEl(GUTTER, titleTop, CLS.a,
-    `THE WORKFLOW AS A GRAPH — ${PHASES.length} phase artifacts, ${EDGES.length} directed edges, all of them drawn here`)
-
-  /* ---- BAND 2: the human-decision markers, above the nodes they belong to - */
-  const humanCol = (file) => (file === '05-manual-qa.md' ? 'qa-signoff' : file === '03-implementation-summary.md' ? 'tdd-mode' : 'run-start')
-  PHASES.forEach((p, i) => {
-    if (!p.human) return
-    const gate = humanCol(p.file)
-    /* The marker is 17 + the label + 5: 3 units of air, a 10-unit diamond, 4 units of air,
-       the label, and 2 units of margin — all of it derived from the measurement rather than
-       chosen, because the engine reserves ink and a marker one unit too narrow is a build
-       failure rather than a slightly tight label. */
-    const w = Math.ceil(17 + tw(gate, FS[CLS.s]) + 5)
-    const x = round(nodeX(i) + (NODE_W - w) / 2)
-    const m = card(x, MARK_TOP, w, MARK_H, 'dg-box-human', 'human decision marker ' + p.file)
-    head([[x + 4, MARK_TOP + MARK_H / 2], [x + 9, MARK_TOP + 2], [x + 14, MARK_TOP + MARK_H / 2], [x + 9, MARK_TOP + MARK_H - 2]], 'dg-mark', 'decision diamond ' + p.file, m)
-    textEl(x + 17, round(MARK_TOP + 1), CLS.s, gate, m)
+  const fitsHere = (box) => api.boxes.every((o) => {
+    const ix = Math.min(box.x + box.w, o.x + o.w) - Math.max(box.x, o.x)
+    const iy = Math.min(box.y + box.h, o.y + o.h) - Math.max(box.y, o.y)
+    return ix <= 0.05 || iy <= 0.05
   })
+  /**
+   * THE FIRST x WHERE A ONE-LINE LABEL FITS, solved rather than guessed. It returns null when
+   * there is no slot: an edge's label is decoration on top of the mark that carries the meaning,
+   * and a label that cannot fit is dropped rather than drawn over a stroke. The four cross-row
+   * labels are required (they name the shortest, least obvious edges in the picture) and they
+   * throw instead.
+   */
+  const putLabel = (text, yTop, from, to, must) => {
+    const w = tw(text, FS[CLS.s])
+    for (let x = round(from); x + w <= to; x = round(x + 2)) {
+      if (fitsHere({ x, y: yTop, w, h: LABEL_H })) { textEl(x, yTop, CLS.s, text); return x }
+    }
+    if (must) {
+      const blockers = api.boxes.filter((o) => o.y < yTop + LABEL_H && yTop < o.y + o.h && o.x < to && from < o.x + o.w)
+        .map((o) => o.label + ' ' + JSON.stringify([o.x, o.y, o.w, o.h]))
+      throw new Error('overview chart: no free slot for the label "' + text + '" between ' + round(from) + ' and ' + round(to)
+        + ' at y=' + yTop + ' — blocked by: ' + blockers.slice(0, 6).join(' | '))
+    }
+    return null
+  }
 
-  /* ---- the nodes --------------------------------------------------------- */
-  const refusalOf = (file) => REFUSAL_MARKS.filter((r) => r.nodes.includes(file))
+  /* ======================= 5. THE NODES ================================== */
+  /**
+   * THE FREE COLUMN UNDER A NODE. A refusal band is as wide as its own label, and everything that
+   * has to pass a node's bottom edge — a lane on its way down, a wildcard stub on its way up, a
+   * back edge re-entering — travels in the strip to the right of it. The strip is measured per
+   * node, and a node whose label leaves too little room is a build failure rather than a stroke
+   * drawn through a hatched band.
+   */
+  const bandText = (file) => {
+    const marks = REFUSAL_MARKS.filter((r) => r.nodes.includes(file))
+    const names = marks.filter((r) => r.nodes.length < PHASES.length).map((r) => r.short).join(' · ')
+    return names === '' ? 'any lock or write' : names
+  }
+  const annotW = (file) => Math.ceil(tw(bandText(file), FS[CLS.s]) + 2 * PAD)
+  const freeFrom = (i) => round(nodeX(i) + annotW(PHASES[i].file))
+  const columnAt = (i, back, what) => {
+    const x = round(nodeRight(i) - back)
+    if (!(round(x - LINE_PAD - 1) >= freeFrom(i))) {
+      throw new Error('overview chart: no free column for ' + what + ' under node ' + PHASES[i].file
+        + ' — the refusal band leaves only ' + round(nodeRight(i) - freeFrom(i)) + ' units')
+    }
+    return x
+  }
+  const freeX = (i, k) => columnAt(i, 11 + 12 * k, 'a column under ' + PHASES[i].file)
+  const needColumn = (i, k, what) => columnAt(i, 11 + 12 * k, what)
+
   PHASES.forEach((p, i) => {
     const x = nodeX(i)
+    const top = rowOf(i) === 0 ? rowATop : rowBTop
     const multi = sourcesOf(p.file) > 1
-    const node = card(x, rowTop, NODE_W, NODE_H, multi ? 'dg-box dg-box-fan' : 'dg-box', 'node ' + p.file)
-    textEl(x + PAD, round(rowTop + 7), CLS.t, short(p.file), node)
-    textEl(x + PAD, round(rowTop + 7 + lh(FS[CLS.t]) + 1), CLS.s, 'phase ' + p.phaseN + ' — ' + PURPOSES[p.file].label, node)
-    textEl(x + PAD, round(rowTop + 7 + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]) + 1), CLS.s, fanInText(p.file), node)
-    /* THE REFUSAL BAND — the second shape, and it means "a guard rule can stop a call at this
-       phase". Its text names the NARROWEST rule that bites here, which is why the picture reads as
-       a refusal surface rather than as twelve identical hatched strips: the three built-in rules
-       that fire on a tool pattern alone bite everywhere, and the named baselines bite where the
-       phase number selects them. */
-    const marks = refusalOf(p.file)
-    const names = marks.filter((r) => r.nodes.length < PHASES.length).map((r) => r.short).join(' · ')
-    const bandLabel = names === '' ? 'any lock or write' : names
-    const band = card(x, refusalTop, NODE_W, refusalH, 'dg-box-refuse', 'refusal band ' + p.file)
-    textEl(x + PAD, round(refusalTop + 3), CLS.s, bandLabel, band)
-    void marks
+    const node = card(x, top, NODE_W, NODE_H, multi ? 'dg-box dg-box-fan' : 'dg-box', 'node ' + p.file)
+    const names = NAMES[p.file]
+    /* The name slot is two lines tall for every node, because one name in the run needs two; a
+       one-line name is CENTRED in that slot rather than pinned to its top, so the eleven short
+       names do not read as eleven labels with a gap under them. */
+    const nameY = names.length === 1 ? round(top + 6 + NAME_SLOT / 2) : round(top + 6)
+    names.forEach((line, k) => {
+      textEl(round(x + PAD), round(nameY + k * NAME_SLOT), CLS.t, line, node)
+    })
+    textEl(round(x + PAD), round(top + 6 + 2 * NAME_SLOT), CLS.s, phaseLine(p), node)
+    textEl(round(x + PAD), round(top + 6 + 2 * NAME_SLOT + lh(FS[CLS.s]) + 1), CLS.s, fanInText(p.file), node)
+
+    /* THE HUMAN-DECISION MARKER, three units above the node it annotates — not in a band of its
+       own, which is where it used to float. It is a card of its own so that the legend's swatch
+       and this box are the same shape, and so the diamond inside it is a declared containment
+       rather than ink painted over a border. */
+    if (p.human) {
+      const gate = humanCol(p.file)
+      const w = Math.ceil(17 + tw(gate, FS[CLS.s]) + 5)
+      const mx = round(x + (NODE_W - w) / 2)
+      const mTop = round(top - MARK_GAP - MARK_H)
+      const m = card(mx, mTop, w, MARK_H, 'dg-box-human', 'human decision marker ' + p.file)
+      head([[round(mx + 4), round(mTop + MARK_H / 2)], [round(mx + 9), round(mTop + 2)],
+        [round(mx + 14), round(mTop + MARK_H / 2)], [round(mx + 9), round(mTop + MARK_H - 2)]],
+      'dg-mark', 'decision diamond ' + p.file, m)
+      textEl(round(mx + 17), round(mTop + 1), CLS.s, gate, m)
+    }
+
+    /* THE REFUSAL BAND — the node's own next line, and it names the NARROWEST rule that bites
+       there, which is why the picture reads as a refusal surface rather than as twelve identical
+       hatched strips: three built-in rules fire on a tool pattern alone and bite everywhere, and
+       the named baselines bite where the phase number selects them. */
+    const annotTop = rowOf(i) === 0 ? annotATop : annotBTop
+    const band = card(x, annotTop, annotW(p.file), ANNOT_H, 'dg-box-refuse', 'refusal band ' + p.file)
+    textEl(round(x + PAD), round(annotTop + (ANNOT_H - LABEL_H) / 2), CLS.s, bandText(p.file), band)
   })
 
-  /* ---- the dotted SEQUENCE-ORDER links ----------------------------------
-     THE ONE MARK THAT IS NOT AN EDGE. Two adjacent pairs — 08→09 and 09→10 — carry no
-     artifact input: the linter's own map does not connect them. Drawing a solid arrow
-     there would have claimed an edge that does not exist, and omitting it would have left
-     a gap in the row that reads as a missing phase. So the order gets its own, weaker,
-     dotted mark, and the legend says so in one clause. */
-  const seqRuns = []
-  for (const i of seqOnly) {
-    const cxm = round(rowTop + NODE_H / 2)
-    const start = round(nodeX(i) + NODE_W + 2)
-    const tip = round(nodeX(i + 1) - 2)
-    const run = ruleH(start, cxm, round(tip - HEAD_L - start), 'dg-line-seq', 'sequence link ' + PHASES[i].file + ' -> ' + PHASES[i + 1].file)
-    head([[tip, cxm], [tip - HEAD_L, cxm - SEQ_HALF], [tip - HEAD_L, cxm + SEQ_HALF]], 'dg-head-seq', 'sequence head ' + PHASES[i + 1].file, run)
-    seqRuns.push([i, start, tip])
+  /* ======================= 6. THE WILDCARD RAIL ========================== */
+  /* ⚠ THE RAIL IS RESERVED BEFORE ANY VERTICAL STUB THAT CROSSES IT, because the only overlap the
+     engine allows is a declared one and a declaration can only name a box that exists. The rail
+     spans the node row EXACTLY — both checkers assert that — and its own text is placed against
+     its right-hand edge, where the two phases it describes are. */
+  const rail = card(GUTTER, railTop, rowW, railH, 'dg-box-rail', 'the wildcard input rail')
+  const railLines = [
+    [CLS.t, 'EVERY PRESENT ARTIFACT EXCEPT ITSELF — the wildcard input, declared by ' + wild.length + ' phases'],
+    [CLS.s, 'RUN_ARTIFACT_SEQUENCE.filter(a => present.has(a) && a !== thisFile) — ' + WILDCARD_SOURCES + ' possible sources, and NO single one of them is required'],
+    [CLS.s, 'Drawn as ONE rail with ' + wild.length + ' thick arrows rather than as ' + (wild.length * WILDCARD_SOURCES) + ' lines, because a bundle of eleven into one node is the picture that stops being readable.'],
+  ]
+  const railTextX = round(GUTTER + rowW - Math.max(...railLines.map(([cls, s]) => tw(s, FS[cls]))) - PAD)
+  let railY = round(railTop + PAD)
+  for (const [cls, s] of railLines) {
+    textEl(railTextX, railY, cls, s, rail)
+    railY = round(railY + lh(FS[cls]) + 1)
   }
 
-  /* ---- the edges: spine joins, lanes, and the wildcard rail -------------- */
-  const runLabels = []
-  const attach = (file, side, list, step) => {
-    // THE TWO SIDES RULE IN OPPOSITE DIRECTIONS, and the asymmetry is forced: a lane
-    // farther from the node row has the longer stub, and a stub must not be drawn across a
-    // nearer lane's run. SOURCE side: the farther lane attaches LEFTMOST, so its long stub
-    // rises clear of every nearer run. TARGET side: the farther lane attaches RIGHTMOST, so
-    // the nearer edge's run ENDS before that stub comes down. (Both directions were needed:
-    // the first version used "leftmost" on both sides and the engine found the crossing.)
-    const base = side === 'out' ? nodeX(idxOf[file]) + NODE_W - 6 : nodeX(idxOf[file]) + 6
-    const sorted = [...list].sort((a, b) => (side === 'out' ? b.dist - a.dist : a.dist - b.dist))
+  /* THE WILDCARD STUBS — one thick arrow per phase that reads the wildcard, rising from the rail's
+     top edge into the node's own bottom edge, in the free column beside its refusal band. Row 2's
+     wildcard phases are 06-decisions-update and 08-memory-impact. */
+  for (const edge of wild) {
+    const i = idxOf[edge.to]
+    if (rowOf(i) !== 1) throw new Error('overview chart: the wildcard stub into ' + edge.to + ' is not in row 2, where the rail is')
+    const x = needColumn(i, 0, 'the wildcard stub into ' + edge.to)
+    head([[x, rowBBottom], [round(x - SEQ_HALF), round(rowBBottom + HEAD_L)], [round(x + SEQ_HALF), round(rowBBottom + HEAD_L)]],
+      'dg-head-wide', 'wildcard head ' + edge.to)
+    ruleV(x, round(rowBBottom + HEAD_L), round(railTop - rowBBottom - HEAD_L), 'dg-line-wide', 'wildcard stub ' + edge.to)
+  }
 
+  /* ======================= 7. ROW 1's THREE LANES ======================== */
+  /**
+   * The three lanes inside row 1 keep the shape the one-row chart already used: a stub up from the
+   * source node's top edge, a run in its own level of the band above the row, a stub down into the
+   * target's top edge, and an arrowhead. `graphBands` SOLVES the level order from the edges' own
+   * intervals so that no run crosses another; it is handed the three lanes and must fit them in
+   * one band, which is asserted below rather than assumed.
+   */
+  const toLane = (edge) => ({ edge, s: colOf(idxOf[edge.from]), t: colOf(idxOf[edge.to]) })
+  const [topBand, topSpare] = graphBands([toLane(L02), toLane(L04), toLane(L24)])
+  if (topSpare.length !== 0 || topBand.length !== 3) {
+    throw new Error('overview chart: row 1 needs exactly one routing band above it, got ' + topBand.length + ' + ' + topSpare.length)
+  }
+  /* SOURCE side: the farther lane attaches LEFTMOST, so its long stub rises clear of every nearer
+     run. TARGET side: the farther lane attaches RIGHTMOST, so the nearer edge's run ends before
+     that stub comes down. Both directions are needed; the engine refuses either mistake. */
+  const attach = (file, side, list, step) => {
+    const base = side === 'out' ? round(nodeRight(idxOf[file]) - 6) : round(nodeX(idxOf[file]) + 6)
+    const sorted = [...list].sort((a, b) => (side === 'out' ? b.dist - a.dist : a.dist - b.dist))
     sorted.forEach((e, j) => { e[side] = round(side === 'out' ? base - (sorted.length - 1 - j) * step : base + j * step) })
   }
-  upper.forEach((e, k) => { e.band = 'upper'; e.k = k; e.dist = k })
-  lower.forEach((e, k) => { e.band = 'lower'; e.k = k; e.dist = k })
-  const outGroups = new Map(), inGroups = new Map()
-  for (const e of lanes) {
-    if (!outGroups.has(e.edge.from)) outGroups.set(e.edge.from, [])
-    outGroups.get(e.edge.from).push(e)
-    if (!inGroups.has(e.edge.to)) inGroups.set(e.edge.to, [])
-    inGroups.get(e.edge.to).push(e)
-  }
-  for (const [file, group] of outGroups) attach(file, 'out', group, 12)
-  for (const [file, group] of inGroups) attach(file, 'in', group, 12)
+  topBand.forEach((e, k) => { e.dist = k })
+  attach(PHASES[0].file, 'out', topBand.filter((e) => e.edge.from === PHASES[0].file), 12)
+  attach(PHASES[2].file, 'out', topBand.filter((e) => e.edge.from === PHASES[2].file), 12)
+  attach(PHASES[2].file, 'in', topBand.filter((e) => e.edge.to === PHASES[2].file), 12)
+  attach(PHASES[4].file, 'in', topBand.filter((e) => e.edge.to === PHASES[4].file), 12)
 
-
-  /* LANE EDGE — stub across the gap, a run in its own lane, a stub down into the target.
-     ⚠ WHERE A RUN ENDS, AND WHY IT IS NOT AT THE TARGET STUB. The last HEAD_L units before
-     the target stub are covered by the arrowhead, whose reserved box is a RECTANGLE around a
-     triangle and therefore overlaps the run's own box by a few units — the engine refused
-     the first version of this for exactly that, with a 4x0.5-unit intersection, which is the
-     collision check doing its job on a shape no reader would ever have seen. So a run STOPS
-     one arrowhead-length short of its target stub and the arrowhead covers the join: the
-     drawn line is unbroken and the two reserved boxes merely touch. The head is declared as
-     the target stub's own ink, which is the one relation the engine exempts and the checker
-     re-derives.
-
-     ⚠ AND IT STOPS SHORT OF EVERY *OTHER* LANE'S ARROWHEAD TOO. Two edges that leave the
-     SAME node and land on different ones — 00-requirements.md does it twice — put their
-     stubs at the same x wherever they attach to that shared source, so the shorter edge's
-     arrowhead sits INSIDE the longer edge's run and the engine refused that as well (a
-     4x0.5-unit intersection, again on ink no reader would see). So every run is truncated at
-     the first foreign arrowhead it would otherwise reach. `endBy` is that list, computed
-     before anything is drawn; the truncation is invisible because an arrowhead is drawn over
-     the join in every remaining case. */
-  const laneHeads = lanes.map((e) => ({ x: e.in, lo: round(e.in - SEQ_HALF), hi: round(e.in + SEQ_HALF) }))
-  const placedLabels = []
-  for (const e of lanes) {
-    const yy = laneY(e.band, e.k)
+  let laneLabelsDrawn = 0
+  const topHeads = topBand.map((e) => ({ x: e.in, lo: round(e.in - SEQ_HALF) }))
+  for (const e of topBand) {
+    const yy = topY(e.dist)
     const xs = e.out, xt = e.in
     const dash = e.edge.kind === 'conditional'
     const line = dash ? 'dg-line-cond' : 'dg-line'
     const headCls = dash ? 'dg-head-cond' : 'dg-head'
-    const up = e.band === 'upper'
-    /* WHICH ARROWHEADS CONSTRAIN THIS RUN. An arrowhead sits at the node row's edge and this
-       lane's run sits OUTSIDE the node band — the lane bands are measured from the row's
-       outer edges, so no run crosses a node — but the head's reserved box reaches one
-       arrowhead-length INTO the lane band, which is exactly where a run in the opposite band
-       travels. So a foreign head constrains a run whenever the run would reach its column. */
-    const foreign = laneHeads.filter((h) => h.x !== xt && h.lo > xs).map((h) => h.lo)
-    const ownStub = round(xs + LINE_PAD + 1)
-    const runEnd = round(Math.max(ownStub, Math.min(round(xt - HEAD_L), ...(foreign.length ? foreign : [Infinity])) - 1))
+    /* WHERE A RUN ENDS. It stops one arrowhead-length short of its target stub — the arrowhead
+       covers the join — and short of every FOREIGN arrowhead it would otherwise reach, because two
+       edges that leave the same node put their stubs at the same x and the shorter one's head would
+       otherwise sit inside the longer one's run. */
+    const foreign = topHeads.filter((h) => h.x !== xt && h.lo > xs).map((h) => h.lo)
+    const runEnd = round(Math.max(round(xs + LINE_PAD + 1),
+      Math.min(round(xt - HEAD_L), ...(foreign.length ? foreign : [Infinity])) - 1))
     const run = ruleH(xs, yy, round(runEnd - xs), line, 'lane ' + e.edge.from + ' -> ' + e.edge.to)
-    const stubS = ruleV(xs, up ? yy : rowBottom, up ? round(rowTop - yy) : round(yy - rowBottom), line, 'stub ' + e.band + ' ' + e.edge.from, run)
-    const stubT = ruleV(xt, up ? yy : round(rowBottom + HEAD_L), up ? round(rowTop - HEAD_L - yy) : round(yy - rowBottom - HEAD_L), line, 'stub ' + e.band + ' ' + e.edge.to, run)
-    if (up) head([[xt, rowTop], [xt - SEQ_HALF, rowTop - HEAD_L], [xt + SEQ_HALF, rowTop - HEAD_L]], headCls, 'lane arrow ' + e.edge.to, stubT)
-    else head([[xt, rowBottom], [xt - SEQ_HALF, rowBottom + HEAD_L], [xt + SEQ_HALF, rowBottom + HEAD_L]], headCls, 'lane arrow ' + e.edge.to, stubT)
-    void stubS
-    /* THE EDGE LABEL, in the node's own short name — anchored at the run's SOURCE end rather
-       than centred on the run, because a centred label on the longest lane lands exactly
-       where another lane's stub crosses. A label is drawn when it FITS, and where it goes is
-       SOLVED rather than guessed:
-
-         · it is laid on the row BELOW its run, which is the side away from the nearer lane —
-           placing it on the far side would paint it across that lane's line;
-         · it slides right until it clears every node it overlaps VERTICALLY. A lane label sits
-           a few units outside the node row, so it clears the row by construction — but its own
-           run starts 6 units INSIDE its source node, and the run's first stretch therefore lies
-           under that node and the next one. The label takes the first x where the node band
-           leaves it alone, which in practice is the 48-unit COLUMN GAP between two nodes;
-         · it must end before the run ends, and it must not overlap a label already placed.
-
-       A lane that reads an ADJACENT phase and loses its label loses nothing: the spine arrow in
-       the gap already states that input. The structural read — that these arrows join
-       NON-adjacent nodes — is what the lane is for. */
+    ruleV(xs, yy, round(rowATop - yy), line, 'stub out ' + e.edge.from, run)
+    const stubT = ruleV(xt, yy, round(rowATop - HEAD_L - yy), line, 'stub in ' + e.edge.to, run)
+    head([[xt, rowATop], [round(xt - SEQ_HALF), round(rowATop - HEAD_L)], [round(xt + SEQ_HALF), round(rowATop - HEAD_L)]],
+      headCls, 'lane arrow ' + e.edge.to, stubT)
     const label = short(e.edge.from) + (dash ? ' · when present' : '')
-    const labelW = tw(label, FS[CLS.s])
-    const labelY = round(yy + LINE_PAD + 1)
-    const labelBot = round(labelY + LABEL_H)
-    const blocksNode = labelBot > rowTop && labelY < rowBottom
-    const underNode = (x) => blocksNode && PHASES.some((_, i) => x < nodeX(i) + NODE_W + 3 && nodeX(i) - 3 < x + labelW)
-    const freeOf = (x) => !underNode(x)
-      && !placedLabels.some((p) => Math.abs(p.y - labelY) < LABEL_H && p.x < x + labelW && x < p.x + p.w)
-    const first = Math.max(xs, round(nodeX(idxOf[e.edge.from]) + NODE_W + 3))
-    let lblX = null
-    for (let x = first; x + labelW <= runEnd - 8; x = round(x + 2)) {
-      if (freeOf(x)) { lblX = x; break }
-    }
-    if (lblX !== null) {
-      textEl(lblX, labelY, CLS.s, label)
-      placedLabels.push({ x: lblX, y: labelY, w: labelW })
-      runLabels.push(label)
-    } else {
-      runLabels.push(null)
-    }
+    if (putLabel(label, round(yy + LINE_PAD + 1), round(xs + 2), round(runEnd - 2)) !== null) laneLabelsDrawn++
   }
 
+  /* ======================= 8. THE ROW BOUNDARY =========================== */
+  /**
+   * ⚠ THE WRAP IS ONE VERTICAL ARROW, AND IT IS A REAL EDGE RATHER THAN A SEQUENCE MARK. It leaves
+   * the bottom of the last node of row 1 in the free column beside that node's refusal band and
+   * lands on the top edge of the first node of row 2, in the same canvas column. Because both ends
+   * are in one column there is no run at all: this is the one edge in the chart whose whole drawing
+   * is a single stroke, and it is the reason the rows are drawn in opposite directions.
+   */
+  const WRAP_X = needColumn(idxOf[wrap.from], 0, 'the row-boundary spine out of ' + wrap.from)
+  const wrapArrival = needColumn(idxOf[wrap.to], 0, 'the row-boundary spine into ' + wrap.to)
+  if (WRAP_X !== wrapArrival) throw new Error('overview chart: the row boundary is not a single column')
+  const wrapDash = wrap.kind === 'conditional'
+  const wrapRun = ruleV(WRAP_X, rowABottom, round(rowBTop - HEAD_L - rowABottom),
+    wrapDash ? 'dg-line-cond' : 'dg-line', 'spine ' + wrap.from + ' -> ' + wrap.to)
+  head([[WRAP_X, rowBTop], [round(WRAP_X - SEQ_HALF), round(rowBTop - HEAD_L)], [round(WRAP_X + SEQ_HALF), round(rowBTop - HEAD_L)]],
+    wrapDash ? 'dg-head-cond' : 'dg-head', 'spine head ' + wrap.to, wrapRun)
 
-  /* ---- the CROSS-RUN band: the loop that no single run can close ---------
-     THE ONE EDGE THAT LEAVES THIS RUN. Everything above is a dependency inside a single
-     run; this band is the cycle the plugin exists for, and it is drawn as an ARC that
-     lands back at a phase ENTRY — the arrow arrives at the top-left of the NEXT run, not
-     at a later phase of this one. Its three nodes are the mechanism in three words each:
-     the run writes the plane and registers it, `training/` is one of the five kinds the
-     reader reads, and `recursive_phase` at the next run's phase entry returns it. */
+  /* ======================= 9. THE FOUR CROSS-ROW LANES =================== */
+  /**
+   * ⚠ THE LEVELS BELOW ARE SOLVED, AND EVERY ALTERNATIVE WAS REFUSED BY ARITHMETIC RATHER THAN BY
+   * TASTE. A run in the band between the rows is crossed by:
+   *   · any SOURCE stub inside its x-span that reaches DEEPER than the run (stubs descend from
+   *     row 1 down to their own level), and
+   *   · any TARGET stub inside its x-span that STARTS ABOVE the run (stubs descend from their own
+   *     level into row 2).
+   * Solving the four lanes against those two rules, and against the three x-positions each node's
+   * free strip allows, gives — from the row downwards:
+   *
+   *   level 0   03-implementation-summary -> 04-test-summary  (column 5 -> 4)
+   *   level 1   02-to-be-plan -> 05-manual-qa                 (column 4 -> 3)
+   *   level 2   02-to-be-plan -> 03.5-code-review             (column 4 -> 5)
+   *
+   * and the two remaining cross-row edges need no level at all, because both of their ends are in
+   * ONE column: 02-to-be-plan -> 04-test-summary (column 4 -> 4) and the row-boundary spine drawn
+   * above (column 5 -> 5).
+   *
+   * ⚠ LEVELS 0 AND 2 ARE THE ONE PAIR THAT CANNOT BE SEPARATED: their arrows swap columns, so they
+   * cross like two one-way streets between the same two junctions. That single bridge is DECLARED
+   * to the engine — named on the level-2 run, which is reserved after the level-0 target stub it
+   * meets — and re-derived by `check-workflow-map.mjs`, which accepts a declared pair only when it
+   * is a real containment or a touch within ONE stroke width. Every other pair, including all the
+   * pairs the naive interval rule calls "nested", is clean.
+   */
+  const X46 = columnAt(idxOf[L46.from], 17, 'the lane out of ' + L46.from)
+  const X47 = columnAt(idxOf[L47.from], 37, 'the straight-down lane out of ' + L47.from)
+  const X48 = columnAt(idxOf[L48.from], 51, 'the lane out of ' + L48.from)
+  const X57 = needColumn(idxOf[L57.from], 2, 'the lane out of ' + L57.from)
+  const T46 = round(nodeX(idxOf[L46.to]) + 6)
+  const T48 = round(nodeX(idxOf[L48.to]) + 6)
+  const T57 = round(nodeRight(idxOf[L57.to]) - 5)
+  for (const [x, i, what] of [[T46, idxOf[L46.to], L46.to], [T48, idxOf[L48.to], L48.to], [T57, idxOf[L57.to], L57.to]]) {
+    if (!(x >= nodeX(i) && x <= nodeRight(i))) throw new Error('overview chart: the arrival of ' + what + ' is not on its own node')
+  }
+  /* ⚠ FOUR COORDINATE FACTS THE LEVEL ORDER RESTS ON, ASSERTED. Each would otherwise be a stroke
+     drawn through another stroke that only a reader would notice.
+       1. THE STRAIGHT-DOWN LANE SITS BETWEEN THE TWO LANE SOURCES OUT OF ITS OWN NODE. Its stroke
+          crosses the whole band, so it is outside the level-2 run (which goes right, to the column
+          above) only if X47 < X46, and outside the level-1 run (which goes left from X48) only if
+          X47 > X48. Both at once is what the free strip's three columns are assigned for.
+       2. THE LEVEL-0 RUN CLEARS IT, with room for its own arrowhead.
+       3. THE ROW-BOUNDARY SPINE IS OUTSIDE THE LEVEL-0 RUN, or the wrap would be crossed too.
+       4. THE BRIDGE IS REAL: the level-2 run's target stub lands fully inside the level-0 run's
+          x-span, which is what makes the declared pair a five-by-five touch and not a partial
+          overlap the checker would refuse. */
+  if (!(X48 < X47 && X47 < X46)) {
+    throw new Error('overview chart: the straight-down lane must sit between the two lane sources, got ' + X48 + ' / ' + X47 + ' / ' + X46)
+  }
+  if (!(T57 > X47 + 2 * SEQ_HALF + LINE_PAD + 2)) {
+    throw new Error('overview chart: the level-0 run would cross the straight-down lane out of ' + L47.from)
+  }
+  if (!(WRAP_X > X57)) throw new Error('overview chart: the row-boundary spine would be crossed by the level-0 run')
+  if (!(X46 < T57 - SEQ_HALF)) throw new Error('overview chart: the level-2 source stub would cross the level-0 run')
+  if (!(T46 - SEQ_HALF >= T57 && T46 + SEQ_HALF <= X57)) {
+    throw new Error('overview chart: the level-2 arrival at ' + T46 + ' is not inside the level-0 run ' + T57 + '..' + X57
+      + ', so the declared bridge would not be the five-by-five touch the checker accepts')
+  }
+
+  /* LEVEL 0, drawn first: the level-2 run declares its bridge against THIS lane's target stub, and
+     a declaration can only name a box that already exists. */
+  const pending = []
+  const l57Dash = L57.kind === 'conditional'
+  const l57Line = l57Dash ? 'dg-line-cond' : 'dg-line'
+  const l57Run = ruleH(T57, midY(0), round(X57 - T57), l57Line, 'lane ' + L57.from + ' -> ' + L57.to)
+  ruleV(X57, rowABottom, round(midY(0) - rowABottom), l57Line, 'stub cross out ' + L57.from, l57Run)
+  const l57StubT = ruleV(T57, midY(0), round(rowBTop - HEAD_L - midY(0)), l57Line, 'stub cross in ' + L57.to, l57Run)
+  head([[T57, rowBTop], [round(T57 - SEQ_HALF), round(rowBTop - HEAD_L)], [round(T57 + SEQ_HALF), round(rowBTop - HEAD_L)]],
+    l57Dash ? 'dg-head-cond' : 'dg-head', 'lane arrow ' + L57.to, l57StubT)
+  pending.push([short(L57.from) + (l57Dash ? ' · when present' : ''), round(midY(0) + LINE_PAD + 1), round(T57 + 10)])
+
+  /* LEVEL 1, and the straight-down lane. 02-to-be-plan -> 04-test-summary has both ends in column
+     4, so it is one stroke with an arrowhead on it and no run at all. */
+  const l48Run = ruleH(T48, midY(1), round(X48 - T48), 'dg-line', 'lane ' + L48.from + ' -> ' + L48.to)
+  ruleV(X48, rowABottom, round(midY(1) - rowABottom), 'dg-line', 'stub cross out ' + L48.from, l48Run)
+  const l48StubT = ruleV(T48, midY(1), round(rowBTop - HEAD_L - midY(1)), 'dg-line', 'stub cross in ' + L48.to, l48Run)
+  head([[T48, rowBTop], [round(T48 - SEQ_HALF), round(rowBTop - HEAD_L)], [round(T48 + SEQ_HALF), round(rowBTop - HEAD_L)]],
+    'dg-head', 'lane arrow ' + L48.to, l48StubT)
+  pending.push([short(L48.from), round(midY(1) + LINE_PAD + 1), round(T48 + 10)])
+
+  const l47Run = ruleV(X47, rowABottom, round(rowBTop - HEAD_L - rowABottom), 'dg-line', 'lane ' + L47.from + ' -> ' + L47.to)
+  head([[X47, rowBTop], [round(X47 - SEQ_HALF), round(rowBTop - HEAD_L)], [round(X47 + SEQ_HALF), round(rowBTop - HEAD_L)]],
+    'dg-head', 'lane arrow ' + L47.to, l47Run)
+  /* ⚠ THE STRAIGHT-DOWN LANE'S LABEL GOES ON THE LEVEL-1 ROW, not on level 0 with the other two.
+     Three of these four edges leave 02-to-be-plan, so three of the four labels carry the same
+     name; the level-0 row has room for one of them beside the level-2 lane's arrival stub and the
+     level-1 row has room for the other. That is arithmetic on this canvas, not a preference. */
+  pending.push([short(L47.from), round(midY(1) + LINE_PAD + 1), round(X47 + 10)])
+
+  /* LEVEL 2, AND THE BRIDGE. The run itself declares the pair: it is reserved after the level-0
+     target stub it meets, and it stops exactly on that stub's left edge, so the two reserved boxes
+     touch and the drawn strokes join without a corner exemption being spent on either of them. */
+  const l46Run = ruleH(X46, midY(2), round(T46 - LINE_PAD - X46), 'dg-line', 'lane ' + L46.from + ' -> ' + L46.to, l57StubT)
+  ruleV(X46, rowABottom, round(midY(2) - rowABottom), 'dg-line', 'stub cross out ' + L46.from, l46Run)
+  const l46StubT = ruleV(T46, midY(2), round(rowBTop - HEAD_L - midY(2)), 'dg-line', 'stub cross in ' + L46.to)
+  head([[T46, rowBTop], [round(T46 - SEQ_HALF), round(rowBTop - HEAD_L)], [round(T46 + SEQ_HALF), round(rowBTop - HEAD_L)]],
+    'dg-head', 'lane arrow ' + L46.to, l46StubT)
+  pending.push([short(L46.from), round(midY(2) + LINE_PAD + 1), round(T46 + 10)])
+
+  /* The four labels, placed after all five strokes are reserved rather than as each one is drawn:
+     a label is the one mark a stroke cannot cover, so its slot has to be solved against every
+     stroke that will exist. They are required, not optional — each of the four names the shortest,
+     least obvious edge in the picture and is the only text that identifies its own run. */
+  const placed = pending.filter(([text, labelY, from]) => putLabel(text, labelY, from, round(GRID_R - 8), true) !== null)
+  if (placed.length !== 4) throw new Error('overview chart: only ' + placed.length + ' of the four cross-row lane labels were placed')
+
+  /* ======================= 10. THE IN-ROW MARKS ========================== */
+  /**
+   * A solid arrow in the gap between two adjacent phases that really do have an input edge, and a
+   * dotted one between the four adjacent pairs that do not. Row 2's arrows point LEFT, because that
+   * is the direction row 2 reads; what separates the two marks is the SHAPE, and the legend says so,
+   * exactly as it did when every arrow pointed the same way. The row boundary is skipped here: it
+   * was drawn above as a single vertical stroke.
+   */
+  let spineMarks = 0
+  let seqMarks = 0
+  for (let i = 0; i + 1 < PHASES.length; i++) {
+    if (i === idxOf[wrap.from]) continue
+    if (rowOf(i) !== rowOf(i + 1)) throw new Error('overview chart: the only row boundary is ' + wrap.from + ' -> ' + wrap.to)
+    const a = colOf(i), b = colOf(i + 1)
+    if (Math.abs(a - b) !== 1) throw new Error('overview chart: adjacent phases ' + PHASES[i].file + ' and ' + PHASES[i + 1].file + ' are not in adjacent columns')
+    const rightward = b > a
+    const edge = spine.find((e) => idxOf[e.from] === i)
+    const dotted = !edge
+    const yTop = rowOf(i) === 0 ? rowATop : rowBTop
+    const cym = round(yTop + NODE_H / 2)
+    const start = rightward ? round(nodeRight(i) + 2) : round(nodeX(i) - 2)
+    const tip = rightward ? round(nodeX(i + 1) - 2) : round(nodeRight(i + 1) + 2)
+    const w = round(Math.abs(tip - start) - HEAD_L)
+    if (!(w > 0)) throw new Error('overview chart: no room for the arrow between ' + PHASES[i].file + ' and ' + PHASES[i + 1].file)
+    const from = rightward ? start : round(start - w)
+    const dash = edge && edge.kind === 'conditional'
+    const klass = dotted ? 'dg-line-seq' : dash ? 'dg-line-cond' : 'dg-line'
+    const headCls = dotted ? 'dg-head-seq' : dash ? 'dg-head-cond' : 'dg-head'
+    const label = dotted
+      ? 'sequence link ' + PHASES[i].file + ' -> ' + PHASES[i + 1].file
+      : 'spine ' + PHASES[i].file + ' -> ' + PHASES[i + 1].file
+    const run = ruleH(from, cym, w, klass, label)
+    const points = rightward
+      ? [[tip, cym], [round(tip - HEAD_L), round(cym - SEQ_HALF)], [round(tip - HEAD_L), round(cym + SEQ_HALF)]]
+      : [[tip, cym], [round(tip + HEAD_L), round(cym - SEQ_HALF)], [round(tip + HEAD_L), round(cym + SEQ_HALF)]]
+    head(points, headCls, (dotted ? 'sequence head ' : 'spine head ') + PHASES[i + 1].file, run)
+    if (dotted) seqMarks++; else spineMarks++
+  }
+  if (spineMarks !== 6 || seqMarks !== 4) {
+    throw new Error('overview chart: expected 6 spine arrows and 4 sequence links in the gaps, drew ' + spineMarks + ' + ' + seqMarks)
+  }
+
+  /* ======================= 11. THE TWO BACKWARD EDGES ==================== */
+  /**
+   * ⚠ BOTH BACK EDGES ARE SHORT LOOPS HERE, AND THAT IS A GAIN RATHER THAN A COMPROMISE. In a
+   * single-row chart a backward edge has to travel the whole width of the canvas to re-enter a node
+   * to its left. With two rows, 04-test-summary -> 03.5-code-review is a hop between two
+   * neighbouring columns of row 2, and 03.5-code-review -> 02-to-be-plan is a hop from the last
+   * column of row 2 to the neighbouring column of row 1 — the two shortest backward hops the
+   * topology allows. Each is drawn the way it always was: OUT of the source's bottom or right edge,
+   * along a shelf of its own, and back UP into the target's own free column.
+   */
+  /* REVISE: row 2 column 4 -> row 2 column 5. The loop lives between row 2 and the rail, so it
+     crosses neither the rail nor any lane. */
+  const reviseTo = idxOf['03.5-code-review.md']
+  const reviseFrom = idxOf['04-test-summary.md']
+  const RV_DROP = needColumn(reviseFrom, 0, 'the REVISE drop')
+  const RV_UP = needColumn(reviseTo, 0, 'the REVISE entry')
+  if (!(RV_UP > RV_DROP)) throw new Error('overview chart: the REVISE loop would run backwards')
+  const rvDrop = ruleV(RV_DROP, rowBBottom, round(reviseShelfY - rowBBottom), 'dg-line-loop', 'revise drop 03.5-code-review.md')
+  const rvShelf = ruleH(RV_DROP, reviseShelfY, round(RV_UP - RV_DROP), 'dg-line-loop', 'revise shelf 03.5-code-review.md', rvDrop)
+  const rvRiser = ruleV(RV_UP, round(rowBBottom + HEAD_L), round(reviseShelfY - rowBBottom - HEAD_L), 'dg-line-loop', 'revise riser 03.5-code-review.md', rvShelf)
+  head([[RV_UP, rowBBottom], [round(RV_UP - SEQ_HALF), round(rowBBottom + HEAD_L)], [round(RV_UP + SEQ_HALF), round(rowBBottom + HEAD_L)]],
+    'dg-head-loop', 'revise head 03.5-code-review.md', rvRiser)
+  /* The loop's own name, placed to the LEFT of its drop: to the right of the drop is the entry
+     riser, and the run of clear space between the two is 170 units against a label that needs 183.
+     The left side of the drop is empty for 800 units, so the label goes where it fits. */
+  const rvLabel = 'REVISE → repair, then re-submit'
+  putLabel(rvLabel, round(reviseShelfY - LABEL_H - 4), round(RV_DROP - 8 - tw(rvLabel, FS[CLS.s])), round(RV_DROP - 8), true)
+
+  /* REOPEN: row 2 column 5 -> row 1 column 4. OUT of the source's right edge, UP the right-hand
+     channel — the one vertical line on this canvas that crosses nothing — then LEFT along the top
+     band and DOWN into the target's top edge, in the free part of its own footprint. */
+  const reopenTo = idxOf['02-to-be-plan.md']
+  const reopenFrom = idxOf['03.5-code-review.md']
+  const RO_TOP = topY(3)
+  const RO_DOWN = round(nodeX(reopenTo) + 148)
+  const roMid = round(rowBTop + NODE_H / 2)
+  const roOut = ruleH(nodeRight(reopenFrom), roMid, round(RISER_X - nodeRight(reopenFrom)), 'dg-line-loop', 'reopen out 02-to-be-plan.md')
+  const roRiser = ruleV(RISER_X, RO_TOP, round(roMid - RO_TOP), 'dg-line-loop', 'reopen riser 02-to-be-plan.md', roOut)
+  const roShelf = ruleH(RO_DOWN, RO_TOP, round(RISER_X - RO_DOWN), 'dg-line-loop', 'reopen shelf 02-to-be-plan.md', roRiser)
+  const roDrop = ruleV(RO_DOWN, RO_TOP, round(rowATop - HEAD_L - RO_TOP), 'dg-line-loop', 'reopen drop 02-to-be-plan.md', roShelf)
+  head([[RO_DOWN, rowATop], [round(RO_DOWN - SEQ_HALF), round(rowATop - HEAD_L)], [round(RO_DOWN + SEQ_HALF), round(rowATop - HEAD_L)]],
+    'dg-head-loop', 'reopen head 02-to-be-plan.md', roDrop)
+  /* The reopen arc's own name, placed just LEFT of its drop — the same rule the REVISE loop's
+     label follows. Searching from the gutter put it at the far left of the frame, 800 units from
+     the violet stroke it names, which is a label that has to be traced rather than read. */
+  const roLabel = 'reopen → back to DRAFT, downstream receipts invalidated'
+  putLabel(roLabel, round(RO_TOP + 4), round(RO_DOWN - 8 - tw(roLabel, FS[CLS.s])), round(RO_DOWN - 8), true)
+
+  /* ======================= 12. THE CROSS-RUN BAND ======================== */
+  /* THE ONE EDGE THAT LEAVES THIS RUN, unchanged in shape and in words: three cards edge to edge —
+     the write, the plane it lands in, and the next run's phase entry that reads it — with an arc
+     that leaves the last card and lands inside the first, at the point the loop actually re-enters
+     the workflow. */
   const crossCardW = Math.ceil(Math.max(
     tw('writes the plane, then REGISTERS it', FS[CLS.s]),
     tw('memory/training/<task-type>.md  +  MEMORY.md', FS[CLS.s]),
@@ -3725,120 +3870,142 @@ function drawOverview(api) {
     tw('RUN N+1 — recursive_phase at phase entry', FS[CLS.t]),
     tw('...returns the shards that match this run', FS[CLS.s]),
   ) + 2 * PAD + 4)
-  /* ⚠ THREE CARDS, EDGE TO EDGE, AND ONE ARROW BACK. The cross-run cycle is the reason this plugin
-     exists, so it is drawn as a cycle rather than as a row with a caption: the run's write and the
-     memory plane it writes to are joined by a shared border, and the return arc leaves the gutter and
-     lands INSIDE the next run's entry card — on its left edge, which is the point the loop actually
-     re-enters the workflow at. Edge-to-edge means the join is a fact of the geometry rather than a
-     short arrow between two boxes that a reader has to infer. */
   const crossCards = [
     { w: crossCardW, klass: 'dg-box', t: 'writes the plane, then REGISTERS it', rows: ['memory/training/<task-type>.md  +  MEMORY.md'] },
     { w: crossCardW, klass: 'dg-box-rail', t: 'MEMORY PLANE — .recursive/memory/', rows: ['training/ is ONE of the 5 kinds read'] },
     { w: crossCardW2, klass: 'dg-box', t: 'RUN N+1 — recursive_phase at phase entry', rows: ['...returns the shards that match this run'] },
   ]
-  const crossRowH = Math.round(2 * PAD + lh(FS[CLS.s]) + 1 + lh(FS[CLS.s]))
-  const crossRowH3 = Math.round(2 * PAD + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s]))
-  const crossBoxH = Math.max(crossRowH, crossRowH3)
+  const crossBoxH = Math.max(
+    Math.round(2 * PAD + lh(FS[CLS.s]) + 1 + lh(FS[CLS.s])),
+    Math.round(2 * PAD + lh(FS[CLS.t]) + 1 + lh(FS[CLS.s])),
+  )
+  const crossTop = y
   let ccx = GUTTER
-  const crossBoxes = crossCards.map((c) => {
-    const b = block(ccx, crossTop, c.w, c.klass, [{ cls: c.w === crossCardW2 ? CLS.t : CLS.s, s: c.t }].concat(c.rows.map((s) => ({ cls: CLS.s, s }))),
-      { label: 'cross-run card: ' + c.t.slice(0, 28), pad: PAD, gap: 1, boxH: crossBoxH })
+  for (const c of crossCards) {
+    block(ccx, crossTop, c.w, c.klass,
+      [{ cls: c.w === crossCardW2 ? CLS.t : CLS.s, s: c.t }].concat(c.rows.map((s) => ({ cls: CLS.s, s }))),
+      { label: 'cross-run card: ' + c.t.slice(0, 28), pad: PAD, gap: 1 })
     ccx = round(ccx + c.w)
-    return b
-  })
-  const crossFirst = crossBoxes[0], crossLast = crossBoxes[crossBoxes.length - 1]
+  }
   const retRiser = round(GUTTER - 22)
   const retY = round(crossTop + PAD + lh(FS[CLS.s]) / 2)
-  /* The return: DOWN beside the last card, along the gutter, and back UP into the first — five boxes
-     and every corner declared against the rule it turns out of. ⚠ THE ARROWHEAD IS THE RETURN RUN'S
-     OWN INK, and the run is reserved WIDE ENOUGH TO HOLD IT: a head is 2*SEQ_HALF across and HEAD_L
-     tall, so the run is drawn at exactly that height with the drawn stroke on the same centre line.
-     Reserved geometry and drawn geometry are two different questions, and this is the case where
-     saying so is the honest answer — the alternative was a head overlapping the rule it terminates,
-     which is the defect the engine exists to refuse. The tip lands inside the card's left edge, which
-     is the point the loop actually re-enters the workflow at. */
-  /* ⚠ THE RETURN'S CORNERS ARE MADE NESTED RATHER THAN DECLARED. A corner where two strokes meet
-     needs an exemption, an exemption names exactly ONE neighbour, and a corner has two — so the
-     engine refused this shape three times in a row (2.5x2.5, then 5x2.5, then 5x4) while a corner
-     was declared against one neighbour and overlapped the other. The layout that needs no exemption
-     at all is COLLINEAR NESTING: the drop shares the riser's exact centre x, so the riser's own box
-     CONTAINS it and the engine files the pair as a containment; the run is reserved wide enough to
-     hold the arrowhead, so the head is the run's own ink; and the line that draws the stroke is
-     contained by the run. Every pair is one box inside another, which is the one overlap the engine
-     allows and the checker re-derives without a special case. */
-  const retFootY = round(crossTop + crossBoxH + 40)
+  const retFootY = round(crossTop + crossBoxH + 26)
   const retDrop = ruleV(retRiser, retY, round(retFootY - retY), 'dg-line-loop', 'cross-run return drop')
   ruleH(round(retRiser + LINE_PAD + 1), retFootY, round(GUTTER - retRiser - LINE_PAD - 1), 'dg-line-loop', 'cross-run return foot', retDrop)
   const retRun = ruleH(retRiser, round(retY - 2 * LINE_PAD), round(GUTTER - retRiser), 'dg-line-loop', 'cross-run return run', retDrop)
-  /* ⚠ THE ARROWHEAD IS THE RUN'S OWN INK, AND THE RUN IS RESERVED WIDE ENOUGH TO HOLD IT. A head's
-     reserved box is a RECTANGLE around a triangle — 2*LINE_PAD across and HEAD_L along — so an
-     arrowhead can only be declared inside a rule whose box is at least that big. Here that is
-     arithmetic: the run's band is HEAD_L tall and the head is nested in it, and the DRAWN stroke runs
-     down the band's centre so the arrow sits on the line rather than beside it. Reserved geometry and
-     drawn geometry are two questions, and this is the case where saying so is the honest answer. */
-  head([[GUTTER, retY + LINE_PAD], [GUTTER - HEAD_L, retY - LINE_PAD], [GUTTER - HEAD_L, retY + LINE_PAD]],
+  head([[GUTTER, round(retY + LINE_PAD)], [round(GUTTER - HEAD_L), round(retY - LINE_PAD)], [round(GUTTER - HEAD_L), round(retY + LINE_PAD)]],
     'dg-head-loop', 'cross-run return head', retRun)
-  void crossLast
   textEl(round(retRiser + 2), round(retFootY + 8), CLS.s, 'ACROSS RUNS — the arrow leaves the run and lands at the NEXT one\'s phase entry')
 
-  /* ---- the LEGEND: ONE line for the shapes, ONE for the connections ------
-     The predecessor drew no legend at all and explained the marks in the three paragraphs
-     above the picture. A legend is the honest form: it is the picture's own key, it is
-     scanned rather than read, and it costs two lines instead of twenty. */
-  let ly = round(retFootY + 40)
-  const legendRow = (title, items, yy) => {
-    textEl(GUTTER, yy, CLS.h, title)
-    let lx = round(GUTTER + tw(title, FS[CLS.h]) + 26)
+  /* ======================= 13. THE LEGEND ================================ */
+  /* THE PICTURE'S OWN KEY, in shape and word rather than in colour: two rows for the marks on the
+     nodes, two for the connections, and two lines of footnote. Every row is measured against the
+     frame as it is drawn — a legend that hid its own last word was a real defect on this page, and
+     the guard that caught it is kept. */
+  let ly = round(retFootY + 28)
+  const legendRow = (t, items, yy) => {
+    if (t) textEl(GUTTER, yy, CLS.h, t)
+    let lx = t ? round(GUTTER + tw(t, FS[CLS.h]) + 26) : GUTTER
     const swW = 20, swH = 11
     for (const [klass, label] of items) {
       const sw = card(lx, round(yy - 1), swW, swH, klass, 'legend swatch: ' + label)
       textEl(round(lx + swW + 6), yy, CLS.s, label, sw)
       lx = round(lx + swW + 6 + tw(label, FS[CLS.s]) + 24)
     }
-    return round(lx)
   }
-  const l1 = legendRow('NODES', [
+  legendRow('NODES', [
     ['dg-legend', 'the phase, in PHASE_SEQUENCE order'],
     ['dg-legend-rail', 'may be absent (OPTIONAL_PHASES)'],
     ['dg-legend-refuse', 'a guard rule can refuse here'],
     ['dg-box-human', 'a person must answer'],
   ], ly)
   ly = round(ly + lh(FS[CLS.h]) + 10)
-  /* ⚠ THE LEGEND IS CLIPPED BY THE CHART'S OWN BOX IF IT RUNS PAST THE FRAME, and the frame is the
-     node row: 2854 units. The first version's last item ran 150 units past it and the final word was
-     cut off in the rendered page — a legend that hides its own last line. Every label here is short
-     because the total is checked against the frame at generate time, not hoped for. */
-  const l2 = legendRow('EDGES', [
+  legendRow('EDGES', [
     ['dg-legend', 'required input'],
     ['dg-legend-cond', 'conditional — source present'],
     ['dg-legend-wide', 'wildcard — every present artifact'],
+  ], ly)
+  ly = round(ly + lh(FS[CLS.h]) + 10)
+  legendRow('', [
     ['dg-legend-seq', 'sequence order only: no input edge'],
     ['dg-legend-rail', 'reads MORE THAN ONE upstream artifact'],
   ], ly)
   ly = round(ly + lh(FS[CLS.s]) + 8)
-  textEl(GUTTER, ly, CLS.s, 'Violet arcs run BACKWARDS: reopen and REVISE re-enter a node to the LEFT of their source, and the same arc closes the CROSS-RUN loop below the row.')
+  const footer1 = 'Violet arcs run BACKWARDS: reopen and REVISE re-enter a node EARLIER in the sequence than their source — against the direction their row reads. The same arc closes the CROSS-RUN loop below.'
+  const footer2 = 'Row 1 reads left to right, row 2 right to left. Shape, word and count carry every distinction; colour carries none of them. Every arrow is an entry in the linter\'s own expected-input map.'
+  textEl(GUTTER, ly, CLS.s, footer1)
   ly = round(ly + lh(FS[CLS.s]) + 4)
-  textEl(GUTTER, ly, CLS.s, 'Shape, word and count carry every distinction here; colour carries none of them. Every arrow is an entry in the linter\'s own expected-input map.')
-  /* ⚠ NOTHING MAY RUN PAST THE FRAME, AND THE FRAME IS THE NODE ROW. The chart is a fixed-width
-     picture in a horizontally scrolling wrapper: anything wider than the row is clipped by the
-     wrapper's own edge, and the legend's last word was — measured in the rendered page, not guessed.
-     So the width is the row, and any row of text that does not fit is a BUILD FAILURE here rather
-     than a clipped word on the page. */
-  for (const [what, text, cls] of [
-    ['the legend row', l2, CLS.s], ['the backward-edge note', 'Violet arcs run BACKWARDS: reopen and REVISE re-enter a node to the LEFT of their source, and the same arc closes the CROSS-RUN loop below the row.', CLS.s],
-    ['the footer note', 'Shape, word and count carry every distinction here; colour carries none of them. Every arrow is an entry in the linter\'s own expected-input map.', CLS.s],
-    ['the title', `THE WORKFLOW AS A GRAPH — ${PHASES.length} phase artifacts, ${EDGES.length} directed edges, all of them drawn here`, CLS.a],
-  ]) {
-    const wide = round(GUTTER + tw(text, FS[cls]))
-    if (wide > railX + rowW) throw new Error('overview chart: ' + what + ' is ' + round(wide - (railX + rowW)) + ' units wider than the frame')
-  }
+  textEl(GUTTER, ly, CLS.s, footer2)
+  ly = round(ly + lh(FS[CLS.s]))
 
-  const W = Math.ceil(railX + rowW + 24)
+  /* ======================= 14. THE TITLE AND THE FRAME =================== */
+  const TITLE = 'THE WORKFLOW AS A GRAPH — ' + PHASES.length + ' phase artifacts, ' + EDGES.length + ' directed edges, all of them drawn here'
+  textEl(GUTTER, titleY, CLS.a, TITLE)
+  void laneLabelsDrawn
+
+  /* ⚠ NOTHING MAY RUN PAST THE FRAME. The chart is a fixed-width picture in a wrapper that scrolls
+     below the width it was drawn for, so anything wider than the frame is clipped by the wrapper's
+     own edge. Each of these is therefore a BUILD FAILURE rather than a clipped word on the page —
+     the legend's last word was once measured hanging off this frame. */
+  const frameR = round(GRID_R + 24)
+  for (const [what, text, cls] of [
+    ['the first footer note', footer1, CLS.s],
+    ['the second footer note', footer2, CLS.s],
+    ['the title', TITLE, CLS.a],
+    ['the first rail line', railLines[0][1], CLS.t],
+    ['the second rail line', railLines[1][1], CLS.s],
+    ['the third rail line', railLines[2][1], CLS.s],
+  ]) {
+    const wide = round(GUTTER + tw(text, cls))
+    if (wide > frameR) throw new Error('overview chart: ' + what + ' is ' + round(wide - frameR) + ' units wider than the frame')
+  }
   /* The frame ends BELOW the last line of text, not at its top: the height is derived from the last
-     row the chart drew plus its own line height, so the last line cannot fall off the bottom edge —
-     which the frame assertion in `chart()` caught it doing by 6 units. */
-  const H = Math.ceil(ly + LABEL_H + 2 * LINE_PAD) - titleTop
-  return { x: 0, y: titleTop, width: W, height: H }
+     row the chart drew plus its own line height, so the last line cannot fall off the bottom edge.
+     Both dimensions are derived — a chart that grows cannot quietly grow past its column. */
+  return { x: 0, y: 0, width: W, height: Math.ceil(ly + 2 * LINE_PAD) }
+}
+
+/**
+ * ⚠ THE WIDTH AND THE EMPTY SPACE ARE INVARIANTS, NOT MEASUREMENTS SOMEBODY ONCE TOOK.
+ *
+ * The overview was 2854 units wide in a 1141-unit column for a whole round, and every check in
+ * this file passed, because no check compared the chart with the box it lands in. These are the
+ * numbers that would have failed, and both `--verify` and `check-workflow-map.mjs` assert them
+ * against the emitted manifest (neither imports them from the other).
+ *
+ *   · MIN_VIEWPORT_W — 1280 CSS px: the narrowest desktop window this page claims to support.
+ *     At that width the reading column gives the chart 1141 units of SVG space (measured in
+ *     headless Chromium at 1280x900, not derived from the token arithmetic); at 1440, where the
+ *     column is at its 1340px cap, it gives 1216. The chart must be under the SMALLER one.
+ *   · WIDTH_BUDGET — 1130 units: the 1141 measured at the minimum viewport, less 11 units of
+ *     slack so that a change to a padding token cannot silently push the chart into a scroll.
+ *   · HEIGHT_BUDGET — 780 units: the chart is read as ONE picture in a 1440x900 window, and 900
+ *     less the sticky tab strip (108px) and a 12px margin leaves 780 for the drawing.
+ *   · MAX_EMPTY_BAND — 48 units: the tallest run of the frame's height that holds no ink at all.
+ *     The defect this catches is the one a reader sees: a marker floating alone in a band, or a
+ *     strip of annotations detached from the nodes it belongs to. The old chart had a 140-unit
+ *     hole under its title and a 70-unit one above its node row.
+ */
+const OVERVIEW_LIMITS = { MIN_VIEWPORT_W: 1280, WIDTH_BUDGET: 1130, HEIGHT_BUDGET: 780, MAX_EMPTY_BAND: 48 }
+
+/**
+ * The tallest run of the frame's own height that holds no reserved ink, computed from the boxes
+ * the engine actually reserved. This is deliberately NOT the bounding box of the drawing — a
+ * bounding box cannot see a hole in the middle of it, which is exactly how a chart with 24% of
+ * its height empty passed every check for a round.
+ */
+function emptyBandOf(L) {
+  const [ox, oy, w, h] = L.viewBox
+  const spans = L.boxes
+    .map((b) => [Math.max(oy, b[2]), Math.min(oy + h, b[2] + b[4])])
+    .filter(([a, b]) => b > a)
+    .sort((a, b) => a[0] - b[0])
+  let worst = 0, reach = oy
+  for (const [a, b] of spans) {
+    if (a > reach) worst = Math.max(worst, a - reach)
+    reach = Math.max(reach, b)
+  }
+  return { worst: Math.round(Math.max(worst, oy + h - reach) * 100) / 100, width: w, height: h }
 }
 
 /* ---- ORDERING THE LANES — no arrow crosses another ------------------------ */
@@ -4037,6 +4204,9 @@ function sectionMap(src) {
   }
   return out
 }
+
+/** Two-decimal rounding, for a comparison whose values come out of a manifest. */
+const round2 = (n) => Math.round(n * 100) / 100
 
 function verify(html) {
   const problems = []
@@ -4430,6 +4600,45 @@ function verify(html) {
       .filter((l) => !labels.includes(l)), [])
   check('the cross-run band draws the three steps of the cycle, edge to edge',
     labels.filter((l) => /^cross-run card: /.test(l)).length, 3)
+  /* ==========================================================================
+     THE COMPOSITION BUDGETS — the invariants that would have caught the defects a
+     reader saw and no check did.
+     ==========================================================================
+
+     The overview shipped 2854 units wide inside a column that measures 1141 units at a
+     1280px window, so a reader opening the page saw five of the twelve phases; it also
+     carried a 148-unit band of empty height under its title, with the run-start marker
+     floating alone in it, and the refusal bands sat 134 units below their own nodes.
+     Every check in this file passed, because nothing compared the chart's SIZE with the
+     box it lands in, or its ink with its own frame. These four numbers do, and they are
+     stated here rather than computed from the layout, so a future edit that widens the
+     chart fails a test instead of shipping a slice of the workflow:
+
+       ·  units of width at a px viewport — the SVG space the page
+         gives a chart is 1141 units at 1280 (measured in headless Chromium, not derived
+         from the token arithmetic) and 1216 at 1440, where the reading column is capped;
+         the budget is the smaller of the two less a margin;
+       ·  units of height — a 1440x900 window less the 108px sticky tab strip and a
+         12px margin, which is what "the whole graph in ONE screenshot" means in numbers;
+       ·  units for the tallest run of the frame that holds no ink at all — a
+         band taller than this is a mark floating in space or a strip detached from the
+         node it annotates, which is exactly what a reader reported twice;
+       · and the frame may not be padded: its height must stay within 5% of the height of
+         the drawing's own bounding box. */
+  const ovEmpty = emptyBandOf(overviewLayout)
+  const ovInk = overviewLayout.boxes.reduce((acc, b) => [Math.min(acc[0], b[2]), Math.max(acc[1], b[2] + b[4])],
+    [Infinity, -Infinity])
+  check('THE OVERVIEW FITS THE COLUMN IT IS READ IN — ' + OVERVIEW_LIMITS.WIDTH_BUDGET + ' units at a '
+    + OVERVIEW_LIMITS.MIN_VIEWPORT_W + 'px viewport (this chart: ' + overviewLayout.viewBox[2] + ')',
+    overviewLayout.viewBox[2] <= OVERVIEW_LIMITS.WIDTH_BUDGET, true)
+  check('THE OVERVIEW IS ONE PICTURE IN A 1440x900 WINDOW — under ' + OVERVIEW_LIMITS.HEIGHT_BUDGET
+    + ' units tall (this chart: ' + overviewLayout.viewBox[3] + ')',
+    overviewLayout.viewBox[3] <= OVERVIEW_LIMITS.HEIGHT_BUDGET, true)
+  check('THE OVERVIEW HAS NO EMPTY BAND TALLER THAN ' + OVERVIEW_LIMITS.MAX_EMPTY_BAND + ' UNITS — measured '
+    + ovEmpty.worst + ' (the shipped chart had 148.3, under its title)',
+    ovEmpty.worst <= OVERVIEW_LIMITS.MAX_EMPTY_BAND, true)
+  check('the overview frame is not padded: its height is within 5% of the drawing it holds',
+    overviewLayout.viewBox[3] <= round2((ovInk[1] - ovInk[0]) * 1.05), true)
   const loopLayout = layoutOf('learning-loop')
   check('the learning loop draws every step and every gate that can stop one',
     [loopLayout.boxes.filter(([, , , , , l]) => /^step \d+: /.test(l)).length,

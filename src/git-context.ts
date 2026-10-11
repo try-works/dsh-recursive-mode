@@ -18,6 +18,7 @@
  * false, never throws. Callers defer rather than fail hard.
  */
 import { execFileSync } from 'node:child_process'
+import { GIT_REQUIRED_NOTICE, GIT_NO_COMMITS_NOTICE, GIT_DETACHED_HEAD_NOTICE } from './phase-rules.ts'
 
 /** Normalized git facts about one checkout directory. */
 export interface GitRepoFacts {
@@ -82,6 +83,36 @@ export function gitFacts(repoRoot: string): GitRepoFacts {
     toplevel,
     upstreamBranch: branch ? stripRemotePrefix(upstreamRef) : null,
   }
+}
+
+/**
+ * THE BASELINE VERDICT — one total function for every unusable-git-baseline state.
+ *
+ * `facts.headSha` is the value Phase 0 records as the diff basis and the linter resolves at lock time
+ * (`ts-lint.ts` rev-parse `--verify <baseline>^{commit}`), so "the baseline is usable" is exactly
+ * "HEAD resolves to a commit". A repo that cannot supply that commit makes the run unlockable, and each
+ * of the three ways that happens has its own cause and its own remedy, so each is one distinct sentence:
+ *
+ *   1. NOT A REPOSITORY  — `gitDir === null`. `git rev-parse --git-dir` fails. Tested FIRST, because a
+ *      non-repo is also trivially "no commits" and must never report the second cause instead.
+ *   2. NO COMMITS        — a repository whose HEAD has never been created. `git rev-parse --verify
+ *      HEAD^{commit}` fails while `--git-dir` succeeds (the hole: the old notice checked only `gitDir`).
+ *      `recursive_init` closes this one itself by making the first commit.
+ *   3. DETACHED HEAD     — `gitDir` is non-null and HEAD resolves to a commit, but there is no branch
+ *      (`detached` is true), so `00-worktree.md`'s recorded branch fields cannot round-trip through the
+ *      lint-time `verifyRecordedBranches` guard.
+ *
+ * Returns `null` when the baseline is usable, otherwise the single caller-facing sentence naming the
+ * REAL blocker and its remedy (one distinct sentence per state, the SAME strings `recursive_phase`
+ * surfaces, so the verdict cannot disagree with what the caller reads). Never throws: it only reads
+ * `GitRepoFacts`, which are already total.
+ */
+export function gitBaselineProblem(facts: GitRepoFacts): string | null {
+  // ORDER MATTERS: a non-repo is also "no commits", so test it first and never report a second cause.
+  if (facts.gitDir === null) return GIT_REQUIRED_NOTICE
+  if (facts.headSha === null) return GIT_NO_COMMITS_NOTICE
+  if (facts.detached) return GIT_DETACHED_HEAD_NOTICE
+  return null
 }
 
 /**

@@ -1,6 +1,7 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { lintRun } from './ts-lint.ts'
 import { requirementsContent, worktreeContent, laterPhaseContent, detectGitContext, RUN_SCAFFOLD_DIRS, type GitContext } from './init-templates.ts'
 import { foldRun, getMdFieldValue, pendingWork, resolveRunDir } from './status.ts'
@@ -27,7 +28,7 @@ import { recordJobRun } from './job-log.ts'
 import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
 import { resolveControlPlaneRoot, type WorkspaceRegistryLike } from './workspace.ts'
-import { phaseRulesFor, GIT_REQUIRED_NOTICE, type PhaseRules } from './phase-rules.ts'
+import { phaseRulesFor, type PhaseRules } from './phase-rules.ts'
 import { closeoutReport, writeCloseoutReceipt } from './closeout-report.ts'
 import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './scratch.ts'
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
@@ -46,7 +47,7 @@ import type { Session } from '@deepseek-ai/dsh-session'
 import { renderRecursivePolicy, type PolicyContext } from './policy.ts'
 import { snapshotWorkspace } from './snapshot.ts'
 import { createLinkedWorktree, promoteBranch, listWorktrees, defaultWorktreeBranch, type CreateWorktreeResult, type PromoteBranchResult } from './worktree.ts'
-import { changedPaths, gitFacts } from './git-context.ts'
+import { changedPaths, gitFacts, gitBaselineProblem } from './git-context.ts'
 import { syncRunGoal, blockRunGoal, resumeRunGoal, type GoalServiceLike, type SyncResult } from './goals-projection.ts'
 import {
   RUN_START_APPROVE,
@@ -83,6 +84,24 @@ export interface LintArtifactResult {
   errors: string[]
   warnings: string[]
   passed: boolean
+}
+
+/**
+ * FU — the outcome of `initRun`'s first-commit step, additive to the init result so the caller (and the
+ * model, via `recursive_init`) can see exactly what the commit did rather than have it happen invisibly.
+ * Absent entirely when no commit was applicable (a repo that already had one, or not a repository).
+ */
+export interface FirstCommitResult {
+  /** True when this call created a commit; false when it attempted and failed, or when it skipped. */
+  committed: boolean
+  /** The commit SHA, present only when `committed` is true. */
+  sha: string | null
+  /** The run-relative paths this call staged (`git add --`), in the order staged. */
+  stagedPaths: string[]
+  /** Non-null when a commit could not be made: the git failure, or 'skipped: <reason>'. */
+  error: string | null
+  /** True when the commit needed the `-c user.name/user.email` placeholder identity fallback. */
+  usedPlaceholderIdentity: boolean
 }
 
 /**
@@ -1556,7 +1575,11 @@ export class RecursiveRuntime extends Service {
       // basis from), never cached: a caller who runs `git init` mid-run must see the notice disappear on
       // the next phase entry rather than be told a stale impossibility. It is total — a non-git root
       // returns nulls — so this cannot be why a phase call fails.
-      gitRequired: gitFacts(root).gitDir === null ? GIT_REQUIRED_NOTICE : null,
+      //
+      // ONE VERDICT FUNCTION (`gitBaselineProblem`), not a single null-check: a repo with NO COMMITS has
+      // a non-null `gitDir` (so `git rev-parse --git-dir` succeeds) and a null `headSha`, and that state
+      // used to pass silently. All three unusable-baseline states now fire, each with its own sentence.
+      gitRequired: gitBaselineProblem(gitFacts(root)),
       // ⚠ `'phase'` IS PASSED BECAUSE THIS IS NOT A REVIEW BUNDLE. The renderer's wording used to be the
       // reviewer's (*"relevant to this REVIEW"*) and this payload inherited it, so the sentence named a
       // reader this text never reaches. The context is the ONE thing that differs between the two callers
@@ -1577,7 +1600,8 @@ export class RecursiveRuntime extends Service {
    * recursive-init.py (incl. git-context prefill); later phases carry every
    * required section (get_artifact_required_sections) + TODO + FAIL gates.
    * Also scaffolds addenda/subagents/router-prompts/evidence dirs. Returns the
-   * run dir + created artifacts.
+   * run dir + created artifacts, plus `firstCommit` describing the baseline
+   * commit this call made (see the in-body note).
    *
    * When `opts.createWorktree` is true, a linked worktree is first created at
    * `.worktrees/<runId>/` and the run is scaffolded INSIDE it (per the
@@ -1585,7 +1609,7 @@ export class RecursiveRuntime extends Service {
    * branch defaults to `recursive/<runId>` and is cut from `opts.baseBranch`
    * (default: current HEAD branch of the root checkout).
    */
-  async initRun(runId: string, agent?: AgentLike | null, opts?: { createWorktree?: boolean; baseBranch?: string }): Promise<{ runDir: string; runId: string; created: string[]; existing: string[]; worktree?: CreateWorktreeResult }> {
+  async initRun(runId: string, agent?: AgentLike | null, opts?: { createWorktree?: boolean; baseBranch?: string }): Promise<{ runDir: string; runId: string; created: string[]; existing: string[]; worktree?: CreateWorktreeResult; firstCommit?: FirstCommitResult }> {
     const root = await this.resolveRootFor(agent)
     if (!root) throw new Error('cannot resolve workspace control-plane root for this session')
     let scaffoldRoot = root
@@ -1672,8 +1696,121 @@ export class RecursiveRuntime extends Service {
       created.push(file)
     }
 
-    const result: { runDir: string; runId: string; created: string[]; existing: string[]; worktree?: CreateWorktreeResult; runStartApproval: { approved: boolean; artifact: string; reason: string; gate: string } } = { runDir, runId, created, existing, runStartApproval: { ...this.readRunStartApproval(scaffoldRoot, runId), gate: RUN_START_GATE_ID } }
+    // ------------------------------------------------------------------------------------------------
+    // FU — THE FIRST COMMIT: in a repository with NO COMMITS, init closes the baseline hole itself.
+    //
+    // WHY HERE AND NOWHERE ELSE. Phase 0 records a diff basis (a commit SHA) that the linter resolves
+    // against live git, and `detectGitContext` just above degrades to the `<resolve-before-locking>`
+    // placeholder when HEAD does not resolve. A zero-commit repo therefore scaffolds an unlockable run:
+    // the lock later dies with "Unable to resolve baseline reference '<resolve-before-locking>'". Making
+    // the first commit HERE — AFTER the scaffold is written — gives the prefill a real HEAD the next time
+    // init runs, and gives `recursive_phase`'s `gitRequired` verdict nothing to complain about.
+    //
+    // ⚠ THE SAFETY PROPERTIES, ALL LOAD-BEARING:
+    //   - STAGE ONLY WHAT THIS CALL WROTE. The pathspecs are the `created` entries plus the run dir's own
+    //     `.recursive/run/<runId>` path; `existing` files are NEVER re-staged as if new, and there is no
+    //     `git add -A` / `git add .` / `git commit -a` anywhere. An unrelated untracked file in the same
+    //     repo must not enter this commit (that is the assertion the test mutates to `git add -A` to prove
+    //     bites).
+    //   - BEST-EFFORT. A failed commit (no identity, hooks, read-only git, sandbox) must not fail init:
+    //     init failing because a convenience commit failed is a worse defect than the one this fixes.
+    //     The failure is recorded and returned, and if it failed, the run is genuinely unlockable —
+    //     `recursive_phase`'s verdict will say so on the next entry, which is the honest outcome.
+    //   - IDEMPOTENT. Only when `gitBaselineProblem` says `no-commits`. A repo that already has a commit
+    //     is untouched: no `--amend`, no reset, no force, no branch/HEAD/remote/index mutation beyond
+    //     `git add` of the named paths and one `git commit`.
+    //   - IDENTITY, DISCLOSED. A fresh repo frequently has no user.name/user.email. Attempt the commit
+    //     normally; if it fails, retry ONCE with `-c user.name=… -c user.email=…` on the single command
+    //     (never repo/global config, which would mutate the user's configuration), and record
+    //     `usedPlaceholderIdentity` so the author is visible in the log rather than silently wrong.
+    // ------------------------------------------------------------------------------------------------
+    let firstCommit: FirstCommitResult | undefined
+    const scaffoldFacts = gitFacts(scaffoldRoot)
+    // "no commits" = a git repository (gitDir resolves) whose HEAD has never been created. `gitBaselineProblem`
+    // returns a SENTENCE (the caller-facing notice), so test the two FACTS directly rather than matching prose.
+    if (scaffoldFacts.gitDir !== null && scaffoldFacts.headSha === null) {
+      // The scaffold root is the repo the commit belongs to: the main checkout, or the freshly created
+      // worktree when `createWorktree` is set (a worktree commit is still a commit of the shared repo).
+      const gitDirOk = scaffoldFacts.gitDir !== null
+      // Paths are repo-relative; `runDir` is absolute, so relativize against the commit's cwd.
+      const runRel = relative(scaffoldRoot, runDir).replace(/\\/g, '/')
+      // STAGE EXACTLY WHAT THIS CALL WROTE: only created FILES. Git does not track empty directories;
+      // passing a new directory as a pathspec recursively stages its contents, including a file someone
+      // might place there between mkdir and commit, so directory entries (`.../`) are deliberately omitted.
+      // Existing files/dirs are NEVER staged. No `git add -A` / `git add .` / `git commit -a`.
+      const createdPaths = created.filter((p) => !p.endsWith('/')).map((p) => (runRel + '/' + p).replace(/\/+/g, '/'))
+      // A path that is gitignored must be skipped rather than failing the whole commit.
+      const isIgnored = (rel: string): boolean => {
+        try {
+          execFileSync('git', ['check-ignore', '--quiet', '--', rel], { cwd: scaffoldRoot, stdio: 'ignore' })
+          return true
+        } catch {
+          return false
+        }
+      }
+      const stagedPaths = [...new Set(createdPaths)].filter((p) => !isIgnored(p))
+      const attemptCommit = (withPlaceholder: boolean): { sha: string | null; error: string | null } => {
+        if (!gitDirOk) return { sha: null, error: 'not a git repository: git rev-parse --git-dir returned no directory' }
+        try {
+          execFileSync('git', ['add', '--', ...stagedPaths], { cwd: scaffoldRoot, stdio: ['ignore', 'pipe', 'pipe'] })
+        } catch (err) {
+          return { sha: null, error: 'git add failed: ' + (err instanceof Error ? err.message : String(err)) }
+        }
+        // `-c` is a GLOBAL git option and must precede the `commit` subcommand.
+        const commitArgs = withPlaceholder
+          ? ['-c', 'user.name=recursive-init', '-c', 'user.email=recursive-init@invalid.local', 'commit', '--only', '-m', 'recursive-init: scaffold run ' + runId, '--', ...stagedPaths]
+          : ['commit', '--only', '-m', 'recursive-init: scaffold run ' + runId, '--', ...stagedPaths]
+        try {
+          execFileSync('git', commitArgs, { cwd: scaffoldRoot, stdio: ['ignore', 'pipe', 'pipe'] })
+          const sha = (() => {
+            try {
+              return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: scaffoldRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+            } catch {
+              return null
+            }
+          })()
+          return { sha: sha || null, error: sha ? null : 'commit succeeded but HEAD did not resolve' }
+        } catch (err) {
+          const details = err && typeof err === 'object' && 'stderr' in err
+            ? String((err as { stderr?: Buffer }).stderr ?? '')
+            : ''
+          return { sha: null, error: 'git commit failed: ' + (details || (err instanceof Error ? err.message : String(err))) }
+        }
+      }
+      let attempt = attemptCommit(false)
+      let usedPlaceholder = false
+      if (attempt.error !== null && /identity|user\.name|user\.email|who you are|auto-detect email/i.test(attempt.error)) {
+        attempt = attemptCommit(true)
+        usedPlaceholder = attempt.error === null
+      }
+      firstCommit = {
+        committed: attempt.sha !== null,
+        sha: attempt.sha,
+        stagedPaths,
+        error: attempt.error,
+        usedPlaceholderIdentity: usedPlaceholder,
+      }
+      // ⚠ THE PRE-FILL HAPPENED BEFORE THE COMMIT, so `00-worktree.md` still records the
+      // `<resolve-before-locking>` placeholder (HEAD did not resolve when it was scaffolded). Now that the
+      // commit exists, re-prefill it so the run's diff basis resolves against the commit init just made —
+      // otherwise init would "succeed" and still leave the run unlockable, which is the exact defect.
+      // This is a WORKING-TREE rewrite (the file was created by this call), not an index/HEAD mutation, so
+      // it is not part of the first commit: the first commit IS the baseline the run now diffs against.
+      // ⚠ ONLY A FILE THIS CALL CREATED IS REWRITTEN. An `existing` 00-worktree.md is the caller's content
+      // and is never overwritten; such a run keeps whatever basis it recorded, and the commit is still
+      // reported, so the caller can decide. This keeps "stage and rewrite only what init scaffolded" true
+      // for `created` and `existing` alike.
+      if (firstCommit.committed && created.includes('00-worktree.md')) {
+        const refreshed = detectGitContext(scaffoldRoot)
+        if (!refreshed.error) {
+          writeFileSync(join(runDir, '00-worktree.md'), worktreeContent(runId, scaffoldRoot, refreshed.context, null), 'utf8')
+        }
+      }
+    }
+
+    const result: { runDir: string; runId: string; created: string[]; existing: string[]; worktree?: CreateWorktreeResult; firstCommit?: FirstCommitResult; runStartApproval: { approved: boolean; artifact: string; reason: string; gate: string } } = { runDir, runId, created, existing, runStartApproval: { ...this.readRunStartApproval(scaffoldRoot, runId), gate: RUN_START_GATE_ID } }
     if (worktree) result.worktree = worktree
+    if (firstCommit) result.firstCommit = firstCommit
     // ⚠ PHASE 0 — SCAFFOLDING A RUN MUST NOT START IT. This used to arm a durable run goal right here,
     // and arming is what makes the harness drive autonomous rounds: asking for a run spec was enough to
     // start an unattended run. The rule is that phase 0 requires EXPLICIT approval to start a run and

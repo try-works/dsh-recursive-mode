@@ -487,8 +487,7 @@ function lockOrderRule(artifact: unknown, runDir: string | undefined, runId?: st
 
 /**
  * Settled-artifact write rule: a denial when the target carries `Status: LOCKED` or a recorded
- * `Status: SKIPPED`, `null` otherwise. Only a run-tree `*.md` is a candidate —
- * the same admission test the pre-T16 branch used, now asked of the RESOLVED
+ * `Status: SKIPPED`, `null` otherwise. Only a run-tree `*.md` is a candidate —* the same admission test the pre-T16 branch used, now asked of the RESOLVED
  * path as well (see the ADMISSION note below).
  *
  * ⚠ A RECORDED SKIP IS EVIDENCE, WHICH IS WHY IT IS IN THIS RULE AND NOT IN A NEW ONE. The whole
@@ -740,7 +739,10 @@ export function builtInToolPolicyRules(): ToolPolicyRule[] {
     rules.push({
       pattern: name,
       verdict: 'deny',
-      reason: 'settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker',
+      // The rule's NAME stays `locked-write` (the label selects its condition, and the shipped policy
+      // file mirrors it), and the reason keeps that phrasing too: the settled state it now also covers
+      // is named in the same sentence, so a reader of a denial sees both cases without the label moving.
+      reason: 'locked-artifact write denial: the target carries Status: LOCKED, or a recorded SKIPPED marker',
       label: 'locked-write',
       predicate: (id, args, ctx) => (WRITE_TOOL_NAMES.has(id) ? lockedWriteRule(policyTargetPath(args), ctx.worktreeRoot) : null),
     })

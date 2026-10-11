@@ -54,10 +54,10 @@ export function createRecursivePhaseTool(recursive: RecursiveRuntime) {
       + ' a failure, so do not retry because of it. Nothing from the memory plane reaches a run before this'
       + ' call, so MAKE IT ONCE WHEN ENTERING A PHASE and before authoring that phase\'s artifact'
       + ' (`00-requirements.md` included: a write to it is refused until a read is recorded for the run).'
-      + ' The same rules are also auto-injected once per phase transition. `gitRequired` is null when git is'
-      + ' available and otherwise SAYS WHAT IS WRONG: in a workspace that is not a git repository no artifact'
-      + ' can be locked at all — the lock hash and the executable diff basis are git facts — so read it BEFORE'
-      + ' authoring and `git init` first rather than writing a phase-0 artifact that cannot be locked.',
+      + ' The same rules are also auto-injected once per phase transition. `gitRequired` is null when the baseline is usable'
+      + ' and otherwise names one of three blockers: not a git repository, a repository with no commits, or detached HEAD.'
+      + ' No artifact can be locked without a usable baseline — the lock hash and executable diff basis are git facts — so read it BEFORE'
+      + ' authoring. `recursive_init` makes the first commit itself when the repository has none; follow the notice remedy for other states.',
     parameters: {
       runId: { type: 'string', description: 'Optional run id — the NAME of the run directory under .recursive/run/ (e.g. 03-something), never a path: ' + RUN_ID_RULE + '. Omit it for the latest run by mtime.' },
     },

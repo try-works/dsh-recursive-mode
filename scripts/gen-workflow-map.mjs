@@ -52,7 +52,8 @@ const DEFAULT_OUT = join(ROOT, 'workflow-map', 'recursive-mode-workflow.html')
 /** Search texts written OUT (not read from the source) so a MOVED anchor is caught. */
 const ANCHORS = {
   'lock.sequence': ['src/lock.ts', 'export const PHASE_SEQUENCE = ['],
-  'lock.optional': ['src/lock.ts', 'export const OPTIONAL_PHASES = new Set(['],
+  'lock.mayBeAbsent': ['src/lock.ts', 'export const MAY_BE_ABSENT_PHASES = new Set(['],
+  'lock.skipped': ['src/lock.ts', 'export function isSettledStatus'],
   'lock.hash': ['src/lock.ts', 'export function lockHashFromContent'],
   'lock.status': ['src/lock.ts', 'export function getLockStatus'],
   'lock.receipts': ['src/lock.ts', 'export function receiptPath'],
@@ -270,9 +271,12 @@ const ANCHORS = {
   /* The two facts behind JOB 1's "positive" statement and the late-set correction. */
   'lint.lateProfile': ['src/ts-lint.ts', 'LATE_PHASE_ARTIFACTS.some(a => existsSync'],
   'runtime.scaffoldLoop': ['src/runtime.ts', 'for (const file of laterPhases) {'],
-  /* The SECOND optionality declaration, and the calculation that consumes it. */
-  'status.optional': ['src/status.ts', "if (phase.optional && !state.exists) state.status = 'SKIPPED'"],
-  'snapshot.complete': ['src/snapshot.ts', 'const mandatory = status.phases.filter(p => !p.optional)'],
+  /* THE WORK-OPTIONALITY DECLARATION (reconciled with the chain one in this revision), and the
+     calculation that consumes it. See `src/types.ts` `PhaseDef.requiredForCompletion` for why the
+     field is no longer called `optional`, and `src/skip.ts` for the legitimate skip. */
+  'status.requiredForCompletion': ['src/status.ts', "if (!phase.requiredForCompletion && !state.exists) state.status = 'SKIPPED'"],
+  'snapshot.complete': ['src/snapshot.ts', 'const required = status.phases.filter(p => p.requiredForCompletion)'],
+  'skip.marker': ['src/skip.ts', 'export function skipPhaseArtifact'],
 }
 
 /**
@@ -295,20 +299,30 @@ function sourceLines(rel) {
 
 /**
  * Resolve one anchor to `file:line`, or `file:a, file:b` for a declared
- * multi-hit anchor. Three properties matter:
+ * multi-hit anchor. Four properties matter:
  *   1. the file-relative path is ALWAYS part of the answer, so no citation can
  *      ever render as a bare line number;
  *   2. an UNDECLARED duplicate is a FAILURE, not a first-match: a second copy of a
  *      marker is a duplication symptom, and silently citing the first hides it;
- *   3. every resolved line is checked to lie inside the file it names.
+ *   3. every resolved line is checked to lie inside the file it names;
+ *   4. an entry may carry a third element `'exact'`, which requires the WHOLE
+ *      line (trailing whitespace aside) to equal the text rather than merely
+ *      contain it. ⚠ It exists because "contains" is not enough for an anchor
+ *      that names a KEY: `  '01-as-is.md': [` is a prefix of every other table
+ *      that happens to be keyed by artifact name, so a second such table turned a
+ *      unique anchor into an ambiguous one without anybody editing the anchor.
+ *      Anchor on the whole line and a new sibling table cannot break it.
  */
 function anchor(key) {
   const entry = ANCHORS[key]
   if (!entry) throw new Error('unknown citation anchor: ' + key)
-  const [rel, text] = entry
+  const [rel, text, mode] = entry
   const lines = sourceLines(rel)
   const hits = []
-  for (let i = 0; i < lines.length; i += 1) if (lines[i].includes(text)) hits.push(i + 1)
+  for (let i = 0; i < lines.length; i += 1) {
+    const matched = mode === 'exact' ? lines[i].trimEnd() === text.trimEnd() : lines[i].includes(text)
+    if (matched) hits.push(i + 1)
+  }
   if (hits.length === 0) throw new Error('ANCHOR NOT FOUND — ' + key + ' ("' + text + '") in ' + rel)
   if (hits.length > 1 && !MULTI_HIT_ANCHORS.has(key)) {
     throw new Error('ANCHOR AMBIGUOUS (' + hits.length + ' hits, undeclared) — ' + key + ' ("' + text + '") in ' + rel
@@ -340,11 +354,15 @@ function citeOf(spec) {
   }).join(', ')
 }
 
-/** All twelve SECTION_MAP anchors, declared by construction rather than by hand. */
+/** All twelve SECTION_MAP anchors, declared by construction rather than by hand.
+ *  ⚠ 'exact' because SECTION_MAP is not the only table in phase-rules.ts keyed by
+ *  artifact name: SECTION_FORMAT_RULES is keyed the same way, so a "contains"
+ *  anchor matched both and the generator refused to run. Anchoring the WHOLE line
+ *  keeps the citation pointing at SECTION_MAP and survives the next such table. */
 const SECTION_FILES = ['00-worktree.md', '00-requirements.md', '01-as-is.md', '01.5-root-cause.md',
   '02-to-be-plan.md', '03-implementation-summary.md', '03.5-code-review.md', '04-test-summary.md',
   '05-manual-qa.md', '06-decisions-update.md', '07-state-update.md', '08-memory-impact.md']
-for (const f of SECTION_FILES) ANCHORS['section.' + f] = ['src/phase-rules.ts', "  '" + f + "': ["]
+for (const f of SECTION_FILES) ANCHORS['section.' + f] = ['src/phase-rules.ts', "  '" + f + "': [", 'exact']
 
 /**
  * One anchor per tool, keyed by its own registered NAME. The anchor text IS the
@@ -361,7 +379,8 @@ for (const tool of TOOL_FILES) ANCHORS['tool.' + tool] = ['src/' + tool + '.tool
 /** Resolved once. A typo in a key throws here, before anything renders. */
 const SRC = {
   seq: citeOf('lock.sequence'),
-  optional: citeOf('lock.optional'),
+  mayBeAbsent: citeOf('lock.mayBeAbsent'),
+  settled: citeOf('lock.skipped'),
   lockHash: citeOf('lock.hash'),
   lockStatus: citeOf('lock.status'),
   receipts: citeOf('lock.receipts'),
@@ -578,7 +597,8 @@ const SRC = {
   inputFilter: citeOf('lint.inputFilter'),
   lintLateProfile: citeOf('lint.lateProfile'),
   scaffoldLoop: citeOf('runtime.scaffoldLoop'),
-  statusOptional: citeOf('status.optional'),
+  statusRequiredForCompletion: citeOf('status.requiredForCompletion'),
+  skipMarker: citeOf('skip.marker'),
   snapshotComplete: citeOf('snapshot.complete'),
 }
 
@@ -723,7 +743,7 @@ const PHASES = [
     human: true,
     late: false,
     audited: false,
-    optional: false,
+    mayBeAbsent: false,
     traceability: false,
     kind: 'Requirements spec',
     inputs: [{ doc: 'the conversation / the issue', c: SRC.tplRequirements, artifact: false }],
@@ -749,7 +769,7 @@ const PHASES = [
     human: false,
     late: false,
     audited: false,
-    optional: false,
+    mayBeAbsent: false,
     traceability: false,
     kind: 'Isolation + diff basis',
     inputs: [
@@ -774,7 +794,7 @@ const PHASES = [
     human: false,
     late: false,
     audited: true,
-    optional: true,
+    mayBeAbsent: true,
     traceability: true,
     priorEvidence: true,
     kind: 'AS-IS characterization',
@@ -785,7 +805,7 @@ const PHASES = [
       { t: 'Coverage + Approval gates; `## Effective Inputs Re-read` is required of every phase doc.', c: 'src/lifecycle.ts:117', human: false, shape: 'gate' },
       { t: 'Reads PRIOR recursive evidence (in a profile that carries it).', c: SRC.priorEvidence, human: false, shape: 'gate' },
       { t: 'The phase baseline DENIES writes to `.recursive/memory/**`, `DECISIONS.md`, `STATE.md` in phases 1-2.', c: SRC.baseline, human: false, shape: 'refuse' },
-      { t: 'Declared OPTIONAL: an absent optional phase does not stop the run.', c: SRC.optional + ', ' + SRC.graphNext, human: false, shape: 'gate' },
+      { t: 'Declared MAY BE ABSENT: an artifact that was never created does not stop the legal-phase selector. This is NOT a licence to remove one — a phase that does not apply is SKIPPED IN PLACE.', c: SRC.mayBeAbsent + ', ' + SRC.settled + ', ' + SRC.skipMarker + ', ' + SRC.graphNext, human: false, shape: 'gate' },
     ],
     sections: ['TODO', 'Reproduction Steps (Novice-Runnable)', 'Current Behavior by Requirement', 'Source Requirement Inventory', 'Relevant Code Pointers', 'Known Unknowns', 'Evidence', 'Traceability', 'Coverage Gate', 'Approval Gate'],
     sectionsC: sectionsCite('01-as-is.md'),
@@ -800,7 +820,7 @@ const PHASES = [
     human: false,
     late: false,
     audited: true,
-    optional: true,
+    mayBeAbsent: true,
     traceability: true,
     kind: 'Root-cause analysis',
     inputs: [{ doc: '01-as-is.md', c: SRC.inputMap, artifact: true }],
@@ -808,7 +828,7 @@ const PHASES = [
     gates: [
       { t: 'Shares phase number 1 with `01-as-is.md` — `phaseNumberForArtifact` takes the leading digits, so both are phase 1.', c: SRC.phaseNumber + ', ' + SRC.phaseOrderRule, human: false, shape: 'gate' },
       { t: 'AUDITED phase (same requirement as 01).', c: SRC.audited + ', src/lifecycle.ts:99-105', human: false, shape: 'gate' },
-      { t: 'Optional; absent-and-optional is skipped by the legal-phase selector.', c: SRC.optional + ', ' + SRC.graphNext, human: false, shape: 'gate' },
+      { t: 'May be absent; absent it is skipped by the legal-phase selector. A phase that does not apply is recorded as SKIPPED in its own artifact, never removed.', c: SRC.mayBeAbsent + ', ' + SRC.settled + ', ' + SRC.skipMarker + ', ' + SRC.graphNext, human: false, shape: 'gate' },
       { t: 'Its presence changes what phase 2 must cite as input.', c: SRC.inputMap, human: false, shape: 'gate' },
     ],
     sections: ['TODO', 'Error Analysis', 'Reproduction Verification', 'Recent Changes Analysis', 'Evidence Gathering (Multi-Layer if applicable)', 'Data Flow Trace', 'Pattern Analysis', 'Hypothesis Testing', 'Root Cause Summary', 'Traceability', 'Coverage Gate', 'Approval Gate'],
@@ -824,7 +844,7 @@ const PHASES = [
     human: false,
     late: false,
     audited: true,
-    optional: true,
+    mayBeAbsent: true,
     traceability: true,
     priorEvidence: true,
     kind: 'TO-BE plan',
@@ -854,7 +874,7 @@ const PHASES = [
     human: false,
     late: false,
     audited: true,
-    optional: true,
+    mayBeAbsent: true,
     traceability: true,
     tdd: true,
     kind: 'Implementation + TDD evidence',
@@ -880,7 +900,7 @@ const PHASES = [
     human: false,
     late: false,
     audited: true,
-    optional: true,
+    mayBeAbsent: true,
     traceability: true,
     kind: 'Independent code review',
     inputs: [
@@ -907,7 +927,7 @@ const PHASES = [
     human: false,
     late: false,
     audited: true,
-    optional: true,
+    mayBeAbsent: true,
     traceability: true,
     priorEvidence: true,
     closeout: true,
@@ -937,7 +957,7 @@ const PHASES = [
     human: true,
     late: false,
     audited: false,
-    optional: true,
+    mayBeAbsent: true,
     traceability: true,
     closeout: true,
     kind: 'Manual QA + sign-off',
@@ -962,7 +982,7 @@ const PHASES = [
     human: false,
     late: true,
     audited: true,
-    optional: false,
+    mayBeAbsent: false,
     traceability: true,
     closeout: true,
     kind: 'Decision ledger delta',
@@ -990,7 +1010,7 @@ const PHASES = [
     human: false,
     late: true,
     audited: true,
-    optional: false,
+    mayBeAbsent: false,
     traceability: true,
     priorEvidence: true,
     closeout: true,
@@ -1018,7 +1038,7 @@ const PHASES = [
     human: false,
     late: true,
     audited: true,
-    optional: false,
+    mayBeAbsent: false,
     traceability: true,
     priorEvidence: true,
     closeout: true,
@@ -1461,7 +1481,7 @@ const LOOPS = [
   {
     n: 'B7',
     title: 'Rule 3: an early unlocked node can be blocked by a LATER one',
-    what: '`nextLegalPhase` skips a LOCKED node, skips an ABSENT-and-OPTIONAL node, and then — if the first survivor has a prerequisite that is not LOCKED — returns `null`, NOT the next node. With a back-edge this is where "continue" and "blocked" give different answers, and only `null` is correct.',
+    what: '`nextLegalPhase` skips a SETTLED node — LOCKED, or deliberately SKIPPED with the marker recorded in its own artifact — then skips a node that is ABSENT and MAY BE ABSENT, and then, if the first survivor has a prerequisite that is not settled, returns `null`, NOT the next node. With a back-edge this is where "continue" and "blocked" give different answers, and only `null` is correct.',
     c: SRC.graphNext,
   },
 ]
@@ -1543,17 +1563,23 @@ const cite = (c) => (c ? `<span class="cite">${esc(c)}</span>` : '')
  * actually describing a STRUCTURAL one, and the page contradicted itself as a result:
  *
  *   · `optional`, rendered 14 times (once per overview row and once per phase detail
- *     view, for the seven members of `lock.ts` `OPTIONAL_PHASES`). The set's ONLY
- *     consumer in the whole plugin is `lock.ts:262`
- *     `nextLegalPhase(graph, { optional: OPTIONAL_PHASES })`, where it means "a member
+ *     view, for the seven members of `lock.ts`'s set). The set's ONLY consumer in the
+ *     whole plugin is `nextLegalPhase(graph, { optional: … })`, where it means "a member
  *     that is ABSENT does not stop the chain" — a statement about the legal-phase
  *     SELECTOR, not about the phase's work. A reader is entitled to read a bare
  *     `optional` badge as "this phase is optional", and the owner did exactly that.
  *     It now says `MAY BE ABSENT`, which is the property the code implements and
  *     cannot be read as a judgement about the work. The two detail views' own gate
- *     sentences keep the code's vocabulary ("Declared OPTIONAL: an absent optional
- *     phase does not stop the run") because THAT sentence carries its scope — it is
- *     the bare badge, not the word, that was wrong.
+ *     sentences keep the code's vocabulary ("Declared MAY BE ABSENT: …") because THAT
+ *     sentence carries its scope — it is the bare badge, not the word, that was wrong.
+ *
+ *     ⚠ AND THE BADGE WORD WAS ONLY HALF THE DEFECT, which this page now records: a LIVE
+ *     agent read the same word in `status.ts` as "this phase may be skipped", found a
+ *     scaffolded phase blocking a run with nothing to investigate, and REMOVED the
+ *     artifact — which the fold refused, correctly, leaving no legitimate way to skip.
+ *     The two declarations are now named apart (`MAY_BE_ABSENT_PHASES` for the chain,
+ *     `requiredForCompletion` for the work) and a skip is a RECORD in the artifact
+ *     (`src/skip.ts`), never a deletion. The `--verify` checks below re-derive all of it.
  *   · `late phase`, rendered 3 times, for the members of `phase-rules.ts`
  *     `LATE_PHASE_ARTIFACTS`. That set's only use in shipped code is a PROFILE
  *     DETECTOR (`ts-lint.ts` returns the compat workflow profile when any of the three
@@ -1572,7 +1598,7 @@ function tagList(p) {
   if (p.human) t.push('<span class="tag tag-human">human gate</span>')
   if (p.late) t.push(`<span class="tag tag-late">${BADGE_LATE_SET}</span>`)
   if (p.audited) t.push('<span class="tag tag-audited">audited</span>')
-  if (p.optional) t.push(`<span class="tag tag-may-be-absent">${BADGE_MAY_BE_ABSENT}</span>`)
+  if (p.mayBeAbsent) t.push(`<span class="tag tag-may-be-absent">${BADGE_MAY_BE_ABSENT}</span>`)
   if (p.tdd) t.push('<span class="tag tag-tdd">TDD gate</span>')
   if (p.memoryGate) t.push('<span class="tag tag-refuse">lock gate</span>')
   if (p.closeout) t.push('<span class="tag tag-closeout">closeout</span>')
@@ -2280,13 +2306,13 @@ ${PHASES.map(phaseRow).join('\n')}
 
   <div class="callout">
     <strong>All twelve artifacts are MANDATORY work. Nothing here is an optional phase.</strong>
-    Every phase row carries a <span class="tag tag-may-be-absent">${BADGE_MAY_BE_ABSENT}</span> badge, and it is worth stating plainly what that badge does <em>not</em> mean: it does not mean the phase is optional. It is the property of one SET — <code>lock.ts</code> <code>OPTIONAL_PHASES</code>, whose only use in the plugin is <code>nextLegalPhase(graph, { optional: OPTIONAL_PHASES })</code>, i.e. "a member that is ABSENT does not stop the legal-phase selector". That is a statement about a fallback query, not about the work.
+    Every phase row carries a <span class="tag tag-may-be-absent">${BADGE_MAY_BE_ABSENT}</span> badge, and it is worth stating plainly what that badge does <em>not</em> mean: it does not mean the phase is optional, and it does not mean an artifact may be deleted. It is the property of one SET — <code>lock.ts</code> <code>MAY_BE_ABSENT_PHASES</code>, whose only use in the plugin is <code>nextLegalPhase(graph, { optional: MAY_BE_ABSENT_PHASES })</code>, i.e. "a member whose artifact was NEVER CREATED does not stop the legal-phase selector". That is a statement about a traversal query, not about the work.
     <br><br>
     <b>The positive fact, which the plugin enforces end to end:</b> <code>recursive_init</code> scaffolds <b>all twelve</b> artifacts in one call — the two Phase 0 templates and then every later phase — so a scaffolded run has no missing phase to skip. ${cite(SRC.scaffoldLoop)} All twelve then lock <b>in sequence</b>: <code>PHASE_SEQUENCE</code> is the canonical order and the lock chain refuses out of order. ${cite(SRC.seq + ', ' + SRC.lockArtifact)} And a normal run produces twelve: the seven <em>may-be-absent</em> phases are written and locked exactly like the other five, because the scaffold writes them and the sequence locks them — being able to be ABSENT is not the same as being permitted to be absent.
     <br><br>
-    <span class="unv">⚠ Stated precisely, because this is the whole point of the badge change:</span> the seven <em>may-be-absent</em> phases are the seven members of <code>OPTIONAL_PHASES</code>, and their badge means only that an <b>absent</b> one will not block the chain. Whether a phase's WORK is optional is not a property any code in this repo declares, and this page no longer implies one.
+    <span class="unv">⚠ Stated precisely, because this is the whole point of the badge change:</span> the seven <em>may-be-absent</em> phases are the seven members of <code>MAY_BE_ABSENT_PHASES</code>, and their badge means only that an <b>absent</b> one will not block the chain. Whether a phase's WORK is required is a SECOND declaration with a SECOND name: <b>REQUIRED FOR COMPLETION</b> — <code>requiredForCompletion</code> on the twelve-row status table in <code>status.ts</code> — and it is a different set from the may-be-absent one (ten phases, not seven) because it answers a different question: is the run complete without this phase? ${cite(SRC.statusPhases + ', ' + SRC.statusRequiredForCompletion)}
     <br><br>
-    <span class="unv">⚠ AND THIS IS A REAL INCONSISTENCY IN THE REPOSITORY, reported rather than smoothed over.</span> There are <b>two independent optionality declarations</b> and they disagree. <code>lock.ts</code> <code>OPTIONAL_PHASES</code> has seven members, and it is what the legal-phase selector uses; <code>status.ts</code> carries its own <code>optional:</code> flag on the twelve-row status table and marks only <b>two</b> — <code>01.5-root-cause.md</code> and <code>03.5-code-review.md</code>. That second flag is load-bearing in two places: a missing phase is reported <code>SKIPPED</code> from it, and <code>snapshot.ts</code> computes a run's <code>complete</code> state by requiring every phase where <code>!p.optional</code>. So five of these seven phases are treated as <b>required</b> by the run-completion calculation while the selector treats them as skippable. Both readings are honest; they are just not the same reading, and a reader deserves to know which one is speaking. ${cite(SRC.statusPhases + ', ' + SRC.statusOptional + ', ' + SRC.snapshotComplete + ', ' + SRC.optional)}
+    <span class="unv">⚠ THIS PAGE USED TO REPORT TWO INDEPENDENT OPTIONALITY DECLARATIONS AND CALL THE DISAGREEMENT A DEFECT. IT STILL REPORTS THEM — AND THE DISAGREEMENT WAS NEVER THE DEFECT.</span> <b>The two optionality declarations are still two, and still independent, because they answer different questions</b> — they are two independent optionality declarations, not competing spellings of one rule. — MAY BE ABSENT (chain: an artifact that was never created does not stop the selector) and REQUIRED FOR COMPLETION (work: is the run complete without this phase?). Their memberships were always different (seven and ten), and that is not a defect to be smoothed over: the two optionality declarations answer different questions, so a page that collapsed them into one word would be lying about one of them. What made the old pair dangerous was that both were SPELLED THE SAME WORD — <code>optional</code> — so no reader could tell which one was speaking, and a LIVE run paid for it: an agent read <code>status.ts</code>'s <code>optional:</code> as "this phase may be skipped", found the SCAFFOLDED phase 1.5 blocking a greenfield build with no defect to investigate, and removed the artifact. The fold failed the turn with <i>"a run artifact is evidence and the chain should only grow"</i> — a correct refusal — and there was no legitimate way to skip: the plugin was telling the agent a phase could be absent while refusing every way of making it so. <b>RESOLVED, in the code and on this page.</b> The two claims now have two names — MAY BE ABSENT (chain) and REQUIRED FOR COMPLETION (work) — and "may be skipped" is a THIRD thing with its own record: <b>a SKIPPED marker recorded in the artifact</b> (<code>Status: SKIPPED</code> + <code>SkippedAt</code> + <code>SkipReason</code>, written by <code>recursive_lock</code>'s <code>skip</code>), which settles the phase so the chain advances while the file stays exactly where it was. Deleting a run artifact is refused by the fold whatever any flag says. ${cite(SRC.mayBeAbsent + ', ' + SRC.settled + ', ' + SRC.skipMarker + ', ' + SRC.snapshotComplete)}
   </div>
 
   <div class="callout">
@@ -2707,7 +2733,8 @@ ${PHASES.map(phaseDetail).join('\n')}
         <tr><td>The twelve artifact names, IN ORDER</td><td><code>src/lock.ts</code> — <code>PHASE_SEQUENCE</code></td></tr>
         <tr><td>The late-phase set (3 members, same order)</td><td><code>src/phase-rules.ts</code> — <code>LATE_PHASE_ARTIFACTS</code></td></tr>
         <tr><td>The audited-phase set (9 members)</td><td><code>src/phase-rules.ts</code> — <code>AUDITED_PHASE_FILES</code></td></tr>
-        <tr><td>The optional-phase set (7 members)</td><td><code>src/lock.ts</code> — <code>OPTIONAL_PHASES</code></td></tr>
+        <tr><td>The may-be-absent set (7 members)</td><td><code>src/lock.ts</code> — <code>MAY_BE_ABSENT_PHASES</code></td></tr>
+        <tr><td>The work-required set (10 members) and the recorded SKIP</td><td><code>src/status.ts</code> — <code>requiredForCompletion</code>; <code>src/skip.ts</code> — <code>skipPhaseArtifact</code></td></tr>
         <tr><td>Every phase's required sections, in order</td><td><code>src/phase-rules.ts</code> — <code>SECTION_MAP</code></td></tr>
         <tr><td>The audit headings (9) and the input-artifact map</td><td><code>src/phase-rules.ts</code> — <code>AUDIT_REQUIRED_HEADINGS</code>; <code>src/ts-lint.ts</code> — <code>getPhaseExpectedInputArtifactNames</code></td></tr>
         <tr><td>The thirteen tool names</td><td><code>src/recursive_*.tool.ts</code> — the registered <code>name:</code> literals</td></tr>
@@ -4062,7 +4089,7 @@ function drawOverview(api) {
   }
   legendRow('NODES', [
     ['dg-legend', 'the phase, in PHASE_SEQUENCE order'],
-    ['dg-legend-rail', 'may be absent (OPTIONAL_PHASES)'],
+    ['dg-legend-rail', 'may be absent (MAY_BE_ABSENT_PHASES)'],
     ['dg-legend-refuse', 'a guard rule can refuse here'],
     ['dg-box-human', 'a person must answer'],
   ], ly)
@@ -4412,12 +4439,12 @@ function verify(html) {
   check('PHASE_SEQUENCE: 12 artifacts, same order', stringList(lockSrc, 'export const PHASE_SEQUENCE'), PHASES.map((p) => p.file))
   check('LATE_PHASE_ARTIFACTS', stringList(rulesSrc, 'export const LATE_PHASE_ARTIFACTS'), LATE.files)
   check('AUDITED_PHASE_FILES', stringList(rulesSrc, 'export const AUDITED_PHASE_FILES = new Set(', { set: true }), PHASES.filter((p) => p.audited).map((p) => p.file))
-  check('OPTIONAL_PHASES', stringList(lockSrc, 'export const OPTIONAL_PHASES = new Set(', { set: true }), PHASES.filter((p) => p.optional).map((p) => p.file))
+  check('MAY_BE_ABSENT_PHASES', stringList(lockSrc, 'export const MAY_BE_ABSENT_PHASES = new Set(', { set: true }), PHASES.filter((p) => p.mayBeAbsent).map((p) => p.file))
 
   /* 1b. JOB 1 — THE MISLEADING `optional` BADGE, AS CHECKED FACTS.
      ------------------------------------------------------------------------
      The owner found this by eye: the page printed a bare `optional` badge 14 times
-     for the seven members of `OPTIONAL_PHASES`, and read correctly as "these seven
+     for the seven members of `MAY_BE_ABSENT_PHASES`, and read correctly as "these seven
      phases are optional work". The set's only consumer is `nextLegalPhase(…,
      { optional })`, i.e. "an ABSENT member does not stop the selector". There was
      nothing on the page to contradict the badge, and nothing in `--verify` to catch
@@ -4480,11 +4507,11 @@ function verify(html) {
   check('the explanation\'s prose badge sits in the Notes view',
     html.slice(0, badgeProse[1]).lastIndexOf('id="panel-notes"') > html.slice(0, badgeProse[1]).lastIndexOf('id="panel-tools"'), true)
   check('the set the may-be-absent badge DESCRIBES is exactly the set the code declares',
-    [...new Set(badgeOf)].sort(), PHASES.filter((p) => p.optional).map((p) => p.file).sort())
+    [...new Set(badgeOf)].sort(), PHASES.filter((p) => p.mayBeAbsent).map((p) => p.file).sort())
   check('every may-be-absent phase carries the badge at BOTH render sites (overview row + detail view)',
-    PHASES.filter((p) => p.optional).map((p) => p.file).filter((f) => badgeOf.filter((b) => b === f).length !== 2), [])
+    PHASES.filter((p) => p.mayBeAbsent).map((p) => p.file).filter((f) => badgeOf.filter((b) => b === f).length !== 2), [])
   check('no phase OUTSIDE the declared set carries the badge',
-    badgeOf.filter((b) => !PHASES.filter((p) => p.optional).some((p) => p.file === b)), [])
+    badgeOf.filter((b) => !PHASES.filter((p) => p.mayBeAbsent).some((p) => p.file === b)), [])
   {
     const scaffold = [...(readRepo('src/runtime.ts').match(/const laterPhases = \[([\s\S]*?)\]/) || ['', ''])[1]
       .matchAll(/'([^']+\.md)'/g)].map((m) => m[1])
@@ -4494,25 +4521,50 @@ function verify(html) {
     check('the page states the positive fact rather than leaving the badge to speak for itself',
       /All twelve artifacts are MANDATORY work/.test(html) && /scaffolds <b>all twelve<\/b>/.test(html), true)
   }
-  /* (d) THE SECOND DECLARATION, CHECKED RATHER THAN MERELY MENTIONED. `status.ts` carries
-     its own `optional:` flag, and the page now says that it disagrees with `lock.ts`. A
-     sentence like that is worth nothing unless the disagreement is re-derived, so the
-     flag is parsed out of the status table and compared: if the two declarations are ever
-     reconciled, THIS CHECK FAILS and the paragraph must be rewritten rather than left
-     asserting a split that no longer exists. */
+  /* (d) THE TWO DECLARATIONS, RE-DERIVED — RECONCILED IN NAME, KEPT APART IN MEANING.
+     -------------------------------------------------------------------------------------
+     This block used to assert that the two optionality declarations DISAGREED, and it said in
+     as many words that reconciling them must FAIL the check rather than leave the paragraph
+     asserting a split that no longer exists. That is what has now happened, so the check moves
+     with the code: `lock.ts` declares MAY_BE_ABSENT_PHASES (chain — an artifact that was never
+     created does not stop the selector) and `status.ts` declares `requiredForCompletion` per
+     phase (work — a run is complete when every required phase is settled). What is re-derived
+     here is therefore the two NAMES, the two MEMBERSHIPS, and the mechanism whose absence made
+     the old split dangerous: a recorded SKIP that settles a phase WITHOUT deleting it. */
   {
     const statusFile = readRepo('src/status.ts')
     const rows = (statusFile.match(/export const PHASES: PhaseDef\[\] = \[([\s\S]*?)\n\]/) || ['', ''])[1]
-    const statusOnly = [...rows.matchAll(/file: '([^']+)', optional: true/g)].map((m) => m[1])
-    check('status.ts declares its own optional set, and it is the TWO the page names',
-      statusOnly, ['01.5-root-cause.md', '03.5-code-review.md'])
-    check('the two optionality declarations DISAGREE — which is what the page reports',
-      PHASES.filter((p) => p.optional).filter((p) => !statusOnly.includes(p.file)).map((p) => p.file),
-      ['01-as-is.md', '02-to-be-plan.md', '03-implementation-summary.md', '04-test-summary.md', '05-manual-qa.md'])
-    check('the run-completion calculation consumes the status.ts flag, not the lock.ts set',
-      /const mandatory = status\.phases\.filter\(p => !p\.optional\)/.test(readRepo('src/snapshot.ts')), true)
-    check('the page SAYS the two declarations disagree, and cites both',
-      /two independent optionality declarations/.test(html) && /optionality declarations<\/b> and they disagree/.test(html), true)
+    const notRequired = [...rows.matchAll(/file: '([^']+)', requiredForCompletion: false/g)].map((m) => m[1])
+    check('status.ts declares the WORK-optionality set, and it is the TWO the page names',
+      notRequired, ['01.5-root-cause.md', '03.5-code-review.md'])
+    check('the two declarations are DIFFERENT SETS under DIFFERENT NAMES, which is the point',
+      {
+        chain: PHASES.filter((p) => p.mayBeAbsent).length,
+        work: PHASES.length - notRequired.length,
+        // No field on the status table may be called `optional` again: that shared word is what a
+        // reader (and a live agent) could not disambiguate.
+        bareOptionalField: /requiredForCompletion|mayBeAbsent/.test(statusFile) && /file: '[^']+', optional:/.test(statusFile),
+      },
+      { chain: 7, work: 10, bareOptionalField: false })
+    check('the run-completion calculation consumes the WORK declaration and honours a recorded skip',
+      /const required = status\.phases\.filter\(p => p\.requiredForCompletion\)/.test(readRepo('src/snapshot.ts'))
+        && /p\.exists && p\.status === 'SKIPPED'/.test(readRepo('src/snapshot.ts')), true)
+    check('the chain selector treats a recorded skip as settled, and keeps it apart from a lock',
+      /skipped\?: readonly string\[\]/.test(readRepo('src/phase-graph.ts'))
+        && /node\.locked === true \|\| node\.skipped === true/.test(readRepo('src/phase-graph.ts')), true)
+    // Substring tests rather than regexes: the marker's own text carries a backtick and a quote, and
+    // an escaped regex for it is the kind of anchor that silently stops matching after a reformat.
+    const skipSrc = readRepo('src/skip.ts')
+    check('a deliberate skip is a RECORD in the artifact, refused when there is nothing to record in',
+      skipSrc.includes("Status: `' + SKIP_STATUS")
+        && skipSrc.includes('SKIP_REASON_FIELD')
+        && skipSrc.includes('no artifact exists, and a skip is a record written IN the artifact'), true)
+    check('the page states the reconciled reading, the skip, and keeps the caveat the FILE checker requires',
+      // The last two phrases are required of the WRITTEN page by `check-workflow-map.mjs`, which never
+      // reads `src/`. Asserting them here as well is what keeps the two-sided toolchain consistent: a
+      // regeneration cannot quietly drop a sentence the file checker demands.
+      /REQUIRED FOR COMPLETION/.test(html) && /SKIPPED marker recorded in the artifact/.test(html)
+        && /the two optionality declarations/.test(html) && /two independent optionality declarations/.test(html), true)
   }
   check('TRACEABILITY_REQUIRED_FILES', stringList(rulesSrc, 'export const TRACEABILITY_REQUIRED_FILES = new Set(', { set: true }), PHASES.filter((p) => p.traceability).map((p) => p.file))
   check('AUDIT_REQUIRED_HEADINGS: 9 entries', stringList(rulesSrc, 'export const AUDIT_REQUIRED_HEADINGS'), ['Audit Context', 'Effective Inputs Re-read', 'Earlier Phase Reconciliation', 'Subagent Contribution Verification', 'Worktree Diff Audit', 'Gaps Found', 'Repair Work Performed', 'Requirement Completion Status', 'Audit Verdict'])

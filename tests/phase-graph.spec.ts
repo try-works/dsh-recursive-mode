@@ -192,4 +192,40 @@ describe('T17 — the next-legal-phase rules, including the one only a GRAPH can
     const graph = buildPhaseGraph({ sequence: SEQUENCE, present: ['00-requirements.md', '01-as-is.md'], locked: ['00-requirements.md'] })
     expect(nextLegalPhase(graph)).toBe('01-as-is.md')
   })
+
+  /**
+   * ⚠ THE FOURTH RULE, AND THE ONE THAT MAKES "NEVER DELETE AN ARTIFACT" SURVIVABLE. A phase that does
+   * not apply is SKIPPED IN PLACE (a recorded marker in a PRESENT artifact — see `src/skip.ts`), so the
+   * walk has to treat a skipped node as SETTLED: it may be passed over, and it satisfies the
+   * prerequisites of what follows. Without this the chain would stall exactly where removal used to be
+   * the only way forward, and the plugin would be back to telling an agent a phase may be skipped while
+   * refusing every legitimate way to do it.
+   *
+   * `skipped` is a SEPARATE node attribute from `locked` on purpose: the walk treats them alike, and a
+   * reader must still be able to tell skipped work from approved work.
+   */
+  it('skips a deliberately SKIPPED node and lets its dependents proceed', () => {
+    // The real sequence's 1.5 slot, spelled locally so the case names the artifact the live run was
+    // stuck on rather than an invented neighbour.
+    const seq = ['00-requirements.md', '01-as-is.md', '01.5-root-cause.md', '02-to-be-plan.md']
+    const graph = buildPhaseGraph({
+      sequence: seq,
+      present: ['00-requirements.md', '01.5-root-cause.md', '02-to-be-plan.md'],
+      locked: ['00-requirements.md'],
+      skipped: ['01.5-root-cause.md'],
+    })
+    // The node is settled but NOT locked, so a reader is not told the work was approved.
+    expect(graph.nodes.find((node) => node.id === '01.5-root-cause.md')!.skipped).toBe(true)
+    expect(graph.nodes.find((node) => node.id === '01.5-root-cause.md')!.locked).toBe(false)
+    // The skipped node is passed over, and the node after it is not blocked by it.
+    expect(nextLegalPhase(graph)).toBe('02-to-be-plan.md')
+    // CONTROL: the same graph WITHOUT the skip record stalls on it — which is the state deletion was
+    // being used to escape.
+    const unskipped = buildPhaseGraph({
+      sequence: seq,
+      present: ['00-requirements.md', '01.5-root-cause.md', '02-to-be-plan.md'],
+      locked: ['00-requirements.md'],
+    })
+    expect(nextLegalPhase(unskipped)).toBe('01.5-root-cause.md')
+  })
 })

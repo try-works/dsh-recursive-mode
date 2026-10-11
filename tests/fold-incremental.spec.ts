@@ -154,6 +154,62 @@ describe('T21 — the incremental fold', () => {
     expect(() => foldRun(runDir, RUN)).toThrow(/append-only|disappeared|removed/i)
   })
 
+  /**
+   * ⚠ THE REFUSAL MUST NOT BE A DEAD END. A live run hit this sentence after an agent deleted an
+   * artifact to get past a phase it read as optional, and the agent had NO legitimate way to skip —
+   * which is what made removal look reasonable. The principle stays ("a run artifact is evidence and
+   * the chain should only grow"); what changes is that the sentence now names the mechanism that
+   * settles a phase IN PLACE (`recursive_lock` with `skip`), so a caller that reads it can act on it.
+   * Asserted on the message, because a refusal whose remedy is not in it is the defect this pins.
+   */
+  it('the append-only refusal KEEPS its principle and NAMES the legitimate alternative', () => {
+    const runDir = makeRun({ '00-requirements.md': draftBody(), '01.5-root-cause.md': draftBody() })
+    foldRun(runDir, RUN)
+    rmSync(join(runDir, '01.5-root-cause.md'))
+    let message = ''
+    try {
+      foldRun(runDir, RUN)
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+    expect(message).toContain('a run artifact is evidence and the chain should only grow')
+    expect(message).toContain('recursive_lock')
+    expect(message).toContain('skip')
+    expect(message).toContain('01.5-root-cause.md')
+  })
+
+  /**
+   * THE OTHER HALF, and the reason the fold needs no exception: the legitimate skip LEAVES THE FILE
+   * ALONE. A phase recorded as skipped is present at every fold, so the append-only check has nothing
+   * to report and the chain only grows — while the phase reads as `skipped`, not as a hole. This is
+   * the shape the refusal above now points at, asserted where the refusal lives.
+   */
+  it('a DELIBERATE SKIP keeps the artifact, so the append-only check stays silent and the phase reads skipped', () => {
+    // The phases before it are LOCK-VALID, deliberately: otherwise the current-phase walk would stop at
+    // an earlier DRAFT and this case could pass without the skip being honoured at all.
+    const lockedFor = (phase: string) => {
+      const body = 'Run: `x`\nPhase: `' + phase + '`\nStatus: `LOCKED`\n\n## TODO\n\n- [x] done\n\nCoverage: PASS\nApproval: PASS\nLockedAt: 2026-01-01T00:00:00Z\n'
+      return body + 'LockHash: ' + lockHashFromContent(body + 'LockHash: ' + '0'.repeat(64) + '\n') + '\n'
+    }
+    const skipped = 'Run: `x`\nPhase: `1.5`\nStatus: `SKIPPED`\nSkippedAt: `2026-01-01T00:00:00Z`\nSkipReason: `no defect to investigate`\n\n## TODO\n\n- [x] done\n'
+    const runDir = makeRun({
+      '00-requirements.md': lockedFor('0'),
+      '00-worktree.md': lockedFor('0'),
+      '01-as-is.md': lockedFor('1'),
+      '01.5-root-cause.md': skipped,
+    })
+    foldRun(runDir, RUN)
+    // The file is still there, so the frame's next pass has nothing to refuse.
+    const second = foldRun(runDir, RUN)
+    const row = second.phases.find(p => p.key === '01.5')!
+    expect(row.exists).toBe(true)
+    expect(row.status).toBe('SKIPPED')
+    expect(row.position).toBe('skipped')
+    // …and the walk moves ON: without the marker honoured, 01.5 is the first unsettled phase and IS the
+    // answer (the assertion below is what fails in that case, not a tautology about ordering).
+    expect(second.currentPhase?.key).toBe('02')
+  })
+
   it('a COLD fold still reports the honest state after a removal', () => {
     const runDir = makeRun({ '00-requirements.md': draftBody(), '01-as-is.md': draftBody() })
     foldRun(runDir, RUN)

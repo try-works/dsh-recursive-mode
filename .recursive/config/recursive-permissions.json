@@ -44,49 +44,49 @@
     {
       "pattern": "write",
       "verdict": "deny",
-      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED, or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "edit",
       "verdict": "deny",
-      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED, or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "fs_write",
       "verdict": "deny",
-      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED, or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "fs-write",
       "verdict": "deny",
-      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED, or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "pwsh",
       "verdict": "deny",
-      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED, or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "shell",
       "verdict": "deny",
-      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED, or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "bash",
       "verdict": "deny",
-      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED, or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "run_code",
       "verdict": "deny",
-      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
+      "reason": "locked-artifact write denial: the target carries Status: LOCKED, or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {

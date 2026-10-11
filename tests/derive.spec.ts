@@ -183,4 +183,15 @@ describe('derive: phase POSITION is the single source of a phase state (T21)', (
     for (const file of MANDATORY_FILES) phases[file] = { phase: file, status: 'LOCKED' }
     expect(cardFacts(card({ phases: phases as never })).lockValidity).toBe('locked')
   })
+
+  /**
+   * ⚠ A SKIP IS SETTLED, NOT LOCKED, AND THE BOARD MUST NOT SHOW IT AS FINISHED. The server's fold
+   * reports a deliberately skipped phase as position `skipped` with `lockValid: false` (see
+   * `src/skip.ts`), and this consumer derives run-level validity from that single position — so a run
+   * that skipped a required phase must still read `in-progress`. This is the cheap safeguard against
+   * the obvious abuse of the skip mechanism: a run cannot look complete by marking its way there.
+   */
+  it('a SKIPPED required phase keeps the card in-progress — a skip is settled, never approved', () => {
+    expect(cardFacts(allLocked({ '05-manual-qa.md': 'skipped' })).lockValidity).toBe('in-progress')
+  })
 })

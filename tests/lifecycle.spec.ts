@@ -87,6 +87,25 @@ describe('lifecycle.ts — transition gate (R1/R2/R6)', () => {
     expect(coupleGateBlockToGoal(null, {}, { id: 'g' }, { code: 'GATE', message: 'x' })).toBe(false)
   })
 
+  /**
+   * ⚠ THE REOPEN GATE KNOWS BOTH SETTLED STATES. Reopening is also how a deliberate SKIP is withdrawn
+   * (`recursive_lock` with `reopen: true` strips the marker), so a gate that only accepted LOCKED would
+   * report every un-skip as a failure while the operation itself succeeded — a gate disagreeing with
+   * the code it gates. The DRAFT control is what keeps the widening from being unconditional.
+   */
+  it('validateTransition allows reopening a SKIPPED artifact (the un-skip) and refuses a DRAFT one', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rm-lifecycle-'))
+    const runDir = join(root, '.recursive', 'run', 'r1')
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, '01.5-root-cause.md'), 'Run: r1\nPhase: 1.5\nStatus: `SKIPPED`\nSkippedAt: `2026-01-01T00:00:00Z`\nSkipReason: `no defect to investigate`\n', 'utf8')
+    writeFileSync(join(runDir, '01-as-is.md'), 'Run: r1\nPhase: 1\nStatus: DRAFT\n', 'utf8')
+    const reopenOf = (artifact: string): PhaseTransitionIntent => ({ runId: 'r1', worktreeRoot: root, targetArtifact: artifact, kind: 'reopen' })
+    expect(validateTransition(reopenOf('01.5-root-cause.md')).passed).toBe(true)
+    const refused = validateTransition(reopenOf('01-as-is.md'))
+    expect(refused.passed).toBe(false)
+    expect(refused.failures.join(' ')).toContain('settled artifact, LOCKED or SKIPPED')
+  })
+
   it('coupleGateBlockToGoal blocks with a goal service', () => {
     let called = false
     const goalService = { block: (_a: unknown, _r: unknown, _reason: unknown) => { called = true } }

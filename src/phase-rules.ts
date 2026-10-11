@@ -516,6 +516,31 @@ export const GIT_REQUIRED_NOTICE = 'This workspace is not a git repository, and 
   + ' authoring phase 0 — otherwise the artifacts can be written but none can be locked, and the run cannot advance.'
 
 /**
+ * FU — the no-commits verdict. A git repository whose HEAD has never been created: `git rev-parse
+ * --git-dir` succeeds (so the old single null-check missed it) but `git rev-parse --verify HEAD^{commit}`
+ * fails, so the Phase 0 diff basis prefill falls back to the `<resolve-before-locking>` placeholder and
+ * every later lock dies resolving that baseline. The remedy is a commit, and `recursive_init` makes that
+ * first commit itself — re-run init and it will stage only what it scaffolded.
+ */
+export const GIT_NO_COMMITS_NOTICE = 'This workspace is a git repository but has NO COMMITS, so the Phase 0 diff basis cannot resolve.'
+  + ' Every artifact lock is refused until a commit exists: `recursive_lock` validates the phase standard by linting the run,'
+  + ' which resolves `00-worktree.md`\'s recorded diff basis against live git, and with no commit that basis is the literal'
+  + ' `<resolve-before-locking>` placeholder. Run `recursive_init` — it makes the first commit itself, staging only the'
+  + ' paths that init scaffolded — and never `git add -A`, which would commit unrelated work in progress.'
+
+/**
+ * FU — the detached-HEAD verdict. A repository where HEAD resolves to a commit but is not attached to a
+ * branch: the diff basis is executable, but `00-worktree.md`'s recorded branch fields cannot round-trip
+ * through the lint-time `verifyRecordedBranches` guard, so the recorded worktree context is not honest.
+ * The remedy is to attach HEAD to a branch before authoring phase 0.
+ */
+export const GIT_DETACHED_HEAD_NOTICE = 'This checkout is on a DETACHED HEAD, and the Phase 0 worktree context requires a branch.'
+  + ' Every artifact lock is refused until HEAD is attached to a branch: `recursive_lock` verifies the recorded worktree'
+  + ' branch against the live HEAD branch, and a detached HEAD cannot match a branch name, so `00-worktree.md` would record'
+  + ' a context the linter cannot confirm. Run `git switch -c <branch>` (or `git checkout -b <branch>`) to attach HEAD before'
+  + ' authoring phase 0.'
+
+/**
  * Structured, single-source-of-truth rules for one phase (refined LIVE BUG 6
  * design): consumed by BOTH the recursive_phase tool and the once-per-phase
  * pre-step reminder. Derived from the canonical artifact-template sections.

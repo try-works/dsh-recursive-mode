@@ -53,12 +53,15 @@ import {
   lockHashFromContent,
   readReceipt,
   validateChain,
+  validateReceiptChain,
+  writeReceipt,
 } from '../src/lock.ts'
 import { foldRun, resetFoldCache } from '../src/status.ts'
 import { skipPhaseArtifact, skipReasonOf, isSkippedArtifact } from '../src/skip.ts'
-import { currentPhaseArtifact } from '../src/enforcement.ts'
+import { currentPhaseArtifact, evaluateToolGuard, resolveToolPolicyForGuard } from '../src/enforcement.ts'
 import { snapshotWorkspace } from '../src/snapshot.ts'
-import { evaluateToolPolicy, resolveToolPolicyForGuard } from '../src/policy-globs.ts'
+import { evaluateToolPolicy } from '../src/policy-globs.ts'
+import { lintRun } from '../src/ts-lint.ts'
 
 const RUN = 'skip-run'
 const SKIPPED = '01.5-root-cause.md'
@@ -214,18 +217,43 @@ describe('the legitimate skip — a phase that does not apply is RECORDED, never
       expect(chain.phases.find((p) => p.file === SKIPPED)!.lockValid).toBe(false)
       expect(chain.phases.find((p) => p.file === SKIPPED)!.status).toBe('SKIPPED')
 
-      // …and the NEXT phase actually LOCKS: the receipt cites the skip record by content hash, which is
-      // what pins it into the chain and makes a later edit detectable.
-      const nextBody = readFileSync(join(m.runDir, NEXT), 'utf8')
-      expect(nextBody.length).toBeGreaterThan(0)
-      const nextReceipt = (() => {
-        const path = join(m.runDir, NEXT)
-        writeFileSync(path, nextBody, 'utf8')
-        return null
-      })()
-      expect(nextReceipt).toBeNull()
-      const cited = lockHashFromContent(after)
-      expect(cited).toMatch(/^[a-f0-9]{64}$/)
+      // …and the NEXT phase's receipt can be WRITTEN, citing the skip record by CONTENT HASH — which is
+      // what pins the record into the chain (an edit to it after the fact then shows up as a stale
+      // downstream receipt, exactly like an edit to a locked artifact).
+      const nextReceipt = writeReceipt(m.runDir, NEXT, join(m.runDir, NEXT))
+      expect(nextReceipt.prerequisite_hashes[SKIPPED]).toBe(lockHashFromContent(after))
+      // The skip wrote a receipt of its own, which is why that citation is not a GAP: a cited
+      // prerequisite with no receipt at all is what `validateReceiptChain` reports, and a skip that
+      // skipped the receipt would make every later phase's chain verification fail. (The other gaps
+      // this fixture has are its own — the earlier phases were materialised on disk by hand, so they
+      // have no receipts — which is why the assertion is scoped to the citation of the skip.)
+      const chainCheck = validateReceiptChain(m.runDir, RUN)
+      expect(chainCheck.breaks.filter((b) => b.kind === 'missing-prerequisite-receipt' && b.detail.includes(SKIPPED))).toEqual([])
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('CASE 3b: the skip record does not fail the NEXT phase\'s own standard (the lock gate stays usable)', async () => {
+    const m = await mount()
+    try {
+      settleUpToPhaseOne(m.runDir)
+      skipPhaseArtifact(m.runDir, RUN, SKIPPED, 'no defect to investigate')
+      // ⚠ NON-VACUITY FIRST: the run-level lint MUST report the skip record as below the phase standard,
+      // or the filter below would be dropping nothing and this case would prove nothing.
+      const original = console.log
+      console.log = () => {}
+      let raw: { errors: string[] }
+      try { raw = lintRun(m.repo, RUN) } finally { console.log = original }
+      expect(raw.errors.some((e) => e.includes(SKIPPED))).toBe(true)
+      // `recursive_lock` lints the WHOLE RUN and keeps the lines for the artifact being locked, and the
+      // linter's own phase-sequence rule reads `getPrerequisiteBlockers` — which now treats a recorded
+      // skip as settled. Both halves matter: if either leaked the skip (as a FAIL naming 01.5, or as a
+      // "prerequisite is SKIPPED (must be LOCKED first)" violation), the mechanism would be wired and
+      // still unusable — every later phase would refuse to lock for a phase nobody has to do.
+      const lint = await m.ctx.recursive.lintArtifact(RUN, NEXT)
+      expect(lint.errors.filter((e) => e.includes(SKIPPED))).toEqual([])
+      expect(lint.errors.filter((e) => /must be LOCKED first/.test(e))).toEqual([])
     } finally {
       await m.dispose()
     }
@@ -275,16 +303,28 @@ describe('the legitimate skip — a phase that does not apply is RECORDED, never
 
       // CHANGED, deliberately: the same phase, DELIBERATELY SKIPPED, is settled — a skip must be a way
       // forward and not a second way to be stuck (the artifact is the scaffolded one from initRun).
+      // Phase 1.5 is settled first because the monotonic rule binds a skip exactly as it binds a lock
+      // (and 1.5 is the phase the live run was actually stuck on).
+      skipPhaseArtifact(m.runDir, RUN, SKIPPED, 'no defect to investigate on a greenfield build')
       skipPhaseArtifact(m.runDir, RUN, NEXT, 'the plan is already carried by the approved requirements')
       resetFoldCache()
       const card = snapshotWorkspace(m.repo)[m.repo]![RUN]!
       expect(card.state).toBe('complete')
       expect(card.phases[NEXT]!.status).toBe('SKIPPED')
       expect(card.phases[NEXT]!.position).toBe('skipped')
-      // And the optional-quality phase the live run was stuck on is NOT required for completion at all:
-      // absent, it is reported SKIPPED (not needed) — the fold's own existing semantics, preserved.
-      expect(foldRun(m.runDir, RUN).phases.find((p) => p.file === '03.5-code-review.md')!.status).toBe('SKIPPED')
-      expect(foldRun(m.runDir, RUN).phases.find((p) => p.file === '03.5-code-review.md')!.exists).toBe(false)
+      // ⚠ AND THE PHASE THE LIVE RUN WAS ACTUALLY STUCK ON IS A PRESENT DRAFT, NOT AN ABSENCE.
+      // `recursive_init` scaffolds ALL TWELVE artifacts, so on a greenfield run the "may be absent"
+      // shape that `MAY_BE_ABSENT_PHASES` describes is unreachable for 03.5 without deleting the file —
+      // which is precisely how the live agent ended up at `git rm`. So the phase is reported DRAFT (not
+      // SKIPPED), it is NOT required for completion, and the honest way to settle it is the marker:
+      const optional = foldRun(m.runDir, RUN).phases.find((p) => p.file === '03.5-code-review.md')!
+      expect(optional.exists).toBe(true)
+      expect(optional.status).toBe('DRAFT')
+      expect(optional.requiredForCompletion).toBe(false)
+      // …which is why the run is COMPLETE with 03.5 still a DRAFT: the flag is a WORK claim, and an
+      // unsettled phase the run's work does not require does not hold the run open. (This is the one
+      // meaning `requiredForCompletion` carries, and the only one it may be read as.)
+      expect(card.state).toBe('complete')
       expect(foldRun(m.runDir, RUN).phases.find((p) => p.file === SKIPPED)!.requiredForCompletion).toBe(false)
       expect(foldRun(m.runDir, RUN).phases.find((p) => p.file === NEXT)!.requiredForCompletion).toBe(true)
     } finally {
@@ -294,15 +334,13 @@ describe('the legitimate skip — a phase that does not apply is RECORDED, never
 })
 
 describe('the skip refuses the shapes that would make it a deletion with extra steps', () => {
-  it('refuses a skip with no reason, a skip of a missing artifact, of a LOCKED one, and a double skip', async () => {
+  it('refuses a skip with no reason, of a missing artifact, of a LOCKED one, and a double skip', async () => {
     const m = await mount()
     try {
       settleUpToPhaseOne(m.runDir)
       // No reason: a hole with a label is exactly what this mechanism replaces.
       expect(() => skipPhaseArtifact(m.runDir, RUN, SKIPPED, '   ')).toThrow(/must carry a reason/)
       // Nothing to record in: an absent artifact is the OTHER word's case, so there is nothing to skip.
-      expect(() => skipPhaseArtifact(m.runDir, RUN, '04-test-summary.md', 'nope')).not.toThrow()
-      // (04 above was scaffolded by initRun, so it skipped cleanly — use a name that does not exist.)
       expect(() => skipPhaseArtifact(m.runDir, RUN, '09-does-not-exist.md', 'nope')).toThrow(/no artifact exists/)
       // LOCKED work is not a phase that "does not apply": reopen explicitly first.
       expect(() => skipPhaseArtifact(m.runDir, RUN, '01-as-is.md', 'nope')).toThrow(/it is LOCKED/)
@@ -310,15 +348,29 @@ describe('the skip refuses the shapes that would make it a deletion with extra s
       skipPhaseArtifact(m.runDir, RUN, SKIPPED, 'first reason')
       expect(() => skipPhaseArtifact(m.runDir, RUN, SKIPPED, 'second reason')).toThrow(/already recorded as SKIPPED/)
       expect(skipReasonOf(readFileSync(join(m.runDir, SKIPPED), 'utf8'))).toBe('first reason')
-      // WORKING AHEAD is refused by the same monotonic rule a lock obeys.
-      const fresh = await mount()
-      try {
-        const refused = await callLock(fresh, { runId: RUN, artifact: '05-manual-qa.md', skip: 'nope' }, 'skip-order')
-        expect(refused.isError).toBe(true)
-        expect(JSON.stringify(refused.value)).toContain('Prerequisite blockers')
-      } finally {
-        await fresh.dispose()
-      }
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('refuses to skip WORKING AHEAD — the same monotonic rule a lock obeys', async () => {
+    const m = await mount()
+    try {
+      settleUpToPhaseOne(m.runDir)
+      // Phase 5's prerequisites include the DRAFT phases 1.5-4, so a skip there is working ahead.
+      const refused = await callLock(m, { runId: RUN, artifact: '05-manual-qa.md', skip: 'nope' }, 'skip-order')
+      expect(JSON.stringify(refused.value)).toContain('Prerequisite blockers')
+      expect(getLockStatus(join(m.runDir, '05-manual-qa.md'))).toBe('DRAFT')
+      // …and the GUARD refuses it too, before dispatch: `recursive_lock*` carries the lock-order rule,
+      // and it reads the same blockers — so a skip cannot be used to jump the queue even when the tool
+      // would have been reached. The refusal names the blocking artifact.
+      const decision = evaluateToolGuard({ name: 'recursive_lock', arguments: { runId: RUN, artifact: '05-manual-qa.md', skip: 'nope' } }, m.repo, RUN, 'strict')
+      expect(decision.kind).toBe('deny')
+      expect(decision.rule).toBe('lock-order')
+      // ⚠ `reason` exists only on a refusal, and `expect().toBe` does not narrow the union for the compiler.
+      // Spell the non-refusal out, as this suite's sibling `reasonOf` does, so a failure names what it got
+      // instead of reading a property the variant does not carry.
+      expect(decision.kind === 'deny' ? decision.reason : 'NOT DENIED (kind: ' + decision.kind + ')').toContain('01.5-root-cause.md')
     } finally {
       await m.dispose()
     }

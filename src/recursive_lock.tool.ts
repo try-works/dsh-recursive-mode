@@ -23,9 +23,10 @@ export function createRecursiveLockTool(recursive: RecursiveRuntime) {
       // `git init` plus a commit, not an edit — so the condition is stated here rather than left to be
       // inferred from the FAIL text after an artifact has been written. `recursive_phase` reports the same
       // fact as `gitRequired` before authoring begins.
-      + ' REQUIRES A GIT REPOSITORY: the lock hash and the diff basis the lint verifies are git facts, so in a'
-      + ' workspace that is not a git repository (or has no commits) every lock is refused, and no edit to the'
-      + ' artifact clears it. Call `recursive_phase` first — it returns `gitRequired` when that is the case.',
+      + ' REQUIRES A USABLE GIT BASELINE: the lock hash and the diff basis the lint verifies are git facts, so in a'
+      + ' workspace that is not a git repository, a git repository with no commits, or a detached HEAD, every lock is'
+      + ' refused and no edit to the artifact clears it. `recursive_init` makes the first commit itself when the'
+      + ' repository has none. Call `recursive_phase` first — it returns `gitRequired` naming the exact blocker.',
     parameters: {
       runId: { type: 'string', description: 'Run id. Required.' },
       artifact: { type: 'string', description: 'Artifact file name, e.g. 03-implementation-summary.md. Required.' },

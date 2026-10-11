@@ -30,7 +30,7 @@ import type { RecursiveRuntime } from './runtime.ts'
 export function createRecursiveInitTool(recursive: RecursiveRuntime) {
   return defineTool({
     name: 'recursive_init',
-    description: 'Scaffold a new recursive-mode run directory (or ensure an existing one) with stub artifact headers. Delegates to the RecursiveRuntime service (no duplicated scaffolding logic). When createWorktree is true, a linked worktree is created first and the run is scaffolded inside it. THIS DOES NOT START THE RUN: no goal exists until the user approves phase 0 through recursive_ask gate=run-start, so the result carries runStartApproval — read it and ask. The runId is the NAME of the run directory under .recursive/run/ and is never a path (see the parameter description): a path-shaped runId is refused before anything is written.',
+    description: 'Scaffold a new recursive-mode run directory (or ensure an existing one) with stub artifact headers. Delegates to the RecursiveRuntime service (no duplicated scaffolding logic). If this is a git repository with NO COMMITS, init attempts to make the first commit itself, staging only paths this call created (never unrelated work); inspect the additive firstCommit result for the SHA, staged paths, placeholder identity use, or reported failure. A failed convenience commit does not fail init, but the run will remain unlockable until a real commit exists. When createWorktree is true, a linked worktree is created first and the run is scaffolded inside it. THIS DOES NOT START THE RUN: no goal exists until the user approves phase 0 through recursive_ask gate=run-start, so the result carries runStartApproval — read it and ask. The runId is the NAME of the run directory under .recursive/run/ and is never a path (see the parameter description): a path-shaped runId is refused before anything is written.',
     parameters: {
       runId: { type: 'string', description: 'Run id — the NAME of the run directory under .recursive/run/ (e.g. 03-something, 01-calculator-lib), never a path: ' + RUN_ID_RULE + '. A run on another drive or inside a worktree is reached with recursive_worktree, not by passing a path here. Required.' },
       createWorktree: { type: 'boolean', description: 'If true, create a linked worktree at .worktrees/<runId>/ and scaffold the run inside it (default: false).' },
@@ -38,7 +38,31 @@ export function createRecursiveInitTool(recursive: RecursiveRuntime) {
     },
     output: {
       schema: { type: 'json' },
-      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+      // ⚠ THE FIRST COMMIT IS RENDERED AS A SENTENCE, not left to be found inside the JSON. A commit is
+      // work this call did to the repository on the caller's behalf; the whole point of returning it is
+      // that it is NOT invisible, so the one surface the model reads gets the outcome in prose — including
+      // the placeholder-identity disclosure and the failure reason when there is one.
+      render: (_args, value) => {
+        const lines = [JSON.stringify(value, null, 2)]
+        const commit = (value as { firstCommit?: { committed: boolean; sha: string | null; stagedPaths: string[]; error: string | null; usedPlaceholderIdentity: boolean } })?.firstCommit
+        if (commit) {
+          if (commit.committed) {
+            lines.push('')
+            lines.push('recursive_init made the first commit for this repository: ' + (commit.sha ?? '(sha unresolved)')
+              + ' — it staged ONLY the ' + commit.stagedPaths.length + ' path(s) this call created, never unrelated work.')
+            if (commit.usedPlaceholderIdentity) {
+              lines.push('No user.name/user.email was configured, so this one commit used the placeholder identity'
+                + ' `recursive-init <recursive-init@invalid.local>` via `-c` on the single command (no repo or global config was changed).'
+                + ' The author in the log is a placeholder, not a person.')
+            }
+          } else {
+            lines.push('')
+            lines.push('recursive_init could NOT make the first commit, so this run is not lockable yet: ' + (commit.error ?? 'unknown git failure')
+              + ' — fix the reported git condition and make a commit, then continue. Init itself succeeded.')
+          }
+        }
+        return [{ type: 'text', text: lines.join('\n') }]
+      },
     },
     async execute(args: { runId?: string; createWorktree?: boolean; baseBranch?: string }, exec) {
       const runId = args.runId?.trim() ?? ''

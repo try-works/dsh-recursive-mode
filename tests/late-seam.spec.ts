@@ -33,7 +33,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -42,6 +42,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as plugin from '../src/index.ts'
 import type { TeamRuntimeLike, TeamTaskViewLike } from '../src/teams-loop.ts'
+import type { JobSpecLike, JobsRegistryLike } from '../src/jobs-runner.ts'
 
 /** The tool this spec exists for: the one the one-shot path could not register. */
 const TOOL = 'recursive_audit_team'
@@ -268,5 +269,117 @@ describe('FIX 1: the agentTeams seam registers the audit-team tool LATE', () => 
       throw new Error('the eagerly-registered tool answered an error: ' + JSON.stringify(created.error))
     }
     expect(team.calls).toContain('createTask:eager')
+  })
+})
+
+/**
+ * THE JOBS SEAM — THE FOURTH SEAM TO NEED THE LATE ATTACH, AND THE FIRST ONE WHOSE ABSENCE FROZE A RUN.
+ *
+ * WHAT THIS PROVES. `ctx.jobs` is mounted by a LATER loader layer than this plugin (the `recursive`
+ * preset mounts `@deepseek-ai/dsh-tool-jobs`; the host mounts the registry), so the one-shot
+ * `ctx.get('jobs')` at apply time legitimately comes back undefined on a host that HAS the registry —
+ * and before this row existed, nothing ever re-resolved it, so every long operation ran untracked and,
+ * worse, `runTracked` had only the absent-registry degradation to fall back on. This spec mounts the REAL
+ * plugin, proves `jobs` is ABSENT after that apply, mounts it afterwards from another plugin's own fiber,
+ * and then asserts the runtime uses it — BY USE, not by identity: a lint is started and the spec the late
+ * registry received is inspected, owner included.
+ *
+ * ⚠ IT FAILS AGAINST THE OLD BEHAVIOUR, WHICH IS THE WHOLE POINT. With only the one-shot `ctx.get`, the
+ * runtime held `null` forever and `attachedJobs()` answered `null` after the service arrived; the lint
+ * therefore reached no registry at all and the fixture recorded zero specs. Both halves are asserted: the
+ * negative BEFORE the service arrives, and the positive after.
+ *
+ * ⚠ WHAT IT DOES **NOT** PROVE — stated so a green is not read as more than it is:
+ *   • it does NOT exercise the real `LocalJobRegistry`. The seam is a FIXTURE satisfying the structural
+ *     `JobsRegistryLike` contract. It proves the plugin's WIRING, not the harness's owner-serving rule —
+ *     `jobs-tracking.spec.ts` covers the owner value and the refusal degradation;
+ *   • it does NOT prove the attachment is WITHDRAWN when the service goes away;
+ *   • it does NOT run a live session: no agent, no model, no Loader. The composition is built in-process.
+ *
+ * ⚠ THE VACUITY TRAP, AND HOW THIS SPEC REFUSES IT. If the fixture registry were provided BEFORE the
+ * plugin applied, the one-shot construction path would attach it and every assertion below would still
+ * pass while proving nothing about late arrival. Two guards: the service and `attachedJobs()` are asserted
+ * absent IMMEDIATELY AFTER the apply and BEFORE the provider is mounted, and the provider THROWS if it is
+ * ever applied first, so reordering the mounts turns a silent vacuum into a loud failure.
+ */
+describe('THE JOBS SEAM: a registry mounted after apply still reaches the runtime', () => {
+  const RUN = 'late-jobs-run'
+  const ARTIFACT = '00-requirements.md'
+
+  /** A structural `ctx.jobs` FIXTURE — see the header for what it does and does not stand in for. */
+  function jobsFixture(): { service: JobsRegistryLike; specs: JobSpecLike[] } {
+    const specs: JobSpecLike[] = []
+    const service: JobsRegistryLike = {
+      start(spec) {
+        specs.push(spec)
+        // The real contract: `run` is invoked synchronously and its hooks are the handle.
+        spec.run({ id: 'lint-1', append: () => {}, updateProgress: () => {} })
+        return 'lint-1'
+      },
+    }
+    return { service, specs }
+  }
+
+  /** The mount, as an ordinary Cordis plugin providing the service from ITS OWN fiber. */
+  function jobsProvider(service: JobsRegistryLike, onApply: () => void) {
+    return {
+      name: 'fixture:jobs',
+      apply(providerCtx: Context) {
+        onApply()
+        providerCtx.provide('jobs', service)
+      },
+    }
+  }
+
+  it('uses it when jobs is mounted AFTER apply, owner included', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'rm-late-jobs-'))
+    const jobs = jobsFixture()
+    let providerApplied = false
+    let pluginApplied = false
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      pluginApplied = true
+
+      // (1) THE STATE THAT USED TO BE TERMINAL: applied, registry absent, runtime holding null.
+      expect(providerApplied, 'the fixture registry must not be mounted yet').toBe(false)
+      expect(ctx.get('jobs'), 'the seam is absent at apply time').toBeUndefined()
+      await settle()
+      expect(ctx.recursive.attachedJobs(), 'the one-shot path had nothing to attach').toBeNull()
+
+      // (2) THE REGISTRY ARRIVES, from a later plugin's own fiber.
+      await ctx.plugin(jobsProvider(jobs.service, () => {
+        if (!pluginApplied) {
+          throw new Error('VACUOUS SPEC: the fixture registry was mounted before the plugin under test '
+            + 'applied, so the one-shot path alone would attach it and this spec would prove nothing')
+        }
+        providerApplied = true
+      }))
+      await settle()
+
+      // The deferral is real, not an ordering accident: the service this plugin could not see at apply
+      // time is now visible to the SAME read (`ctx.get`) that came back undefined then.
+      expect(providerApplied).toBe(true)
+      expect(ctx.get('jobs')).toBe(jobs.service)
+      // (3) AND IT REACHED THE RUNTIME, which is what the injected row exists to do.
+      expect(ctx.recursive.attachedJobs()).toBe(jobs.service)
+
+      // (4) PROVEN BY USE — a lint goes THROUGH the late registry. A run directory with no artifact makes
+      // the runtime answer `Artifact not found` WITHOUT calling the linter, so an artifact is authored
+      // first; what is asserted is the spec the registry received, not the lint verdict.
+      mkdirSync(join(root, '.recursive', 'run', RUN), { recursive: true })
+      writeFileSync(join(root, '.recursive', 'run', RUN, ARTIFACT), '# Requirements\n\nStatus: `DRAFT`\n', 'utf8')
+      await ctx.recursive.lintArtifact(RUN, ARTIFACT, { id: 'agent-late' })
+      expect(jobs.specs, 'the late registry must have been reached').toHaveLength(1)
+      expect(jobs.specs[0].kind).toBe('lint')
+      // ⚠ THE OWNER, asserted here too so the two halves of the fix are covered by one composition: with no
+      // owner the real registry would consult only the global layer and refuse.
+      expect(jobs.specs[0].owner).toBe('agent-late')
+    } finally {
+      try { await ctx.fiber.dispose() } catch { /* teardown must not mask an assertion that already failed */ }
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

@@ -286,6 +286,13 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     // a long operation must still run, and say it was untracked, rather than fail because no
     // board is attached.
     const jobs = ctx.get('jobs') as JobsRegistryLike | undefined
+    // ⚠ AND RESOLVE IT AGAIN WHENEVER THE SERVICE APPEARS — the same late-attach the three seams below
+    // use, added here for a MEASURED reason rather than symmetry: `ctx.jobs` is mounted by a LATER loader
+    // layer than this plugin (the preset mounts `tool-jobs`), so the one-shot `get` above can legitimately
+    // come back undefined on a host that has the registry. A registry that is present but was never seen
+    // is a board this plugin cannot report to; a registry that is seen but REFUSES is handled in
+    // `runTracked`, where the refusal degrades to inline work instead of failing the operation. Both paths
+    // are needed, and neither replaces the other.
     // T39: the subagents seam is resolved HERE, at the composition, so the runtime can fall back
     // to it when a caller passes none. Measured reason: `recursive_review.tool.ts` — the only
     // production caller of `delegateReview` — passes no seam, and the runtime then reported
@@ -316,6 +323,17 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     recursive.attachUserQuestions((ctx.get('userQuestions') as UserQuestionsLike | undefined) ?? null)
     ctx.inject(['userQuestions'], (questionsCtx: Context) => {
       recursive.attachUserQuestions((questionsCtx.get('userQuestions') as UserQuestionsLike | undefined) ?? null)
+    })
+    // ⚠ THE JOBS SEAM, LATE-ATTACHED FOR THE REASON ABOVE — the fourth seam to need it, and the one whose
+    // absence FROZE EVERY LIVE RUN. `ctx.inject` fires immediately when `jobs` is already present and again
+    // whenever it appears, so this is a guarantee rather than a second chance; the attachment is idempotent
+    // (last attach wins), so a refresh cannot accumulate anything. Measured on the live diagnostic run:
+    // `recursive_lock` failed twice with "background jobs unavailable: no job controller serves this agent",
+    // because the runtime held the registry but `runTracked`'s spec carried no owner. The OWNER is the other
+    // half of the fix and lives in `src/runtime.ts` (`agentOwner`); this row makes the registry visible when
+    // the loader mounts it after this plugin applies.
+    ctx.inject(['jobs'], (jobsCtx: Context) => {
+      recursive.attachJobs((jobsCtx.get('jobs') as JobsRegistryLike | undefined) ?? null)
     })
 
     // T7 — THE SETTINGS NAMESPACE, APPLIED ON EVERY APPLY. The settings service edits the

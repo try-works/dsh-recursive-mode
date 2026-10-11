@@ -91,10 +91,46 @@ export interface TrackedRunOptions<T> {
 export const TIMEOUT_REASON = 'timed out'
 
 /**
+ * The NO-BOARD path: do the work, say it was untracked, and never track a failure as success.
+ *
+ * ⚠ ONE DEFINITION, TWO REASONS TO TAKE IT — and that is the fix, not a convenience. This path is
+ * reached when no registry is mounted AND when the mounted registry REFUSES to start the job. The
+ * module's own header promises the second case behaves like the first ("failing a lint … merely
+ * because no board is attached would be a worse failure than losing the progress display"), so the
+ * two must not be able to drift apart; sharing this function is what makes that structural.
+ *
+ * `detail` records why tracking degraded, when the caller knows. It is the TRACKING reason and never
+ * the work's: a work failure is reported in `error` with `status: 'failed'`, and a successful work
+ * outcome keeps `status: 'completed'` whatever `detail` says.
+ */
+async function runInline<T>(options: TrackedRunOptions<T>, detail?: string): Promise<JobRunResult<T>> {
+  try {
+    const value = await options.run({ report: () => {}, signal: new AbortController().signal })
+    return { tracked: false, status: 'completed', value, ...(detail === undefined ? {} : { detail }) }
+  } catch (err) {
+    return {
+      tracked: false,
+      status: 'failed',
+      error: err instanceof Error ? err.message : String(err),
+      ...(detail === undefined ? {} : { detail }),
+    }
+  }
+}
+
+/**
  * Run `options.run` as a native job when a registry is available, inline when it is not.
  *
  * Never throws for a failure of the WORK: the outcome carries `status: 'failed'` and the
  * message, because a caller tracking a job wants to read what happened rather than catch it.
+ *
+ * ⚠ A TRACKING FAILURE IS NOT A WORK FAILURE. `start` is a REQUEST to a registry that preflights it,
+ * and a real registry refuses (`background jobs unavailable: no job controller serves this agent …`)
+ * when no attached controller serves the spec's owner. Letting that escape the guard made the
+ * degradation conditional on the registry being ABSENT, so a registry that was present and merely
+ * refused turned observability into an outage — the exact failure the module header rules out. So the
+ * start is protected, and a refusal degrades to the inline path with the reason carried in `detail`.
+ * The protection covers `start` ONLY: `options.run`'s own failures are classified by the code below the
+ * protected block, where a cancelled operation still settles `killed` and a deadline is still a kill.
  */
 export async function runTracked<T>(
   jobs: JobsRegistryLike | null | undefined,
@@ -102,16 +138,7 @@ export async function runTracked<T>(
 ): Promise<JobRunResult<T>> {
   if (jobs === null || jobs === undefined || typeof jobs.start !== 'function') {
     // No board to report to: do the work, and SAY it was untracked.
-    try {
-      const value = await options.run({ report: () => {}, signal: new AbortController().signal })
-      return { tracked: false, status: 'completed', value }
-    } catch (err) {
-      return {
-        tracked: false,
-        status: 'failed',
-        error: err instanceof Error ? err.message : String(err),
-      }
-    }
+    return await runInline(options)
   }
 
   let value: T | undefined
@@ -121,43 +148,56 @@ export async function runTracked<T>(
   // synchronously, and that its returned hooks are the only handle on the work.
   let captured: JobHooksLike | null = null
 
-  const jobId = jobs.start({
-    kind: options.kind,
-    label: options.label,
-    ...(options.owner === undefined ? {} : { owner: options.owner }),
-    run: (job) => {
-      const controller = new AbortController()
-      const done = (async (): Promise<JobOutcomeLike> => {
-        try {
-          value = await options.run({
-            report: (line) => job.updateProgress(line),
-            signal: controller.signal,
-          })
-          return { status: 'completed', result: options.render ? options.render(value) : undefined }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err)
-          // A cancelled operation reports KILLED, not failed: the signal being aborted is how
-          // a deliberate stop reaches the work, and "stopped" is not "broken". Checked BEFORE
-          // recording an error, so a kill does not ALSO leave an `error` behind — an error
-          // field says "something broke", and carrying one beside `killed` contradicts the
-          // status a board is rendering.
-          if (controller.signal.aborted) {
-            return { status: 'killed', detail: abortReason(controller.signal) }
+  // ⚠ THE PROTECTED REGION — `start` MAY THROW, AND THAT MUST NOT REACH THE WORK. What is inside the
+  // `try` is deliberately ONLY the registry call: `options.run` is invoked from inside the starter, but a
+  // throw from the WORK is classified below (killed / failed), so widening this guard to cover it would
+  // be the over-catch that turns a broken lint into a silent success.
+  let jobId: string
+  try {
+    jobId = jobs.start({
+      kind: options.kind,
+      label: options.label,
+      ...(options.owner === undefined ? {} : { owner: options.owner }),
+      run: (job) => {
+        const controller = new AbortController()
+        const done = (async (): Promise<JobOutcomeLike> => {
+          try {
+            value = await options.run({
+              report: (line) => job.updateProgress(line),
+              signal: controller.signal,
+            })
+            return { status: 'completed', result: options.render ? options.render(value) : undefined }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err)
+            // A cancelled operation reports KILLED, not failed: the signal being aborted is how
+            // a deliberate stop reaches the work, and "stopped" is not "broken". Checked BEFORE
+            // recording an error, so a kill does not ALSO leave an `error` behind — an error
+            // field says "something broke", and carrying one beside `killed` contradicts the
+            // status a board is rendering.
+            if (controller.signal.aborted) {
+              return { status: 'killed', detail: abortReason(controller.signal) }
+            }
+            error = message
+            return { status: 'failed', detail: message }
           }
-          error = message
-          return { status: 'failed', detail: message }
+        })()
+        captured = {
+          cancel: (reason?: string) => {
+            // Abort first so the work can wind down, and record the reason for the outcome.
+            controller.abort(reason ?? 'cancelled')
+          },
+          done,
         }
-      })()
-      captured = {
-        cancel: (reason?: string) => {
-          // Abort first so the work can wind down, and record the reason for the outcome.
-          controller.abort(reason ?? 'cancelled')
-        },
-        done,
-      }
-      return captured
-    },
-  })
+        return captured
+      },
+    })
+  } catch (err) {
+    // THE REGISTRY REFUSED. The work has NOT run yet — nothing was started — so it runs now, inline,
+    // and the refusal travels with the result rather than replacing it. `tracked: false` is the same
+    // word the absent-registry path uses, so a caller reads one degradation instead of two.
+    const refusal = err instanceof Error ? err.message : String(err)
+    return await runInline(options, 'job tracking unavailable: ' + refusal)
+  }
 
   const hooks = captured as JobHooksLike | null
   if (hooks === null) {

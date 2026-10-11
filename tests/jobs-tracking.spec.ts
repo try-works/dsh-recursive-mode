@@ -14,15 +14,82 @@
  */
 import { describe, it, expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RecursiveRuntime } from '../src/runtime.ts'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as plugin from '../src/index.ts'
 import { readJobRuns } from '../src/job-log.ts'
+import { getLockStatus } from '../src/lock.ts'
+import { ensureMemoryPlane, writeCompliantRun } from './compliant-artifact.ts'
 import {
   runTracked, describeJobRun, TIMEOUT_REASON,
   type JobHooksLike, type JobSpecLike, type JobsRegistryLike,
 } from '../src/jobs-runner.ts'
+
+/**
+ * THE REGISTRY'S OWN REFUSAL, VERBATIM.
+ *
+ * Copied from the harness rather than paraphrased (`packages/jobs/jobs-local/src/index.ts`, the
+ * `servesOwner` preflight in `start`) because the whole point of the case below is that a refusal
+ * with THIS text — the one a live diagnostic run recorded twice — must not be able to stop the work.
+ * A paraphrase would let the test pass against a message the real registry never produces.
+ */
+const REGISTRY_REFUSAL = 'background jobs unavailable: no job controller serves this agent '
+  + '(load @deepseek-ai/dsh-tool-jobs in its composition)'
+
+/**
+ * A runtime mounted the way the LIVE HOST mounts it — through the plugin's own `apply`, not by
+ * constructing `RecursiveRuntime` directly.
+ *
+ * ⚠ WHY THAT MATTERS, measured: `apply` is where the `jobs` seam is attached (`ctx.inject(['jobs'], …)`
+ * in `src/index.ts`), so a spec that constructs the runtime itself exercises a runtime whose late-attach
+ * wiring was never installed — the same shape of mistake that hid the original defect. The registry is
+ * provided by a separate plugin row (as the loader's `tool-jobs` row does), and `mountRuntime` is
+ * deliberately NOT given the registry as a `RecursiveRuntime` config argument: that is the one-shot
+ * constructor path, which the main host makes unnecessary and which these cases exist to distinguish from.
+ */
+async function mountRuntime(root: string, jobs?: JobsRegistryLike) {
+  const ctx = new Context()
+  await ctx.plugin(SystemPrompt)
+  await ctx.plugin(ToolRuntime)
+  if (jobs !== undefined) {
+    await ctx.plugin({
+      name: 'fixture:jobs',
+      apply(providerCtx: Context) { providerCtx.provide('jobs', jobs) },
+    })
+    // A fiber activation is a microtask chain, so a macrotask boundary is what makes the provided
+    // service observable to the plugin's injecting row rather than racy.
+    await new Promise<void>((resolve) => { setTimeout(resolve, 0) })
+  }
+  await ctx.plugin(plugin as never, { repoRoot: root } as never)
+  return ctx
+}
+
+/**
+ * A run whose artifact MEETS the phase standard. Required by every case below that expects work to
+ * actually start.
+ *
+ * ⚠ THIS IS NOT FIXTURE DRESSING — it is what stops the assertions being vacuous, and the first draft of
+ * these cases proved it the hard way. With no artifact on disk, `lintArtifact` returns
+ * `{ errors: ['Artifact not found'], passed: false }` BEFORE `runTracked` is reached, so `jobs.specs`
+ * stayed empty and an "untracked" assertion passed over an operation that was never attempted. Every
+ * case below therefore drives a real lint over a real artifact, and the ones that expect a refusal assert
+ * the refusal's own wording.
+ */
+async function mountRuntimeOverCompliantRun(root: string, runId: string, artifact: string, jobs?: JobsRegistryLike) {
+  const scaffold = new Context()
+  await scaffold.plugin(RecursiveRuntime, { repoRoot: root })
+  try {
+    await scaffold.recursive.initRun(runId)
+  } finally {
+    await scaffold.fiber.dispose()
+  }
+  writeCompliantRun(root, runId, [artifact])
+  return await mountRuntime(root, jobs)
+}
 
 /** A registry that records the spec and lets the test drive cancellation. */
 function fakeJobs() {
@@ -675,6 +742,305 @@ describe('T39 — a delegation round shows as a job', () => {
       // The round is recorded under the run it belongs to, as at every other site.
       expect(readJobRuns(root, 'run-1')[0].kind).toBe('delegation')
     } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * THE FROZEN-RUN DEFECT, AND THE THREE THINGS THAT FIX IT — asserted separately, because a single
+ * end-to-end case would let one half of the fix cover for another.
+ *
+ * WHAT A LIVE DIAGNOSTIC RUN RECORDED (four runs, the same way each time): `recursive_lock` failed
+ * TWICE with `background jobs unavailable: no job controller serves this agent (load
+ * @deepseek-ai/dsh-tool-jobs in its composition)`, and `recursive_lint` failed the same way. Locking is
+ * the only way to advance a run, so the chain FROZE AT PHASE 0 — twelve artifacts stayed `Status: DRAFT`,
+ * `.recursive/locks/` was never created, and `operations.jsonl` recorded no lock operation at all. The
+ * gates were all correct; they never ran, because a TRACKING call threw first.
+ *
+ * ⚠ THE THREE LAYERS, AND WHY EACH NEEDS ITS OWN CASE:
+ *   (1) `runTracked` protected only an ABSENT registry, so a registry that was mounted and REFUSED threw
+ *       out of `jobs.start` and killed the operation. Case 2/3 below drive exactly that refusal;
+ *   (2) no `runTracked` call carried `owner`, and the real registry checks only the GLOBAL controller
+ *       layer without one, where a preset's realm-scoped `tool-jobs` never registers. Cases 1 and 4
+ *       assert the owner reaches the spec — the only thing this plugin can control, since the registry's
+ *       serving decision belongs to the harness;
+ *   (3) the registry is resolved with ONE `ctx.get('jobs')` at apply time, so a registry mounted by a
+ *       later loader layer was never seen. Case 5 asserts the late attach.
+ *  Case 6 is the acceptance: THE LOCK ITSELF, through the runtime, with a refusing registry.
+ *
+ * ⚠ WHAT WOULD MAKE THESE PASS VACUOUSLY, stated so a green is not read as more than it is: a fake
+ * registry that never throws would make cases 2/3/6 pass without exercising the degradation at all —
+ * which is why each asserts the refusal reason it produced. A `mountRuntime` whose `ctx.recursive` were
+ * not the service under test would make case 6 pass over a runtime that never locked — which is why it
+ * asserts the LOCK FIELDS on disk, not only the returned status. And a compliant fixture that the linter
+ * refused for some other reason would make case 6 fail loudly rather than pass quietly, which is the
+ * safe direction; the sibling `lock-gate.spec.ts` proves the fixture's compliance independently, in its
+ * own suite, so this file's lock case cannot be green because the linter was never consulted.
+ */
+describe('THE FROZEN-RUN DEFECT — a TRACKING failure must never fail the WORK', () => {
+  /** A run whose artifacts meet the phase standard, so a lock can actually be reached. */
+  const RUN = 'job-run'
+  const ARTIFACT = '00-requirements.md'
+
+  /**
+   * A registry that REFUSES EVERY START with the harness's own wording — the closest a fake gets to
+   * "mounted, but no controller serves this agent". It records what it was asked for, so a case can show
+   * the plugin really tried before degrading, which is the difference between this and a registry that
+   * was simply never mounted.
+   */
+  function refusingJobs() {
+    const specs: JobSpecLike[] = []
+    const registry: JobsRegistryLike = {
+      start(spec) {
+        specs.push(spec)
+        throw new Error(REGISTRY_REFUSAL)
+      },
+    }
+    return { registry, specs }
+  }
+
+  /**
+   * A registry that models the harness's OWN owner rule: it ACCEPTS a spec that carries an owner it
+   * serves, and REFUSES one that carries none — which is exactly `LocalJobRegistry.start`
+   * (`resolveOwner(spec.owner)` then `servesOwner(owner)`: no owner means the GLOBAL layer is consulted,
+   * where a preset's realm-scoped `tool-jobs` controller never registers).
+   *
+   * ⚠ WHY THIS EXISTS AND A BLANKET REFUSAL WAS NOT ENOUGH. With a fake that throws unconditionally, the
+   * OWNER half of the fix contributes nothing to the acceptance case: the lock would still succeed with no
+   * owner at all, so the case would be green while proving only the degradation half. A mutation that
+   * reverted `owner: agentOwner(agent)` left that case passing — measured, not assumed. This fake makes
+   * the acceptance case depend on BOTH halves, so neither can be reverted without a failure.
+   */
+  function ownerServingJobs() {
+    const specs: JobSpecLike[] = []
+    const registry: JobsRegistryLike = {
+      start(spec) {
+        specs.push(spec)
+        // The same shape of lookup the real registry performs, and the same refusal when it finds nothing.
+        if (spec.owner === undefined) throw new Error(REGISTRY_REFUSAL)
+        spec.run({ id: 'lint-1', append: () => {}, updateProgress: () => {} })
+        return 'lint-1'
+      },
+    }
+    return { registry, specs }
+  }
+
+  /** A registry that accepts, so what a call hands it can be read back. */
+  function recordingJobs() {
+    const specs: JobSpecLike[] = []
+    const registry: JobsRegistryLike = {
+      start(spec) {
+        specs.push(spec)
+        // The real contract: `run` is invoked synchronously and its hooks are the handle.
+        spec.run({ id: 'lint-1', append: () => {}, updateProgress: () => {} })
+        return 'lint-1'
+      },
+    }
+    return { registry, specs }
+  }
+
+  it('THE OWNER IS PASSED: the lint call carries the calling agent id the registry needs', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'rm-jobs-owner-'))
+    const jobs = recordingJobs()
+    const ctx = await mountRuntimeOverCompliantRun(root, RUN, ARTIFACT, jobs.registry)
+    try {
+      await ctx.recursive.lintArtifact(RUN, ARTIFACT, { id: 'agent-7', session: { header: { cwd: root } } })
+      // ⚠ ANTI-VACUITY: the job must actually have been started. `lintArtifact` short-circuits on a
+      // missing artifact, so an empty `specs` here would mean nothing was ever requested.
+      expect(jobs.specs).toHaveLength(1)
+      // ⚠ THE ASSERTION THAT FAILS ON THE OLD CODE: with no owner the registry resolves `undefined` and
+      // consults only the global controller layer, which is why a mounted registry refused the job.
+      expect(jobs.specs[0].owner).toBe('agent-7')
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('NO OWNER IS INVENTED: an agent with no id leaves the field ABSENT, not undefined-but-present', async () => {
+    // The other half of `agentOwner`: passing a non-answer is worse than passing none, because the
+    // registry's `resolveOwner` throws `session "…" has no live agent` for an id it cannot resolve.
+    const root = mkdtempSync(join(tmpdir(), 'rm-jobs-noid-'))
+    const jobs = recordingJobs()
+    const ctx = await mountRuntimeOverCompliantRun(root, RUN, ARTIFACT, jobs.registry)
+    try {
+      await ctx.recursive.lintArtifact(RUN, ARTIFACT, { session: { header: { cwd: root } } })
+      expect(jobs.specs).toHaveLength(1)
+      expect('owner' in jobs.specs[0]).toBe(false)
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('A REFUSAL DEGRADES TO INLINE: the work RUNS, reports untracked, and records the reason', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'rm-jobs-refuse-'))
+    const jobs = refusingJobs()
+    const ctx = await mountRuntimeOverCompliantRun(root, RUN, ARTIFACT, jobs.registry)
+    try {
+      const result = await ctx.recursive.lintArtifact(RUN, ARTIFACT, { id: 'agent-7' })
+      // The plugin really tried, so this is about a REFUSAL rather than about a registry that was absent.
+      expect(jobs.specs).toHaveLength(1)
+      // ⚠ THE WORK RAN ANYWAY. `lintArtifact` reports a non-completed job through its own error path, so
+      // an operation that died with the refusal would carry the refusal in `errors` — it does not.
+      expect(result.artifact).toBe(ARTIFACT)
+      expect(result.runId).toBe(RUN)
+      expect(result.errors).not.toContain('Artifact not found')
+      expect(result.errors.join('\n')).not.toContain('no job controller serves this agent')
+      // ⚠ THE TRACKING WAS REPORTED, NOT SWALLOWED — as `untracked`, with the harness's own wording.
+      const recorded = readJobRuns(root, RUN)
+      expect(recorded).toHaveLength(1)
+      expect(recorded[0].kind).toBe('lint')
+      expect(recorded[0].tracked).toBe(false)
+      expect(recorded[0].status).toBe('completed')
+      expect(recorded[0].jobId).toBeUndefined()
+      expect(recorded[0].detail).toContain('no job controller serves this agent')
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('AN INLINE WORK FAILURE IS STILL A FAILURE OF THE WORK — only the TRACKING may degrade', async () => {
+    // ⚠ THE OVER-CATCH GUARD, asserted on the RUNNER rather than through a run fixture so the two facts
+    // cannot be confused: if the protected region were widened to cover the work itself, a broken lint
+    // would come back `completed`. A refusal to TRACK and a failure to WORK are two facts, and only the
+    // first one is allowed to be absorbed.
+    const result = await runTracked(
+      { start() { throw new Error(REGISTRY_REFUSAL) } },
+      { kind: 'lint', label: 'lint', run: async () => { throw new Error('the linter blew up') } },
+    )
+    expect(result.tracked).toBe(false)
+    expect(result.status).toBe('failed')
+    expect(result.error).toContain('the linter blew up')
+    // Both reasons survive: the work's in `error`, the tracking's in `detail`.
+    expect(result.detail).toContain('no job controller serves this agent')
+  })
+
+  it('THE WORKTREE CREATE ALSO CARRIES THE OWNER — the same call shape, on the other call site', async () => {
+    // The third `runTracked` call site, and the second kind of long operation the item names. A non-git
+    // directory makes the CREATE fail while leaving the JOB started, which is what lets the spec read the
+    // spec the registry received — and the failure path must be unchanged by the wrapping.
+    const root = mkdtempSync(join(tmpdir(), 'rm-jobs-worktree-'))
+    const jobs = refusingJobs()
+    const ctx = await mountRuntime(root, jobs.registry)
+    try {
+      await expect(ctx.recursive.initRun('wt-run', { id: 'agent-9' }, { createWorktree: true })).rejects.toThrow()
+      expect(jobs.specs).toHaveLength(1)
+      expect(jobs.specs[0].kind).toBe('worktree')
+      // The owner reached the worktree site too — this is the assertion that fails without it.
+      expect(jobs.specs[0].owner).toBe('agent-9')
+      // And the refusal to track did not replace the create's own outcome: the create still threw.
+      await expect(ctx.recursive.initRun('wt-run', { id: 'agent-9' }, { createWorktree: true })).rejects.toThrow()
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('⚠ THE LOCK STILL LOCKS: `recursive_lock` advances the run while the registry REFUSES every job', async () => {
+    // ⚠ THIS IS THE ACCEPTANCE, AND IT IS THE CASE THAT FAILS ON THE UNFIXED CODE. `lockArtifact` calls
+    // the linter, the linter is a tracked operation, and locking is the only way a run advances — so a
+    // throwing `jobs.start` here reproduces the live freeze exactly: no lock, no `.recursive/locks/`, and
+    // a run stuck at phase 0 with every artifact left DRAFT.
+    //
+    // ⚠ AND NOTHING ABOUT THE GATE IS RELAXED BY THIS FIX: the lock is still refused when the artifact is
+    // below standard, because the WORK (the lint verdict) still decides. What changed is only that a
+    // refusal to TRACK can no longer be mistaken for a refusal to LOCK.
+    const root = mkdtempSync(join(tmpdir(), 'rm-jobs-lock-'))
+    // ⚠ THE OWNER-SERVING FAKE, NOT THE BLANKET REFUSAL — see `ownerServingJobs`. The acceptance case
+    // must depend on BOTH halves of the fix: this registry accepts the lint carrying the owner (so the
+    // lock's lint gate passes and the artifact locks) and would refuse it without one (so removing the
+    // owner fails this case).
+    const jobs = ownerServingJobs()
+    const ctx = await mountRuntimeOverCompliantRun(root, RUN, ARTIFACT, jobs.registry)
+    const runDir = join(root, '.recursive', 'run', RUN)
+    try {
+      const result = await ctx.recursive.lockArtifact(RUN, ARTIFACT, false, { id: 'agent-7' })
+      // ⚠ THE JOB WAS ACCEPTED, so the lock's lint gate passed a TRACKED lint rather than degrading to an
+      // inline one. This is what makes the case about the owner as well as about the protection.
+      expect(jobs.specs.length, 'the lock path must really have tracked the lint').toBeGreaterThan(0)
+      expect(jobs.specs[0].owner, 'the tracked lint must carry the owner the registry serves').toBe('agent-7')
+      // The artifact advanced, and it advanced FOR REAL: status, hash, and the field on disk.
+      expect(result.status).toBe('LOCKED')
+      expect(result.lockHash).toMatch(/^[a-f0-9]{64}$/)
+      expect(getLockStatus(join(runDir, ARTIFACT))).toBe('LOCKED')
+      expect(readFileSync(join(runDir, ARTIFACT), 'utf8')).toContain('Status: `LOCKED`')
+      // And the lint was recorded as a TRACKED run, which is what a fixed live run would show.
+      const lintRunRecord = readJobRuns(root, RUN).find((record) => record.kind === 'lint')
+      expect(lintRunRecord).toBeDefined()
+      expect(lintRunRecord?.tracked).toBe(true)
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('⚠ A LOCK IS NOT BLOCKED BY A REGISTRY THAT REFUSES EVERY JOB — the live freeze, reproduced', async () => {
+    // ⚠ THE USER-FACING ACCEPTANCE, AND THE CASE THAT FAILS ON THE UNFIXED CODE. This is the live defect
+    // in one call: a registry that is MOUNTED (so the absent-registry degradation does not apply) and that
+    // REFUSES the job. Before the fix `jobs.start` sat outside the guard, so the refusal threw out of
+    // `runTracked`, out of `lintArtifact`, and out of `lockArtifact` — and since locking is the only way a
+    // run advances, EVERY live run froze at phase 0 with all twelve artifacts left DRAFT and
+    // `.recursive/locks/` never created.
+    //
+    // ⚠ WHY THIS IS A SEPARATE CASE FROM THE OWNER-SERVING ONE ABOVE, deliberately: that registry ACCEPTS
+    // the owner, so it proves the owner half and never reaches the degradation; this registry refuses
+    // whatever it is handed, so it proves the degradation half. Neither substitutes for the other.
+    const root = mkdtempSync(join(tmpdir(), 'rm-jobs-lock-refuse-'))
+    const jobs = refusingJobs()
+    const ctx = await mountRuntimeOverCompliantRun(root, RUN, ARTIFACT, jobs.registry)
+    const runDir = join(root, '.recursive', 'run', RUN)
+    try {
+      const result = await ctx.recursive.lockArtifact(RUN, ARTIFACT, false, { id: 'agent-7' })
+      // The registry really refused, and the call still succeeded: the work ran INLINE.
+      expect(jobs.specs.length, 'the lock path must really have attempted to track the lint').toBeGreaterThan(0)
+      expect(result.status).toBe('LOCKED')
+      expect(getLockStatus(join(runDir, ARTIFACT))).toBe('LOCKED')
+      // The degradation is on the record: untracked, with the registry's own reason rather than a silence.
+      const lintRunRecord = readJobRuns(root, RUN).find((record) => record.kind === 'lint')
+      expect(lintRunRecord).toBeDefined()
+      expect(lintRunRecord?.tracked).toBe(false)
+      expect(lintRunRecord?.detail).toContain('no job controller serves this agent')
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('⚠ THE STANDARD GATE STILL BITES: the lock is still REFUSED when the artifact is below standard', async () => {
+    // ⚠ THE OTHER HALF OF THE ACCEPTANCE, and the reason the case above is not evidence that the gate was
+    // weakened. The TWO facts are deliberately separated by ROOT, because the fixture that makes a lock
+    // reachable is run-LEVEL (the memory plane and an executable diff basis) and a missing run prerequisite
+    // would refuse the lock for a reason that has nothing to do with the artifact under test:
+    //   • root A holds a compliant run, so the lock SUCCEEDS and proves the tracking refusal did not block it;
+    //   • root B is the SCAFFOLD's own output — `recursive_init`'s templates, which are 19 FAILs under
+    //     `lintRun` — so the same call with the same refusing registry must still be REFUSED, by the
+    //     LINTER's verdict rather than by the registry.
+    const root = mkdtempSync(join(tmpdir(), 'rm-jobs-gate-'))
+    const scaffold = new Context()
+    await scaffold.plugin(RecursiveRuntime, { repoRoot: root })
+    try {
+      await scaffold.recursive.initRun(RUN)
+    } finally {
+      await scaffold.fiber.dispose()
+    }
+    const jobs = refusingJobs()
+    const ctx = await mountRuntime(root, jobs.registry)
+    try {
+      const message = await ctx.recursive.lockArtifact(RUN, ARTIFACT, false, { id: 'agent-7' }).then(
+        () => null, (error: Error) => error.message,
+      )
+      expect(message, 'a below-standard artifact must still be refused').not.toBeNull()
+      expect(message).toContain('does not meet the phase standard')
+      // And the refusal still came from the LINTER rather than from the registry: the tracked lint really
+      // ran and its FAIL list is what the message carries.
+      expect(jobs.specs.length, 'the lint gate must have consulted the linter').toBeGreaterThan(0)
+      expect(message).not.toContain('no job controller serves this agent')
+      expect(getLockStatus(join(root, '.recursive', 'run', RUN, ARTIFACT))).toBe('DRAFT')
+    } finally {
+      await ctx.fiber.dispose()
       rmSync(root, { recursive: true, force: true })
     }
   })

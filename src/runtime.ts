@@ -149,6 +149,43 @@ function parentDepthOf(parent: unknown): number {
   return typeof depth === 'number' && Number.isSafeInteger(depth) && depth > 0 ? depth : 0
 }
 
+/**
+ * What this runtime reads from the calling agent — the same structural seam the harness's
+ * `SubagentParentHandle` (`./delegation.ts`) uses, plus the `id` a native job needs as its owner.
+ *
+ * The live `Agent` satisfies it: `exec.agent`, which every tool in this plugin already passes, carries
+ * both `id` and `session.header.cwd`. Declaring it once keeps the runtime's agent parameter from being
+ * re-spelled at eight call sites, and lets `agentOwner` be the single place the owner is derived.
+ */
+export interface AgentLike {
+  readonly id?: string
+  readonly session?: { readonly header?: { readonly cwd?: string } }
+}
+
+/**
+ * The one field a native job needs from a caller: the owning session id.
+ *
+ * ⚠ ESTABLISHED FROM THE HARNESS'S OWN CONTRACT, not guessed. `JobSpec.owner` is a `SessionId`
+ * (`packages/jobs/jobs/src/types.ts`), and `LocalJobRegistry.start` resolves it with
+ * `agents.get(spec.owner)` (`packages/jobs/jobs-local/src/index.ts`) — the live AGENT REGISTRY lookup,
+ * so the value must be the id that registry is keyed by (`brandString<SessionId>` in
+ * `packages/core/agent/src/index.ts`). What the registry then asks is whether an attached job
+ * controller serves that owner's SCOPE (`servesOwner` → `scopeOf(owner.ctx)`), which is why an
+ * omitted owner checks only the GLOBAL layer: a preset's realm-scoped `tool-jobs` controller is not
+ * there, and `start` refuses with "no job controller serves this agent".
+ *
+ * ⚠ THE `id` IS OPTIONAL HERE BECAUSE THE LIVE OBJECT MAY NOT CARRY ONE, and passing a non-answer is
+ * worse than passing none: an id the registry cannot resolve throws "session "…" has no live agent".
+ * `undefined` reproduces exactly the pre-existing behaviour, so this helper can only ever improve a
+ * call, never make one worse. The other tools that hand an agent to a host service use the same
+ * shape — `tool-pwsh` passes `...(exec.agent ? { owner: exec.agent.id } : {})`, and `tool-subagent`
+ * passes `owner: parent.id`.
+ */
+function agentOwner(agent: AgentLike | null | undefined): string | undefined {
+  const id = agent?.id
+  return typeof id === 'string' && id !== '' ? id : undefined
+}
+
 /** How many of that run's decisions the status surface carries. */
 const GUARD_DECISION_SURFACE_LIMIT = 20
 
@@ -183,8 +220,11 @@ export class RecursiveRuntime extends Service {
   }
 
   /**
-   * T10: the native jobs registry, when the composition mounts one. */
-  private readonly jobs: JobsRegistryLike | null
+   * T10: the native jobs registry, when the composition mounts one.
+   *
+   * ⚠ NOT `readonly`, unlike a constructor-only seam would be: `attachJobs` below replaces it when the
+   * registry is mounted after this plugin applies (see that method for why that is not optional). */
+  private jobs: JobsRegistryLike | null
 
   /**
    * PHASE 0 — attach the goals service after construction.
@@ -251,6 +291,34 @@ export class RecursiveRuntime extends Service {
   private subagentsSeam: SubagentsRuntimeLike | null
   /** FU-19: the host's provider/model inventory, or null when no llm service is mounted. */
   private llmInventory: LlmInventoryLike | null = null
+
+  /**
+   * ⚠ THE JOBS SEAM, ATTACHABLE AFTER CONSTRUCTION — the THIRD time this plugin needed the same shape,
+   * and the first time it cost a frozen run.
+   *
+   * `apply` resolves the registry with ONE `ctx.get('jobs')` and passes it to the constructor, which is
+   * only a fast path: a composition that mounts the registry from a LATER loader layer leaves the
+   * runtime holding `null`, and nothing re-resolves it. `attachSubagents` and `attachLlmInventory` exist
+   * for exactly that reason, and `agentTeams` needed a `ctx.inject` row as well (FIX 1 in `src/index.ts`),
+   * so this follows the established shape rather than inventing one.
+   *
+   * ⚠ IDEMPOTENT, AND THE CONSTRUCTOR ARGUMENT WINS. "Last attach wins" would be wrong HERE, and the
+   * difference from the sibling seams is deliberate: `jobs` is the one seam that is ALSO a constructor
+   * argument, and `ctx.get` resolves services by INHERITANCE, so an unrelated registry visible in the
+   * context could silently replace the exact one a caller passed. The late attach therefore fills the
+   * seam ONLY when nothing has filled it — which is precisely the case that was broken (a registry
+   * mounted after this plugin applied, while the one-shot `ctx.get` had returned undefined) — and the
+   * guard is repeated per invocation, so a refresh of the injecting fiber cannot accumulate anything.
+   */
+  attachJobs(jobs: JobsRegistryLike | null): void {
+    if (this.jobs !== null) return
+    this.jobs = jobs
+  }
+
+  /** What the composition attached, for a caller that needs to report or assert it. */
+  attachedJobs(): JobsRegistryLike | null {
+    return this.jobs
+  }
 
   /**
    * ⚠ FU-9 — ATTACH THE SEAM WHEN THE SERVICE APPEARS, not only when this plugin happens to apply.
@@ -392,7 +460,7 @@ export class RecursiveRuntime extends Service {
     runId: string
     phase: string
     artifact: string
-    agent?: { session?: { header?: { cwd?: string } } } | null
+    agent?: AgentLike | null
     runAuditRound: (round: number, task: TeamTaskViewLike) => Promise<AuditRoundOutcome>
     blockedBy?: readonly string[]
     writeScopes?: readonly string[]
@@ -474,7 +542,7 @@ export class RecursiveRuntime extends Service {
    * `{ ok: false }` carrying {@link RUN_START_NOT_APPROVED}: callers must treat that as normal work,
    * never as a warning (see `armRunGoalIfApproved`, the one caller that arms).
    */
-  projectRunToGoal(agent: { session?: { header?: { cwd?: string } } } | null | undefined, runId: string, state: Parameters<typeof syncRunGoal>[3] = 'active', approved = false): SyncResult {
+  projectRunToGoal(agent: AgentLike | null | undefined, runId: string, state: Parameters<typeof syncRunGoal>[3] = 'active', approved = false): SyncResult {
     if (!agent) return { ok: false, reason: 'no agent' }
     return syncRunGoal(this.goalsService, agent, runId, state, approved)
   }
@@ -486,14 +554,14 @@ export class RecursiveRuntime extends Service {
    * goal, no write and no throw. Read on EVERY call rather than cached, because the approval can arrive
    * mid-session and a cached "not yet" would leave an approved run unable to arm until a plugin reload.
    */
-  armRunGoalIfApproved(agent: { session?: { header?: { cwd?: string } } } | null | undefined, root: string, runId: string, state: Parameters<typeof syncRunGoal>[3] = 'active'): SyncResult {
+  armRunGoalIfApproved(agent: AgentLike | null | undefined, root: string, runId: string, state: Parameters<typeof syncRunGoal>[3] = 'active'): SyncResult {
     if (!agent) return { ok: false, reason: 'no agent' }
     const approval = this.readRunStartApproval(root, runId)
     return syncRunGoal(this.goalsService, agent, runId, state, approval.approved)
   }
 
   /** T1: block the run's goal on a gate-block (durable + UI-visible). */
-  blockRunToGoal(agent: { session?: { header?: { cwd?: string } } } | null | undefined, runId: string, reason: { code: string; message: string }): SyncResult {
+  blockRunToGoal(agent: AgentLike | null | undefined, runId: string, reason: { code: string; message: string }): SyncResult {
     if (!agent) return { ok: false, reason: 'no agent' }
     return blockRunGoal(this.goalsService, agent, runId, reason)
   }
@@ -504,7 +572,7 @@ export class RecursiveRuntime extends Service {
    * `projectRunToGoal`: the phase-0 gate cannot be defaulted open. An approved run's approval outlives
    * a reopen because it is a durable line in the run's own Phase 0 artifact, not a held value.
    */
-  resumeRunToGoal(agent: { session?: { header?: { cwd?: string } } } | null | undefined, runId: string, approved = false): SyncResult {
+  resumeRunToGoal(agent: AgentLike | null | undefined, runId: string, approved = false): SyncResult {
     if (!agent) return { ok: false, reason: 'no agent' }
     return resumeRunGoal(this.goalsService, agent, runId, approved)
   }
@@ -514,7 +582,7 @@ export class RecursiveRuntime extends Service {
    * Resolves the session agent's canonical cwd -> workspace path via the
    * registry; NEVER scans list(). Returns null when unavailable (defer).
    */
-  async resolveWorkspaceRoot(agent?: { session?: { header?: { cwd?: string } } } | null): Promise<string | null> {
+  async resolveWorkspaceRoot(agent?: AgentLike | null): Promise<string | null> {
     return resolveControlPlaneRoot(agent, this.workspaceRegistry)
   }
 
@@ -522,7 +590,7 @@ export class RecursiveRuntime extends Service {
    * Run-scoped closeout receipt scaffold (R2), rooted under the given
    * workspace root. Refuses runIds outside the root (never crosses workspaces).
    */
-  async closeoutRun(root: string, runId: string, phase: string, agent?: { session?: { header?: { cwd?: string } } } | null) {
+  async closeoutRun(root: string, runId: string, phase: string, agent?: AgentLike | null) {
     const runDir = join(root, '.recursive', 'run', runId)
     const runRoot = join(root, '.recursive', 'run')
     // workspace-scoping guard: the run must be under this root
@@ -1037,6 +1105,17 @@ export class RecursiveRuntime extends Service {
             const awaited = await runTracked(this.jobs, {
               kind: 'delegation',
               label: 'delegation round ' + input.runId + ' ' + input.phase,
+              // ⚠ THE OWNER THE REGISTRY REQUIRES, taken from the EXACT LIVE PARENT AGENT this call already
+              // carries. `input.parent` is the handle `recursive_review`/`recursive_delegate` build from
+              // `exec.agent`, and `SubagentParentHandle.id` is documented as its session id, so no new
+              // plumbing is needed to answer the registry's `agents.get(spec.owner)` lookup.
+              //
+              // ⚠ AND THIS CALL SITE CANNOT ALWAYS ANSWER IT, which is stated rather than papered over:
+              // `parent` is OPTIONAL on this input (`runtime.ts` :731), and a caller that omits it — a
+              // workflow-engine or hand-built call — leaves the owner undefined, so the registry falls back
+              // to the pre-fix behaviour (global layer, refusal, degraded inline). Passing a plausible
+              // substitute would be worse: an id with no live agent throws from `resolveOwner` instead.
+              owner: agentOwner(input.parent),
               run: async ({ report, signal }) => {
                 report('awaiting the review round')
 
@@ -1329,7 +1408,7 @@ export class RecursiveRuntime extends Service {
    * session's cwd (or registry-canonicalized), NEVER process.cwd() — the host
    * checkout is not the run's workspace. Reads resolve under that root only.
    */
-  async resolveRootFor(agent?: { session?: { header?: { cwd?: string } } } | null): Promise<string | null> {
+  async resolveRootFor(agent?: AgentLike | null): Promise<string | null> {
     return resolveControlPlaneRoot(agent, this.workspaceRegistry, this.repoRoot)
   }
 
@@ -1358,7 +1437,7 @@ export class RecursiveRuntime extends Service {
     return null
   }
 
-  async status(runId?: string, agent?: { session?: { header?: { cwd?: string } } } | null): Promise<RecursiveStatusWithGuardDecisions | null> {
+  async status(runId?: string, agent?: AgentLike | null): Promise<RecursiveStatusWithGuardDecisions | null> {
     const root = await this.resolveRootFor(agent)
     if (!root) return null
     const resolved = resolveRunDir(root, runId)
@@ -1397,7 +1476,7 @@ export class RecursiveRuntime extends Service {
    * rules + instructions. Returns null when no active phase exists. This is the
    * canonical data source for the recursive_phase tool.
    */
-  async phaseRules(runId?: string, agent?: { session?: { header?: { cwd?: string } } } | null, files?: readonly string[]): Promise<(PhaseRules & { runId: string; phase: string; memory: string; memoryReason: string }) | null> {
+  async phaseRules(runId?: string, agent?: AgentLike | null, files?: readonly string[]): Promise<(PhaseRules & { runId: string; phase: string; memory: string; memoryReason: string }) | null> {
     const root = await this.resolveRootFor(agent)
     if (!root) return null
     const resolved = resolveRunDir(root, runId)
@@ -1491,7 +1570,7 @@ export class RecursiveRuntime extends Service {
    * branch defaults to `recursive/<runId>` and is cut from `opts.baseBranch`
    * (default: current HEAD branch of the root checkout).
    */
-  async initRun(runId: string, agent?: { session?: { header?: { cwd?: string } } } | null, opts?: { createWorktree?: boolean; baseBranch?: string }): Promise<{ runDir: string; runId: string; created: string[]; existing: string[]; worktree?: CreateWorktreeResult }> {
+  async initRun(runId: string, agent?: AgentLike | null, opts?: { createWorktree?: boolean; baseBranch?: string }): Promise<{ runDir: string; runId: string; created: string[]; existing: string[]; worktree?: CreateWorktreeResult }> {
     const root = await this.resolveRootFor(agent)
     if (!root) throw new Error('cannot resolve workspace control-plane root for this session')
     let scaffoldRoot = root
@@ -1507,6 +1586,10 @@ export class RecursiveRuntime extends Service {
       const created = await runTracked(this.jobs, {
         kind: 'worktree',
         label: 'worktree ' + runId,
+        // ⚠ THE OWNER, from the calling agent this method was already given (`exec.agent`, threaded by
+        // `recursive_init`). Without it the registry checks only the GLOBAL controller layer, where the
+        // preset's realm-scoped `tool-jobs` controller does not appear, and `start` refuses.
+        owner: agentOwner(agent),
         run: async ({ report, signal }) => {
           report('creating ' + runId)
           if (signal.aborted) throw new Error('worktree create cancelled before it started')
@@ -1598,7 +1681,7 @@ export class RecursiveRuntime extends Service {
    * the session — and so a reader of the run can answer "was this run started, and by what?" without the
    * transcript. `answer` is validated against the gate's own labels before it reaches here.
    */
-  approveRunStart(root: string, runId: string, agent?: { session?: { header?: { cwd?: string } } } | null, answer: string = RUN_START_APPROVE): { ok: boolean; reason: string; path: string; replaced: boolean; goal: SyncResult } {
+  approveRunStart(root: string, runId: string, agent?: AgentLike | null, answer: string = RUN_START_APPROVE): { ok: boolean; reason: string; path: string; replaced: boolean; goal: SyncResult } {
     if (root.trim() === '' || runId.trim() === '') {
       return { ok: false, reason: 'a run start needs a workspace root and a run id', path: '', replaced: false, goal: { ok: false, reason: 'no run to start' } }
     }
@@ -1653,7 +1736,7 @@ export class RecursiveRuntime extends Service {
    * Lock a DRAFT artifact (or reopen a LOCKED one). Validates prerequisites;
    * writes Status/LockedAt/LockHash + receipt. Returns the lock result.
    */
-  async lockArtifact(runId: string, artifact: string, reopen = false, agent?: { session?: { header?: { cwd?: string } } } | null): Promise<LockArtifactResult> {
+  async lockArtifact(runId: string, artifact: string, reopen = false, agent?: AgentLike | null): Promise<LockArtifactResult> {
     const root = await this.resolveRootFor(agent)
     if (!root) throw new Error('cannot resolve workspace control-plane root for this session')
     const runDir = join(root, '.recursive', 'run', runId)
@@ -1749,7 +1832,7 @@ export class RecursiveRuntime extends Service {
   }
 
   /** Reopen a LOCKED artifact to DRAFT (delete LockedAt/LockHash, invalidate downstream receipts). */
-  private reopenArtifact(root: string, runDir: string, runId: string, artifact: string, artifactPath: string, agent?: { session?: { header?: { cwd?: string } } } | null): LockArtifactResult {
+  private reopenArtifact(root: string, runDir: string, runId: string, artifact: string, artifactPath: string, agent?: AgentLike | null): LockArtifactResult {
     if (!existsSync(artifactPath)) throw new Error('Artifact not found: ' + artifact)
     let content = readFileSync(artifactPath, 'utf8')
 
@@ -1822,7 +1905,7 @@ export class RecursiveRuntime extends Service {
    * WARN lines, `passed` = no FAIL (WARN-only passes, matching the canonical
    * non-strict verdict).
    */
-  async lintArtifact(runId: string, artifact?: string, agent?: { session?: { header?: { cwd?: string } } } | null): Promise<LintArtifactResult> {
+  async lintArtifact(runId: string, artifact?: string, agent?: AgentLike | null): Promise<LintArtifactResult> {
     const root = await this.resolveRootFor(agent)
     if (!root) throw new Error('cannot resolve workspace control-plane root for this session')
     const runDir = join(root, '.recursive', 'run', runId)
@@ -1835,6 +1918,14 @@ export class RecursiveRuntime extends Service {
       kind: 'lint',
       // The label is what the board shows, so it names the run AND the artifact.
       label: 'lint ' + runId + ' ' + target,
+      // ⚠ THE OWNER — AND THIS IS THE ONE THAT FROZE EVERY LIVE RUN. `lockArtifact` calls this method
+      // (`runtime.ts` :1724) and a lock is the only way a run advances, so a refusal here stopped the
+      // chain at phase 0: all twelve artifacts stayed DRAFT, `.recursive/locks/` was never created, and
+      // `operations.jsonl` recorded no lock operation at all. The harness's refusal was
+      // "background jobs unavailable: no job controller serves this agent (load
+      // @deepseek-ai/dsh-tool-jobs in its composition)" — from a registry that WAS mounted, because the
+      // spec carried no owner and only the global layer was consulted.
+      owner: agentOwner(agent),
       // NO TIMEOUT HERE, deliberately: a deadline would silently convert a slow-but-working
       // lint into a failure, which is a policy change rather than visibility. The job gives
       // the board a running entry and a kill switch, which is what the item asks for;
@@ -1869,7 +1960,7 @@ export class RecursiveRuntime extends Service {
   }
 
   /** Legacy structural fallback (kept for type reference; lintArtifact uses lintRun). */
-  async lintArtifactStructuralFallback(runId: string, artifact: string, agent?: { session?: { header?: { cwd?: string } } } | null): Promise<LintArtifactResult> {
+  async lintArtifactStructuralFallback(runId: string, artifact: string, agent?: AgentLike | null): Promise<LintArtifactResult> {
     const root = await this.resolveRootFor(agent)
     if (!root) throw new Error('cannot resolve workspace control-plane root for this session')
     const runDir = join(root, '.recursive', 'run', runId)

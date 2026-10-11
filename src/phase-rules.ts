@@ -358,6 +358,122 @@ export function getArtifactRequiredSections(fileName: string, workflowProfile: s
   return headings
 }
 
+/* -------------------------------------------------------------------------- */
+/* THE NON-OBVIOUS SECTION FORMATS, AS RULES THE AGENT IS TOLD                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * ⚠ WHY THIS EXISTS, MEASURED FROM A LIVE RUN'S OWN TRANSCRIPT. An agent spent a very large number of
+ * turns reverse-engineering the entry-row format from the linter's error messages — *"the lint logic is a
+ * black box"*, *"unless the parser regex is GREEDY"*, *"maybe the parser doesn't care about backticks"* —
+ * and closed with a workaround it called a hack: *"ensure EVERY inventory entry contains at least one
+ * backtick pair IN THE QUOTE"*. It also tested its entries one by one for the substring `with`, on the
+ * theory that the parser keyed on it. None of that was necessary: the format is decided by three short
+ * functions in `ts-lint.ts` (`parse_source_requirement_inventory_entries`, `parse_requirement_mapping_entries`,
+ * `parse_requirement_completion_entries` — a `- ` bullet, pipe-separated fields, the requirement id ALONE in
+ * the first field) and by `trimMdValue`. Nothing told the agent, so it inferred rules from failures. **A rule
+ * an agent has to infer from failures is a rule the plugin has not written down.** This table is it written
+ * down, in the payload the agent reads at phase entry.
+ *
+ * ⚠ THE PARSER'S REAL EDGE, STATED PLAINLY RATHER THAN DRESSED UP AS INTENT. `trimMdValue` unwraps ONE
+ * matching quote pair and REFUSES when the inner text contains that same character. So a row written the
+ * way the canonical reference shows it — the WHOLE row inside backticks, ``- `R1 | Disposition: ...` `` —
+ * parses only while NO field value contains a backtick. The moment a `Source Quote` (or a path) is itself
+ * backticked, the wrapper is not unwrapped, the first pipe field reads ``` `R1 ```, `REQUIREMENT_ID_RE`
+ * rejects it, and the row is DROPPED SILENTLY: no diagnostic, just an "is missing explicit requirement IDs"
+ * failure naming ids the agent can see it wrote. That is a PARSER BUG — reported, deliberately NOT fixed
+ * here and NOT described as intended anywhere — so the `rule` lines below give the writer the safe shape
+ * (a PLAIN bullet, never a backtick-wrapped row) rather than teaching the accident as the format.
+ *
+ * ⚠ ONE LINE OF RULE PLUS ONE PASSING EXAMPLE PER SECTION, and NOTHING for the sections whose format is
+ * obvious from their heading (`## Evidence`, `## Gaps Found`, …). The table is worth having because it is
+ * short enough to be read while writing: a wall of prose is the failure mode this project keeps hitting.
+ * The failure MESSAGES in `ts-lint.ts` carry the same shape for a writer who is already reading a failure.
+ *
+ * ⚠ AND IT IS NOT A SECOND SECTION LIST. `getArtifactRequiredSections` above stays byte-parity with the
+ * canonical linter (`tests/phase-rules.parity.spec.ts` pins all twelve lists); this table rides BESIDE it,
+ * keyed by artifact, and only ever describes sections that list ALREADY requires. A rule for a section the
+ * artifact does not require would be unreachable — `tests/section-format-guidance.spec.ts` refuses it.
+ */
+export interface SectionFormatRule {
+  /** The `## Section` this rule describes — one of the artifact's own required sections. */
+  section: string
+  /** ONE line: what the section must contain, in the shape the linter accepts. */
+  rule: string
+  /** ONE passing line, copy-pasteable, in the shape the linter accepts. */
+  example: string
+}
+
+/** The trailing half of every entry-row rule: the shape that must NOT be used, and why it is said here. */
+const ROW_SHAPE_WARNING = ' Keep the row a PLAIN bullet: a row wrapped in backticks is dropped silently when any field value contains a backtick.'
+
+/** `## Source Requirement Inventory` — phase 1, current profile only. */
+const INVENTORY_FORMAT: SectionFormatRule = {
+  section: 'Source Requirement Inventory',
+  rule: 'one bullet per requirement id: the id ALONE as the first `|` field (R1, R2, ... or the zero-padded SRC-001),'
+    + ' then `Disposition: in-scope|out-of-scope|constraint|quality-gate`, `Source Quote: <text that appears in 00-requirements.md>`'
+    + ' and `Summary: <one line>`. EVERY `R<n>` defined in 00-requirements.md needs its own row.' + ROW_SHAPE_WARNING,
+  example: '- R1 | Disposition: in-scope | Source Quote: the lock must refuse an out-of-order artifact | Summary: an artifact with an unlocked prerequisite is refused',
+}
+
+/** `## Requirement Mapping` — phase 2, current profile only. */
+const MAPPING_FORMAT: SectionFormatRule = {
+  section: 'Requirement Mapping',
+  rule: 'one bullet per Source Requirement Inventory entry: the id ALONE first, then `Source Quote:` copied EXACTLY from that'
+    + ' inventory row, `Coverage: direct|merged|indirect|deferred|out-of-scope|blocked`, and (for direct/merged/indirect)'
+    + ' `Implementation Surface`, `Verification Surface` and `QA Surface`.' + ROW_SHAPE_WARNING,
+  example: '- R1 | Source Quote: the lock must refuse an out-of-order artifact | Coverage: direct | Implementation Surface: src/guard.ts | Verification Surface: tests/guard.spec.ts | QA Surface: re-run the refusal by hand',
+}
+
+/** `## Requirement Completion Status` — phase 2: PLANNING dispositions. */
+const REQUIREMENT_STATUS_PLAN_FORMAT: SectionFormatRule = {
+  section: 'Requirement Completion Status',
+  rule: 'phase 2 uses PLANNING statuses only: one bullet per in-scope id, the id ALONE first, then'
+    + ' `Status: planned|planned-via-merge|planned-indirectly|deferred|out-of-scope|blocked|superseded by approved addendum`;'
+    + ' a planned one needs `Implementation Surface`, `Verification Surface` and `QA Surface`, and a merge also needs `Rationale`.'
+    + ROW_SHAPE_WARNING,
+  example: '- R1 | Status: planned | Implementation Surface: src/guard.ts | Verification Surface: tests/guard.spec.ts | QA Surface: re-run the refusal by hand',
+}
+
+/** `## Requirement Completion Status` — the audited phases: CLOSEOUT dispositions. */
+const REQUIREMENT_STATUS_FORMAT: SectionFormatRule = {
+  section: 'Requirement Completion Status',
+  rule: 'one bullet per in-scope requirement id, the id ALONE first, then'
+    + ' `Status: implemented|verified|deferred|out-of-scope|blocked|superseded by approved addendum` and ONLY that status\'s own fields'
+    + ' - implemented: `Changed Files` + `Implementation Evidence`; verified: those plus `Verification Evidence`;'
+    + ' deferred: `Rationale` + `Deferred By`; out-of-scope: `Rationale` + `Scope Decision`; blocked: `Rationale` + `Blocking Evidence`;'
+    + ' superseded: `Addendum`.' + ROW_SHAPE_WARNING,
+  example: '- R1 | Status: verified | Changed Files: src/guard.ts | Implementation Evidence: src/guard.ts | Verification Evidence: tests/guard.spec.ts',
+}
+
+/**
+ * The non-obvious formats, per artifact. Keyed by the SAME artifact names `SECTION_MAP` uses, and only for
+ * the sections whose row shape a writer cannot guess from the heading.
+ */
+export const SECTION_FORMAT_RULES: Record<string, readonly SectionFormatRule[]> = {
+  '01-as-is.md': [INVENTORY_FORMAT, REQUIREMENT_STATUS_FORMAT],
+  '01.5-root-cause.md': [REQUIREMENT_STATUS_FORMAT],
+  '02-to-be-plan.md': [MAPPING_FORMAT, REQUIREMENT_STATUS_PLAN_FORMAT],
+  '03-implementation-summary.md': [REQUIREMENT_STATUS_FORMAT],
+  '03.5-code-review.md': [REQUIREMENT_STATUS_FORMAT],
+  '04-test-summary.md': [REQUIREMENT_STATUS_FORMAT],
+  '06-decisions-update.md': [REQUIREMENT_STATUS_FORMAT],
+  '07-state-update.md': [REQUIREMENT_STATUS_FORMAT],
+  '08-memory-impact.md': [REQUIREMENT_STATUS_FORMAT],
+}
+
+/**
+ * The format rules for an artifact, or `[]` when every section's format is obvious.
+ *
+ * ⚠ SCOPED TO THE CURRENT PROFILE FOR THE SAME REASON THE LINT IS: `lintSourceRequirementInventory` and
+ * `lintRequirementMapping` return `[]` unless the run declares `recursive-mode-audit-v2`, so telling a
+ * legacy run's author about v2 row shapes would describe a check that is not running.
+ */
+export function sectionFormatRulesFor(fileName: string, workflowProfile: string = CURRENT_WORKFLOW_PROFILE): SectionFormatRule[] {
+  if (workflowProfile !== CURRENT_WORKFLOW_PROFILE) return []
+  return [...(SECTION_FORMAT_RULES[fileName] ?? [])]
+}
+
 /**
  * LIVE BUG 6 (0.2.1): dedup gate for the agent/pre-step lint-rules reminder.
  * Keyed by (root, runId, phase) so each new run or phase transition gets its own
@@ -375,6 +491,29 @@ export class ReminderOnceGate {
     return true
   }
 }
+
+/**
+ * FU-11 — THE GIT PRECONDITION, IN THE WORDS A CALLER READS AT PHASE ENTRY.
+ *
+ * A non-git workspace is a state this plugin MEETS rather than a hypothetical: a live diagnostic run
+ * executed in one, and it discovered the requirement only at the first lock, after the phase-0 docs
+ * had been authored — because the two things that need git (`00-worktree.md`'s executable diff basis
+ * and the lock hash) are both checked at LOCK time, by the linter, at the very end of the refusal
+ * chain. The requirement itself is NOT relaxed here: the lock hash is the tamper mechanism and a
+ * recorded baseline that cannot be resolved against a real repository verifies nothing, so a lock
+ * without git would be a receipt for a check that never ran. What is fixed is WHEN the caller is
+ * told: at phase entry, before the artifact it will not be able to lock is written.
+ *
+ * ⚠ IT IS A STRING, NOT A BOOLEAN, and the distinction is deliberate: this structure is spread
+ * straight into the `recursive_phase` payload, so the field has to READ as the rule. `null` means the
+ * checkout is a git repository (or the root could not be resolved), so every git-dependent gate can
+ * do its work; a string means it cannot, and says what to do about it.
+ */
+export const GIT_REQUIRED_NOTICE = 'This workspace is not a git repository, and git is REQUIRED for this workflow.'
+  + ' Every artifact lock is refused until it is one: `recursive_lock` validates the phase standard by linting the run,'
+  + ' which resolves `00-worktree.md`\'s recorded diff basis against live git, and the lock hash itself is the tamper'
+  + ' mechanism those git facts anchor. Run `git init` and make at least one commit in the workspace root before'
+  + ' authoring phase 0 — otherwise the artifacts can be written but none can be locked, and the run cannot advance.'
 
 /**
  * Structured, single-source-of-truth rules for one phase (refined LIVE BUG 6
@@ -396,6 +535,33 @@ export interface PhaseRules {
    * same source: a rule that lives here is a rule the agent is actually told, in one place.
    */
   memoryWrite: Phase8MemoryWriteRule | null
+  /**
+   * FU-11 — the git precondition as a sentence, or null when git is available.
+   *
+   * ⚠ SET BY `runtime.phaseRules` FROM LIVE GIT FACTS, not by `phaseRulesFor` below: the rules
+   * function is pure and profile-derived, while this is a fact about the CHECKOUT the run is executing
+   * in — the same split `memoryWrite` (a property of the phase) and `memory` (a property of the run)
+   * already follow in that payload. `null` here means "not measured", so a bare `phaseRulesFor` caller
+   * reads exactly what it read before this field existed.
+   */
+  gitRequired: string | null
+  /**
+   * The NON-OBVIOUS section formats for this artifact: one rule plus one passing example per section whose
+   * row shape cannot be guessed from its heading (see {@link SectionFormatRule}). `[]` when every section's
+   * format is obvious, or when the profile is not `recursive-mode-audit-v2`.
+   *
+   * ⚠ WHY IT IS ON THIS STRUCTURE, not a table beside it: `runtime.phaseRules` spreads this object straight
+   * into the `recursive_phase` payload and the pre-step reminder is built from the same source — so a rule
+   * that lives here is a rule the agent is actually TOLD, in one place. That is the same reason
+   * `memoryWrite` is a field here rather than a lookup at the call site.
+   *
+   * ⚠ AND WHY IT IS OPTIONAL WHILE `memoryWrite`/`gitRequired` ARE NOT — a limitation, stated rather than
+   * hidden: `PhaseRules` is also built BY HAND in `tests/skill-registration.spec.ts`, whose fixture is
+   * outside this change's ownership, so a required member would make `pnpm typecheck` fail in a file this
+   * work must not edit. `phaseRulesFor` ALWAYS sets it, so no `recursive_phase` payload, no reminder and no
+   * skill registration ever sees it absent — asserted in `tests/section-format-guidance.spec.ts`.
+   */
+  sectionFormats?: SectionFormatRule[]
 }
 
 export function phaseRulesFor(fileName: string, workflowProfile: string = CURRENT_WORKFLOW_PROFILE): PhaseRules {
@@ -407,6 +573,9 @@ export function phaseRulesFor(fileName: string, workflowProfile: string = CURREN
     tdd: fileName === '03-implementation-summary.md',
     qa: fileName === '05-manual-qa.md',
     memoryWrite: phase8MemoryWriteRuleFor(fileName),
+    // Not knowable here (see the field's note): the runtime fills it from the checkout's own facts.
+    gitRequired: null,
+    sectionFormats: sectionFormatRulesFor(fileName, workflowProfile),
   }
 }
 
@@ -418,6 +587,13 @@ export function phaseRulesFor(fileName: string, workflowProfile: string = CURREN
  */
 export function phaseLintRulesMessage(fileName: string, workflowProfile: string = CURRENT_WORKFLOW_PROFILE): string {
   const rules = phaseRulesFor(fileName, workflowProfile)
+  // ⚠ THE REMINDER NAMES THE ENTRY-ROW SECTIONS AND THE ONE THING THAT DECIDES THEIR PARSE, and does not
+  // repeat the full format: the paragraphs and the passing example live in the `recursive_phase` payload
+  // (`sectionFormats`), which is the call the workflow already requires before authoring. This mirrors the
+  // phase-8 memory line below, which carries `summary` while the payload carries `instruction` — one rule,
+  // two depths, no second copy of the prose. Both surfaces exist because the reminder is injected
+  // AUTOMATICALLY at phase entry while the payload answers the agent that asks.
+  const formats = rules.sectionFormats ?? []
   const lines = [
     '<system-reminder>',
     'Recursive-mode phase lint rules for THIS phase (' + fileName + '):',
@@ -426,6 +602,9 @@ export function phaseLintRulesMessage(fileName: string, workflowProfile: string 
     'Audited phases: end with Audit: PASS before setting Coverage/Approval PASS; record Audit Context and Audit Verdict.',
     'TDD (phase 3): declare TDD Mode: strict|pragmatic; strict requires RED + GREEN evidence paths.',
     'QA (phase 5): declare QA Execution Mode: human|agent-operated|hybrid; human/hybrid need user sign-off.',
+    ...(formats.length === 0 ? [] : ['Entry-row sections (one `- ` bullet per requirement id, the id ALONE in the first `|` field; exact '
+      + 'format + a passing example for each are in the recursive_phase payload under `sectionFormats`): '
+      + formats.map((format) => '## ' + format.section).join(' | ')]),
     // T40 — the phase-8 memory write is named HERE, once, where every other phase gate is named.
     // Additive on purpose: the message is only ever asserted with `toContain` (r5-parity.spec.ts),
     // so a new phase's obligation cannot be mistaken for a regression in an existing one.

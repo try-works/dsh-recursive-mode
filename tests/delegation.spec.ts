@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { delegate, delegationError, reviewOutputSchema, defaultReviewToolFilter, validateReferences, writeActionRecord, evaluateDelegationResult } from '../src/delegation.ts'
+import { delegate, delegateContinuable, delegationError, reviewOutputSchema, defaultReviewToolFilter, validateReferences, writeActionRecord, evaluateDelegationResult } from '../src/delegation.ts'
 
 function makeRun(root: string, runId: string) {
   const runDir = join(root, '.recursive', 'run', runId)
@@ -84,3 +84,83 @@ describe('delegation.ts — plugin-driven delegation + validation (R4/R6/R7)', (
     expect(evaluateDelegationResult({ success: true, stopReason: 'completed' }).accepted).toBe(true)
   })
 })
+
+/**
+ * ⚠ FU-20 — WHAT THE CHILD ACTUALLY RUNS ON, REPORTED BY THE ONE PLACE THAT CAN KNOW.
+ *
+ * `delegateContinuable` is the only code in this plugin holding BOTH the live parent Agent and the model the
+ * child was asked for. That pair is exactly what an independence claim needs, and without it the record can only
+ * say "delegated" — which is what the live run said while the authoring agent reviewed its own work.
+ *
+ * ⚠ AND THE POINT IS WHAT IT REFUSES TO CLAIM. A child that inherits the session's model is a real, separate
+ * agent — genuinely independent by CONTEXT — but it is NOT a second opinion from a different model. The owner
+ * wants the session model as the default, so this case is normal, not a failure; what would be a failure is
+ * describing it as independent-of-model, and that is what these assertions forbid.
+ */
+describe('FU-20 — a delegated child reports the route it actually took', () => {
+  const sessionParent = (provider: string, model: string) => ({
+    id: 'parent-1',
+    session: { requestHeader: () => ({ config: { provider, model } }) },
+  })
+
+  /** A continuable seam that never settles, so the outcome is a PARK (the cheapest full round trip). */
+  async function run(input: {
+    parent: unknown
+    agentOptions?: { model?: string }
+  }): Promise<ReturnType<typeof delegateContinuable> extends Promise<infer T> ? T : never> {
+    const subagents = {
+      startContinuable: async () => ({ childId: 'c1', messageId: 'm1' }),
+      followup: async () => ({ messageId: 'm2' }),
+    }
+    return await delegateContinuable({
+      subagents: subagents as never,
+      provider: 'spawn',
+      label: 'd1/c1',
+      prompt: 'review this',
+      parent: input.parent as never,
+      awaitRoundResult: async () => null,
+      ...(input.agentOptions === undefined ? {} : { agentOptions: input.agentOptions }),
+    })
+  }
+
+  it('NO model configured: names the session’s model and says the independence is not of model', async () => {
+    const out = await run({ parent: sessionParent('deepseek-official', 'deepseek-flash') })
+    expect(out.childRoute).toContain('deepseek-official/deepseek-flash')
+    expect(out.childRoute).toContain('NOT by model')
+    expect(out.sessionModel?.available).toBe(true)
+    expect(out.reason, 'the parked round carries the route too, so a reader of the park knows what it parked').toContain('deepseek-flash')
+  })
+
+  it('a model DIFFERENT from the session’s: says so, and on what basis', async () => {
+    const out = await run({
+      parent: sessionParent('deepseek-official', 'deepseek-flash'),
+      agentOptions: { model: 'deepseek-pro' },
+    })
+    expect(out.childRoute).toContain('deepseek-pro')
+    expect(out.childRoute).toContain('DIFFERENT model')
+  })
+
+  it('a model the SAME as the session’s: refuses to call it a second opinion', async () => {
+    const out = await run({
+      parent: sessionParent('deepseek-official', 'deepseek-flash'),
+      agentOptions: { model: 'deepseek-flash' },
+    })
+    expect(out.childRoute).toContain('SAME MODEL')
+    expect(out.childRoute).toContain('NOT by model')
+  })
+
+  it('⚠ an UNREADABLE session model is reported as unknown — neither answer is assumed', async () => {
+    const out = await run({ parent: {}, agentOptions: { model: 'deepseek-pro' } })
+    expect(out.sessionModel?.available).toBe(false)
+    expect(out.childRoute).toContain('UNKNOWN')
+    expect(out.childRoute, 'the difference is explicitly NOT claimed').toContain('is not claimed')
+  })
+
+  it('and the parked reason never claims a review the delegation did not buy', async () => {
+    const out = await run({ parent: {} })
+    expect(out.parked).toBe(true)
+    expect(out.reason).toContain('PARKED, not failed')
+    expect(out.childRoute).toContain('no model was configured')
+  })
+})
+

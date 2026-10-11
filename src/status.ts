@@ -19,6 +19,10 @@ export type { ArtifactState, PhasePosition }
  * on an otherwise-intact artifact is a fixable omission.
  */
 export function phasePosition(state: ArtifactState): PhasePosition {
+  // SKIPPED first, for a reason of the same kind as `tampered`'s precedence below: a phase that is
+  // settled-without-a-lock is NAMED as such whatever else is true of the file. A present skip record
+  // has no lock fields and no passing gates, so without this branch it would be reported as
+  // `blocked` — i.e. the run would look stuck on the very phase it deliberately decided not to do.
   if (state.status === 'SKIPPED') return 'skipped'
   if (!state.exists) return 'absent'
   if (state.status === 'LOCKED') {
@@ -43,19 +47,35 @@ export const RUN_ARTIFACT_SEQUENCE = [
   '08-memory-impact.md',
 ]
 
+/**
+ * The run's twelve phases.
+ *
+ * ⚠ `requiredForCompletion` IS THE WORK DECLARATION, and it is deliberately not called `optional`
+ * any more. It is read in exactly two places, and both are claims about WORK, not about the chain:
+ *   - `foldRun` reports a phase this flag excludes, whose artifact was never created, as SKIPPED
+ *     (the oracle's own words: "not needed") rather than PENDING;
+ *   - `snapshot.runStateOf` requires every phase this flag includes to be SETTLED — LOCKED, or
+ *     deliberately SKIPPED in the artifact — before the run is 'complete'.
+ *
+ * The CHAIN declaration is a different set with a different name and a different membership:
+ * `MAY_BE_ABSENT_PHASES` in `src/lock.ts` (7 members), which says only that an artifact that was
+ * NEVER CREATED does not stop the legal-phase selector. Neither flag means "may be skipped by
+ * deleting the artifact" — the fold refuses a removal, and the legitimate skip is recorded IN the
+ * artifact (`src/skip.ts`).
+ */
 export const PHASES: PhaseDef[] = [
-  { key: '00R', label: 'Phase 0 (Requirements)', file: '00-requirements.md', optional: false, phaseName: '0 (Requirements)' },
-  { key: '00W', label: 'Phase 0 (Worktree)', file: '00-worktree.md', optional: false, phaseName: '0 (Worktree)' },
-  { key: '01', label: 'Phase 1 (AS-IS)', file: '01-as-is.md', optional: false, phaseName: '1 (AS-IS)' },
-  { key: '01.5', label: 'Phase 1.5 (Root Cause)', file: '01.5-root-cause.md', optional: true, phaseName: '1.5 (Root Cause)' },
-  { key: '02', label: 'Phase 2 (TO-BE Plan)', file: '02-to-be-plan.md', optional: false, phaseName: '2 (TO-BE Plan)' },
-  { key: '03', label: 'Phase 3 (Implementation)', file: '03-implementation-summary.md', optional: false, phaseName: '3 (Implementation)' },
-  { key: '03.5', label: 'Phase 3.5 (Code Review)', file: '03.5-code-review.md', optional: true, phaseName: '3.5 (Code Review)' },
-  { key: '04', label: 'Phase 4 (Test Summary)', file: '04-test-summary.md', optional: false, phaseName: '4 (Test Summary)' },
-  { key: '05', label: 'Phase 5 (Manual QA)', file: '05-manual-qa.md', optional: false, phaseName: '5 (Manual QA)' },
-  { key: '06', label: 'Phase 6 (Decisions)', file: '06-decisions-update.md', optional: false, phaseName: '6 (Decisions Update)' },
-  { key: '07', label: 'Phase 7 (State)', file: '07-state-update.md', optional: false, phaseName: '7 (State Update)' },
-  { key: '08', label: 'Phase 8 (Memory)', file: '08-memory-impact.md', optional: false, phaseName: '8 (Memory Impact)' },
+  { key: '00R', label: 'Phase 0 (Requirements)', file: '00-requirements.md', requiredForCompletion: true, phaseName: '0 (Requirements)' },
+  { key: '00W', label: 'Phase 0 (Worktree)', file: '00-worktree.md', requiredForCompletion: true, phaseName: '0 (Worktree)' },
+  { key: '01', label: 'Phase 1 (AS-IS)', file: '01-as-is.md', requiredForCompletion: true, phaseName: '1 (AS-IS)' },
+  { key: '01.5', label: 'Phase 1.5 (Root Cause)', file: '01.5-root-cause.md', requiredForCompletion: false, phaseName: '1.5 (Root Cause)' },
+  { key: '02', label: 'Phase 2 (TO-BE Plan)', file: '02-to-be-plan.md', requiredForCompletion: true, phaseName: '2 (TO-BE Plan)' },
+  { key: '03', label: 'Phase 3 (Implementation)', file: '03-implementation-summary.md', requiredForCompletion: true, phaseName: '3 (Implementation)' },
+  { key: '03.5', label: 'Phase 3.5 (Code Review)', file: '03.5-code-review.md', requiredForCompletion: false, phaseName: '3.5 (Code Review)' },
+  { key: '04', label: 'Phase 4 (Test Summary)', file: '04-test-summary.md', requiredForCompletion: true, phaseName: '4 (Test Summary)' },
+  { key: '05', label: 'Phase 5 (Manual QA)', file: '05-manual-qa.md', requiredForCompletion: true, phaseName: '5 (Manual QA)' },
+  { key: '06', label: 'Phase 6 (Decisions)', file: '06-decisions-update.md', requiredForCompletion: true, phaseName: '6 (Decisions Update)' },
+  { key: '07', label: 'Phase 7 (State)', file: '07-state-update.md', requiredForCompletion: true, phaseName: '7 (State Update)' },
+  { key: '08', label: 'Phase 8 (Memory)', file: '08-memory-impact.md', requiredForCompletion: true, phaseName: '8 (Memory Impact)' },
 ]
 
 const LOCK_HASH_LINE_RE = /^[ \t]*LockHash:.*(?:\n|$)/gm
@@ -342,9 +362,19 @@ export function foldRun(runDir: string, runId: string): RecursiveStatusResult {
     for (const key of Object.keys(frame.stamps)) {
       if (frame.stamps[key] !== null && stamps[key] === null) {
         const file = PHASES.find((p) => p.key === key)?.file ?? key
+        // ⚠ THE REFUSAL KEEPS ITS PRINCIPLE AND NOW NAMES THE WAY OUT. An agent that finds an
+        // artifact in its way has three options and this sentence has to leave it only one:
+        // the phase's work is done (lock it), the phase does not apply (SKIP IT IN PLACE — the
+        // artifact stays and records the decision), or the run is being abandoned (that is a run-
+        // level act, not an edit to the tree). Deleting the file is not one of them, and until
+        // `recursive_lock { skip }` existed there was no legitimate way to say "this phase was
+        // considered and does not apply" — which is exactly what made removal look reasonable and
+        // made this refusal a dead end rather than a redirection.
         throw new Error(
           'fold frame is append-only: ' + file + ' was present at the last fold and is now missing under ' + runDir +
-          ' - a run artifact is evidence and the chain should only grow',
+          ' - a run artifact is evidence and the chain should only grow. If the phase does not apply to this run,' +
+          ' put the artifact back and record the skip IN IT: call recursive_lock with { artifact: "' + file +
+          '", skip: "<why this phase does not apply>" } - that settles the phase, advances the chain and keeps the record.',
         )
       }
     }
@@ -368,7 +398,12 @@ export function foldRun(runDir: string, runId: string): RecursiveStatusResult {
     }
     const state = getArtifactState(join(runDir, phase.file), workflowProfile)
     if (stamp !== null) foldStats.reparsed += 1
-    if (phase.optional && !state.exists) state.status = 'SKIPPED'
+    // A phase whose WORK the run does not require, whose artifact was never created, is reported
+    // SKIPPED ("not needed") rather than PENDING. A phase whose artifact EXISTS and records a
+    // deliberate skip arrives here already carrying `Status: SKIPPED` — read from the file by
+    // `getArtifactState` — so nothing is synthesized for it and the two shapes stay distinguishable
+    // by `exists`: a synthesized skip never has a file, a recorded skip always does.
+    if (!phase.requiredForCompletion && !state.exists) state.status = 'SKIPPED'
     else if (workflowProfile === 'legacy' && LATE_PHASE_KEYS.has(phase.key) && !state.exists) state.status = 'SKIPPED'
     states.set(phase.key, state)
   }
@@ -376,6 +411,9 @@ export function foldRun(runDir: string, runId: string): RecursiveStatusResult {
   let currentPhase: RecursiveStatusResult['currentPhase'] = null
   for (const phase of PHASES) {
     const state = states.get(phase.key)!
+    // SKIPPED is SETTLED WITHOUT BEING LOCKED, in both of its shapes (recorded in a present
+    // artifact, or synthesized for an absent phase the run does not require), so it is never the
+    // phase the run is working on. That is what lets the chain move past a legitimate skip.
     if (state.status === 'SKIPPED') continue
     if (!state.exists || !state.lockValid) {
       // `currentPhase` keeps its pinned four-field shape: status.parity deep-equals
@@ -387,7 +425,7 @@ export function foldRun(runDir: string, runId: string): RecursiveStatusResult {
   const phases: PhaseState[] = PHASES.map(phase => {
     const state = states.get(phase.key)!
     return {
-      key: phase.key, label: phase.label, file: phase.file, optional: phase.optional,
+      key: phase.key, label: phase.label, file: phase.file, requiredForCompletion: phase.requiredForCompletion,
       exists: state.exists, status: state.status, lockValid: state.lockValid,
       lockProblems: state.lockProblems, blockers: state.blockers,
       position: phasePosition(state),

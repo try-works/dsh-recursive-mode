@@ -11,7 +11,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { getPrerequisiteBlockers, getLockStatus } from './lock.ts'
+import { getPrerequisiteBlockers, getLockStatus, isSettledStatus } from './lock.ts'
 import { getMdFieldValue, getGateStatus } from './status.ts'
 
 /** Run-level durable states (PROPOSAL 8.8). */
@@ -64,7 +64,10 @@ export function validateTransition(intent: PhaseTransitionIntent): GateCheckResu
 
   if (intent.kind === 'reopen') {
     const status = getLockStatus(artifactPath)
-    if (status !== 'LOCKED') failures.push('reopen requires a LOCKED artifact (current: ' + status + ')')
+    // SETTLED, not merely LOCKED: reopening is also how a deliberate SKIP is withdrawn (the skip
+    // record is what a reopen strips), and a gate that only knew LOCKED would report every un-skip
+    // as a failure while the operation itself succeeded — a gate disagreeing with the code it gates.
+    if (!isSettledStatus(status)) failures.push('reopen requires a settled artifact, LOCKED or SKIPPED (current: ' + status + ')')
     return { passed: failures.length === 0, failures }
   }
 

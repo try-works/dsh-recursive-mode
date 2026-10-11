@@ -76,8 +76,11 @@ describe('T12 — the skill BODY carries the rules, not a pointer to them', () =
   it('says so when a phase declares no sections rather than emitting an empty list', () => {
     // T40: `memoryWrite` is part of PhaseRules like `tdd`/`qa` are, so this hand-built fixture states
     // it — null here, because the case under test is a phase that declares no sections AND owes no
-    // memory write. The assertions are unchanged.
-    const registration = phaseSkillRegistration({ fileName: 'x.md', label: 'x', requiredSections: [], audited: false, tdd: false, qa: false, memoryWrite: null })
+    // memory write. FU-11 adds `gitRequired` to the same structure for the same reason, and it is
+    // `null` here for the same reason it is null on a bare `phaseRulesFor`: this fixture describes a
+    // PHASE's rules, and whether the checkout is a git repository is not a property of a phase. The
+    // assertions are unchanged.
+    const registration = phaseSkillRegistration({ fileName: 'x.md', label: 'x', requiredSections: [], audited: false, tdd: false, qa: false, memoryWrite: null, gitRequired: null })
     expect(registration.content).toContain('(none declared for this phase)')
     expect(registration.whenToUse).not.toContain('gate(s)')
   })

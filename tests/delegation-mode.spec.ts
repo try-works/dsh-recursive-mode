@@ -189,6 +189,72 @@ describe('T35 — delegation is continuable by default', () => {
 })
 
 /**
+ * ⚠ FU-20 — THE LIVE DEFECT, REPRODUCED AT THE LEVEL IT ACTUALLY HAPPENED.
+ *
+ * The policy below is this file's own `POLICY`: `code-reviewer` is `external-cli` with `cli: null` — byte for byte
+ * the shape `bootstrap.ts` scaffolds into every workspace, and the shape a live run's log described when it
+ * concluded "`code-reviewer` is `external-cli` with no CLI configured → fallback is self-audit; I'll attempt the
+ * canonical review path after authoring and record the outcome."
+ *
+ * `router.spec.ts` pins the DECISION. This pins the OUTCOME: that the review is delegated — a child is actually
+ * started — rather than becoming the author's own, and that when no child CAN be started the record says so in
+ * words that cannot be read as a routing preference.
+ */
+describe('FU-20 — a scaffolded `external-cli` route with no CLI delegates to a MODEL, and never self-audits silently', () => {
+  it('the review STARTS A CHILD on a host with a native provider — it does not become a self-review', async () => {
+    const { result, calls } = await review({ continuable: true })
+    expect(calls, 'the child was started, so the review is not the author reviewing itself').toContain('startContinuable')
+    expect(result.delegationMode).toBe('continuable')
+  })
+
+  it('and the record it files says the framework created a child, not that a fallback was taken', async () => {
+    const { root, result } = await reviewOnDisk({ awaitRoundResult: async () => APPROVED })
+    try {
+      const record = oneRecord(root).text
+      expect(record, 'the execution mode names the tier that actually ran').toContain('native')
+      expect(record).not.toContain('self-audit')
+      expect(result.delegationMode).toBe('continuable')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('⚠ with NO provider able to create a child, the failure NAMES the lost independence', async () => {
+    // The physical outcome cannot be anything else — a child needs a provider. What changed is that the caller is
+    // told it is a SELF-AUDIT by the authoring agent rather than handed a policy note.
+    const root = makeRoot()
+    const ctx = new Context()
+    await ctx.plugin(RecursiveRuntime, { repoRoot: root })
+    try {
+      const result = await ctx.recursive.delegateReview({
+        root,
+        runId: 'run-1',
+        phase: '3',
+        role: 'code-reviewer',
+        delegationId: 'd1',
+        childId: 'c1',
+        artifactPath: join(root, '.recursive', 'run', 'run-1', '03-implementation-summary.md'),
+        upstreamArtifacts: [] as string[],
+        auditQuestions: ['does it work?'],
+        requiredOutput: 'verdict',
+        providers: {},
+        subagents: fakeSubagents({ continuable: true }).runtime,
+        parent: {} as SubagentParentHandle,
+        awaitRoundResult: async () => APPROVED,
+      } as never) as unknown as { error?: string; delegationMode?: string }
+      expect(result.delegationMode, 'no child ran: the mode is `none`, not a lifecycle that started one').toBe('none')
+      expect(result.error ?? '', 'the caller is told the independence was lost, in those words').toContain('INDEPENDENCE LOST')
+      expect(result.error ?? '', 'and told what the review now is').toContain('SELF-AUDIT')
+      expect(result.error ?? '', 'and how to restore an independent reviewer').toContain('configure a DSH model')
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+
+/**
  * ⚠ THE THREE STATES — a PARKED round is not a FAILED one, IN THE RECORD.
  *
  * THE DEFECT THIS PINS, from a live run's own records. A review's continuable child had not settled within the

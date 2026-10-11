@@ -15,7 +15,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RecursiveRuntime } from '../src/runtime.ts'
 import { renderRecursivePolicy } from '../src/policy.ts'
-import { getArtifactRequiredSections, phaseLintRulesMessage, phaseRulesFor } from '../src/phase-rules.ts'
+import { getArtifactRequiredSections, phaseLintRulesMessage, phaseRulesFor, sectionFormatRulesFor } from '../src/phase-rules.ts'
+import { getLockStatus, lockHashFromContent } from '../src/lock.ts'
 
 
 async function setup(repoRoot: string) {
@@ -143,6 +144,46 @@ describe('phaseRulesFor — structured single source of truth (refined LIVE BUG 
     expect(msg).toContain('Changes Applied')
     expect(msg).toContain('TDD Compliance Log')
     expect(msg).toContain('Audit Verdict')
+  })
+})
+
+/**
+ * ⚠ THE PAYLOAD ITSELF, NOT THE PURE FUNCTION. `recursive_phase` returns `runtime.phaseRules(...)`, which
+ * SPREADS `phaseRulesFor(phase)` — so a field added to `PhaseRules` reaches the agent only if that spread is
+ * intact. Asserting `phaseRulesFor` alone would pass even if the payload dropped the field, which is exactly
+ * the failure this test exists to catch. The run is advanced to phase 1 first (the phase that owns
+ * `## Source Requirement Inventory`), because a phase-0 payload carries no format rules: an empty-array
+ * comparison would pass vacuously and prove nothing.
+ */
+describe('recursive_phase payload — the section formats reach the agent through runtime.phaseRules', () => {
+  /** A real lock header on disk, hashed the way `getLockStatus` verifies — so progress cannot be faked. */
+  function lockOnDisk(runDir: string, name: string): void {
+    const path = join(runDir, name)
+    const body = readFileSync(path, 'utf8')
+    const header = 'Status: LOCKED\nLockedAt: ' + new Date().toISOString().replace(/\.\d{3}Z$/, 'Z') + '\nLockHash: ' + '0'.repeat(64) + '\n'
+    const hash = lockHashFromContent(header + body)
+    writeFileSync(path, header.replace('0'.repeat(64), hash) + body, 'utf8')
+    expect(getLockStatus(path), 'precondition: ' + name + ' must be lock-valid').toBe('LOCKED')
+  }
+
+  it('carries sectionFormats for the CURRENT phase, non-empty', async () => {
+    const repo = freshGitRepo('payload')
+    try {
+      const ctx = await setup(repo)
+      await ctx.recursive.initRun('r5-payload', { session: { header: { cwd: repo } } })
+      const runDir = join(repo, '.recursive', 'run', 'r5-payload')
+      lockOnDisk(runDir, '00-requirements.md')
+      lockOnDisk(runDir, '00-worktree.md')
+
+      const payload = await ctx.recursive.phaseRules('r5-payload', { session: { header: { cwd: repo } } })
+      expect(payload?.phase).toBe('01-as-is.md')
+      expect(payload?.sectionFormats).toEqual(sectionFormatRulesFor('01-as-is.md'))
+      expect(payload?.sectionFormats?.length).toBe(2)
+      // The literal an agent copies, present in the payload it actually receives — not merely in the table.
+      expect(JSON.stringify(payload)).toContain('- R1 | Disposition: in-scope | Source Quote:')
+      expect(JSON.stringify(payload)).toContain('the id ALONE as the first')
+      await ctx.fiber.dispose()
+    } finally { rmSync(repo, { recursive: true, force: true }) }
   })
 })
 

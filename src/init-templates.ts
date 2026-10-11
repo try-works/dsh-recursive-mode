@@ -11,7 +11,7 @@
  */
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
-import { getArtifactRequiredSections } from './phase-rules.ts'
+import { getArtifactRequiredSections, sectionFormatRulesFor } from './phase-rules.ts'
 import { gitFacts, resolveBaseBranch, type GitRepoFacts } from './git-context.ts'
 
 export interface GitContext {
@@ -244,6 +244,9 @@ export function worktreeContent(runId: string, repoRoot: string, git: Partial<Gi
  */
 export function laterPhaseContent(runId: string, fileName: string, workflowProfile = 'recursive-mode-audit-v2'): string {
   const sections = getArtifactRequiredSections(fileName, workflowProfile)
+  // The non-obvious section formats for THIS artifact, keyed by section: the same table the
+  // `recursive_phase` payload carries, so the scaffold, the payload and the failure message cannot drift.
+  const formatsBySection = new Map(sectionFormatRulesFor(fileName, workflowProfile).map((format) => [format.section, format]))
   const lines = [
     'Run: `/.recursive/run/' + runId + '/`',
     'Phase: `' + fileName.replace(/\.md$/, '').replace(/^0?/, '') + '`',
@@ -264,7 +267,19 @@ export function laterPhaseContent(runId: string, fileName: string, workflowProfi
   ];
   for (const section of sections) {
     if (section === 'TODO') continue
-    lines.push('', '## ' + section, '', '- (fill)')
+    lines.push('', '## ' + section, '')
+    // ⚠ THE FORMAT HINT SITS IN THE DOCUMENT THE AGENT IS EDITING, under the exact heading it applies to.
+    // The payload says it too (`recursive_phase` -> `sectionFormats`), but a scaffold is the one surface a
+    // writer sees without asking for anything, and "one line of rule plus one passing example" under the
+    // heading costs two comment lines and cannot be mistaken for content. HTML comments rather than `## TODO`
+    // lines on purpose: the TODO list is a work checklist whose boxes are counted and gated
+    // (`getTodoStats`), and a format hint is not a work item.
+    const format = formatsBySection.get(section)
+    if (format) {
+      lines.push('<!-- lint format: ' + format.rule + ' -->')
+      lines.push('<!-- passing example: ' + format.example + ' -->')
+    }
+    lines.push('- (fill)')
   }
   lines.push('', '## Coverage Gate', '', 'Coverage: FAIL', '', '## Approval Gate', '', 'Approval: FAIL', '')
   return lines.join('\n')

@@ -17,6 +17,7 @@ import {
   type ReceiptChainResult,
 } from './lock.ts'
 import type { PendingWorkItem, RecursiveStatusResult } from './types.ts'
+import { skipPhaseArtifact, SKIP_REASON_FIELD, SKIPPED_AT_FIELD, type SkipResult } from './skip.ts'
 import { findOperation, countOperations, operationId, recordOperation } from './identity.ts'
 import { createHookRegistry, type HookRegistry } from './hooks.ts'
 import { runTracked, abortReason, type JobsRegistryLike } from './jobs-runner.ts'
@@ -26,7 +27,7 @@ import { recordJobRun } from './job-log.ts'
 import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
 import { resolveControlPlaneRoot, type WorkspaceRegistryLike } from './workspace.ts'
-import { phaseRulesFor, type PhaseRules } from './phase-rules.ts'
+import { phaseRulesFor, GIT_REQUIRED_NOTICE, type PhaseRules } from './phase-rules.ts'
 import { closeoutReport, writeCloseoutReceipt } from './closeout-report.ts'
 import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './scratch.ts'
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
@@ -1542,6 +1543,20 @@ export class RecursiveRuntime extends Service {
       runId: resolved.runId,
       phase,
       ...phaseRulesFor(phase),
+      // FU-11 — THE GIT PRECONDITION, AT PHASE ENTRY, WHERE IT CAN STILL BE ACTED ON.
+      //
+      // MEASURED: in a non-git workspace the requirement surfaced only as a LOCK refusal, after the
+      // phase-0 docs had been authored — so the caller learned that the artifact it had just written
+      // could never be locked, at the end of the chain, from a sentence that named the git preconditions
+      // but not their consequence. `recursive_phase` is the entry call the workflow ALREADY makes before
+      // authoring (and the one the memory-read gate already requires for `00-requirements.md`), so it is
+      // where the capability statement belongs: no new call, no new refusal, nothing relaxed.
+      //
+      // READ FROM LIVE FACTS ON EVERY ENTRY (`gitFacts`, the same accessor `initRun` prefills the diff
+      // basis from), never cached: a caller who runs `git init` mid-run must see the notice disappear on
+      // the next phase entry rather than be told a stale impossibility. It is total — a non-git root
+      // returns nulls — so this cannot be why a phase call fails.
+      gitRequired: gitFacts(root).gitDir === null ? GIT_REQUIRED_NOTICE : null,
       // ⚠ `'phase'` IS PASSED BECAUSE THIS IS NOT A REVIEW BUNDLE. The renderer's wording used to be the
       // reviewer's (*"relevant to this REVIEW"*) and this payload inherited it, so the sentence named a
       // reader this text never reaches. The context is the ONE thing that differs between the two callers
@@ -1747,6 +1762,18 @@ export class RecursiveRuntime extends Service {
     if (!existsSync(artifactPath)) throw new Error('Artifact not found: ' + artifact)
     const status = getLockStatus(artifactPath)
     if (status === 'LOCKED') throw new Error('Artifact already LOCKED: ' + artifact)
+    // ⚠ A SKIPPED ARTIFACT IS SETTLED, AND LOCKING IT DIRECTLY WOULD LEAVE BOTH RECORDS. The lock
+    // writes `Status: LOCKED` and the skip's `SkippedAt`/`SkipReason` lines would survive underneath
+    // it, so the artifact would claim the work was done and that it does not apply. The remedy is one
+    // call and it is the honest one: reopen withdraws the skip record (and invalidates the receipt the
+    // skip wrote), and then the phase can be locked like any other.
+    if (status === 'SKIPPED') {
+      throw new Error(
+        'Artifact is recorded as SKIPPED, not DRAFT: ' + artifact + '. Reopen it first (recursive_lock with' +
+        ' { artifact: "' + artifact + '", reopen: true }), which withdraws the skip record, and then lock the' +
+        ' work - locking it in place would leave the artifact carrying both a lock and a stale skip reason.',
+      )
+    }
     // B2: the pre-step gate reads transition intent from the session log; the
     // durable commit below is what the live fs route folds. No phase-intent event.
     const blockers = getPrerequisiteBlockers(runDir, artifact)
@@ -1806,8 +1833,32 @@ export class RecursiveRuntime extends Service {
     // "meets the standard".
     const lint = await this.lintArtifact(runId, artifact, agent)
     if (!lint.passed) {
+      // ⚠ FU-11 — WHEN THE BLOCKER IS THE ENVIRONMENT, SAY SO INSTEAD OF "FIX THE CAUSE AND RETRY".
+      //
+      // MEASURED, in a live diagnostic run in a NON-GIT workspace: two `recursive_lock` calls were
+      // refused here, naming the git preconditions correctly (`HEAD is detached; expected branch …`,
+      // `Unable to verify git diff basis: Unable to resolve baseline reference '<resolve-before-locking>':
+      // fatal: not a git repository`), and the caller then spent its repair on the ONE other line the
+      // plugin had emitted — the report-only transition advisory — because it read as a cause it could
+      // fix. This branch is the honest place to say that no artifact edit is the remedy: the diff basis
+      // and the lock hash are the tamper mechanism, both are git facts, and `lockArtifact` has no
+      // git-less mode. The refusal is UNCHANGED in kind and precedence — the extra sentence is appended
+      // to the same message, after the linter's own failures, so a caller still reads the verdict first.
+      //
+      // IT FIRES ON THE LINTER'S OWN WORDS, not on a second git probe: the run-level FAIL this appends to
+      // is emitted because git could not answer, so the detection cannot disagree with the refusal it
+      // explains. `.git` itself is never re-examined here.
+      const gitBlocker = lint.errors.some((error) => error.includes('not a git repository'))
       throw new Error(
-        'Artifact ' + artifact + ' does not meet the phase standard, so it was not locked: ' + lint.errors.join('; '),
+        'Artifact ' + artifact + ' does not meet the phase standard, so it was not locked: ' + lint.errors.join('; ')
+        + (gitBlocker
+          // The appended clause ends WITHOUT a full stop on purpose: the caller renders this through
+          // `codeRuntimeRefusal`, whose sentence continues ("… can clear it. Next: fix the cause …"), and a
+          // terminal period here produced "… can clear it.. Next: …" in the live transcript.
+          ? ' - ENVIRONMENT BLOCKER, not an artifact defect: the workspace is not a git repository, and the diff'
+          + ' basis plus the lock hash are the tamper mechanism, so this phase cannot be locked until the run'
+          + ' executes in a git repository with at least one commit; no edit to ' + artifact + ' can clear it'
+          : ''),
       )
     }
     let content = readFileSync(artifactPath, 'utf8')
@@ -1829,6 +1880,27 @@ export class RecursiveRuntime extends Service {
       receipt,
       blockers: [],
     }
+  }
+
+  /**
+   * SETTLE A PHASE THAT DOES NOT APPLY, IN PLACE — the legitimate skip.
+   *
+   * The runtime method exists for the same reason `lockArtifact` does: the marker must be written by
+   * the PLUGIN, not by the model's `write` tool, because the phase-order guard binds writes to the
+   * active phase and a skipped phase is by definition not the active one — an agent told to "mark it
+   * skipped" with `edit` would be refused by our own write rule. The tool that owns phase settlement
+   * is therefore the one that writes it, and the decision logic lives in `src/skip.ts` (which this
+   * method only resolves paths and reports for).
+   *
+   * ⚠ THE ARTIFACT IS NEVER REMOVED, here or anywhere else in this plugin: the skip is a decision
+   * recorded in the file, which is what keeps "a run artifact is evidence and the chain should only
+   * grow" true while still letting a run move past a phase that does not apply to it.
+   */
+  async skipArtifact(runId: string, artifact: string, reason: string, agent?: AgentLike | null): Promise<SkipResult> {
+    const root = await this.resolveRootFor(agent)
+    if (!root) throw new Error('cannot resolve workspace control-plane root for this session')
+    const runDir = join(root, '.recursive', 'run', runId)
+    return skipPhaseArtifact(runDir, runId, artifact, reason)
   }
 
   /** Reopen a LOCKED artifact to DRAFT (delete LockedAt/LockHash, invalidate downstream receipts). */
@@ -1876,6 +1948,14 @@ export class RecursiveRuntime extends Service {
     content = content.replace(/^[ \t]*Status:.*$/m, 'Status: `DRAFT`')
     content = content.replace(/^[ \t]*LockedAt:.*\n?/m, '')
     content = content.replace(/^[ \t]*LockHash:.*\n?/m, '')
+    // ⚠ A REOPEN IS ALSO THE UN-SKIP, so the skip record goes with the status it belonged to. Leaving
+    // `SkippedAt`/`SkipReason` on a DRAFT artifact would leave a phase that is being worked on carrying
+    // a stale statement that it does not apply — and the reason text would silently survive into the
+    // next lock. The DECISION itself is not lost: the receipt the skip wrote is invalidated right
+    // below (reopen invalidates this artifact's receipt and every stale downstream one), so the chain
+    // records that a settlement happened and was withdrawn, which is the honest history.
+    content = content.replace(new RegExp('^[ \\t]*' + SKIPPED_AT_FIELD + ':.*\\n?', 'm'), '')
+    content = content.replace(new RegExp('^[ \\t]*' + SKIP_REASON_FIELD + ':.*\\n?', 'm'), '')
     writeFileSync(artifactPath, content, 'utf8')
     // Record the attempt AFTER it succeeded, best-effort: a failed index write must
     // never change the outcome of an operation the caller already performed.

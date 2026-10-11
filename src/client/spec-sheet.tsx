@@ -68,11 +68,16 @@ import { fetchPhaseDoc } from './host-api.ts'
 import { useLiveProjection } from './use-live.ts'
 import { unfilledEvidence } from '../run-spec.ts'
 import {
+  CALL_ANSWERED_LEAD,
+  CALL_PENDING_LEAD,
+  CALL_PENDING_TAIL,
+  CALL_REFUSED_QUOTE_LEAD,
   decisionLine,
   isSpecSheetCall,
   otherMode,
   PREPARING_NOTICE,
   readCall,
+  refusedNotice,
   RUN_START_OPTION_MEANING,
   RUN_START_QUESTION,
   RUN_START_SPEC_FILE,
@@ -82,6 +87,8 @@ import {
   specSheetModel,
   specViewToggle,
   TRUNCATED_NOTICE,
+  unknownNotice,
+  type CallOutcome,
   type SpecFetch,
   type SpecSheetBlock,
   type SpecSheetModel,
@@ -93,9 +100,31 @@ export {
   RUN_START_SPEC_FILE,
   parseRecursiveAskArgs,
   isRunStartCall,
+  readCall,
+  readCallOutcome,
   specPath,
   specSheetModel,
   decisionLine,
+  refusedNotice,
+  unknownNotice,
+  CALL_ANSWERED_LEAD,
+  CALL_PENDING_LEAD,
+  CALL_PENDING_TAIL,
+  CALL_REFUSED_LEAD,
+  CALL_REFUSED_NEXT,
+  CALL_REFUSED_QUOTE_LEAD,
+  CALL_REFUSED_UNQUOTED,
+  CALL_UNKNOWN_LEAD,
+  CALL_UNKNOWN_REASON,
+  // ⚠ THE GATE'S OWN WORDS STAY RE-EXPORTED. They were dropped here once while this file was being edited,
+  // and the failure mode was SILENT: an `expect(text).toContain(RUN_START_QUESTION)` with the constant
+  // `undefined` asserts nothing at all and passes, which is how an imported name going missing weakens the
+  // spec instead of failing it. `tests/spec-sheet.spec.ts` now pins every re-exported name as a non-empty
+  // string so the next removal fails loudly.
+  RUN_START_APPROVE_LABEL,
+  RUN_START_HOLD_LABEL,
+  RUN_START_QUESTION,
+  RUN_START_OPTION_MEANING,
   UNFILLED_NOTICE,
   UNFILLED_SHORT,
   NO_CALL_NOTICE,
@@ -109,7 +138,17 @@ export {
   specBodyContent,
   specViewToggle,
 } from './spec-sheet-view.ts'
-export type { SpecSheetModel, SpecSheetBlock, SpecFetchState, RecursiveAskArgs, SpecViewMode, SpecViewToggle } from './spec-sheet-view.ts'
+export type {
+  CallOutcome,
+  CallUnknownReason,
+  SpecCallResult,
+  SpecSheetModel,
+  SpecSheetBlock,
+  SpecFetchState,
+  RecursiveAskArgs,
+  SpecViewMode,
+  SpecViewToggle,
+} from './spec-sheet-view.ts'
 
 /** The session-standard hooks the seat is given, all optional so the spec can render the sheet alone. */
 export interface SpecSheetProps {
@@ -218,8 +257,14 @@ export function RunStartSpecSheet({ block, cwd, useSessions, useWorkspaces }: Sp
       'This `recursive_ask` call names no runId, so no run spec can be shown for it.'))
   }
 
+  // ⚠ `read.outcome` TRAVELS WITH THE MODEL, AND THAT IS THE FIX. This seat renders for the CALL, and a call
+  // that was REFUSED is a settled call like any other — so without the outcome the body rendered the document
+  // beside "The question about this document is …" and a description of Start run / Hold for a gate that had
+  // asked nobody anything. The owner read exactly that and asked why no dialog appeared (*"it showed the
+  // requirement preview without any accept dialog"*). The body now chooses which of the three states to
+  // describe from what the call itself returned.
   return createElement(RunStartSpecSheetBody, {
-    model: specSheetModel({ args: read.args, root, fetch: fetchState }),
+    model: specSheetModel({ args: read.args, root, fetch: fetchState, call: read.outcome }),
   })
 }
 
@@ -258,11 +303,32 @@ export function RunStartSpecSheetBody({ model }: { model: SpecSheetModel }): Rea
     createElement('span', { className: 'rec-spec-tag' }, 'read-only'),
   ),
   createElement('p', { className: 'rec-spec-path' }, specPath(model.runId, model.root, model.file)),
-  notice(model),
-  questionBlock(model),
+  stateHead(model),
   viewControls(toggle, model, () => { setMode(otherMode(toggle.mode)) }),
   documentBody(model, mode),
   )
+}
+
+/**
+ * WHAT THE CALL'S OWN STATE SAYS, with the document's own verdict above it when there is one.
+ *
+ * ⚠ THE ORDER IS THE FIX, NOT A LAYOUT PREFERENCE. In the live defect the sheet's warning block ("This
+ * document is still the UNFILLED TEMPLATE. There is no spec to approve yet.") sat ABOVE a block announcing
+ * "The question about this document is …" and describing Start run / Hold — one panel making two opposite
+ * claims about whether a decision was on offer. The state now comes first and the document's verdict follows
+ * it, so the first thing a reader is told is whether anything is being asked of them.
+ */
+function stateHead(model: SpecSheetModel): ReactNode {
+  const outcome = model.call
+  // GATE REFUSED: the refusal first, and then the document's own verdict if the document could be read —
+  // "it is still the template" is usually the reason the refusal names, so the reader gets the refusal and the
+  // evidence for it from one place.
+  if (outcome.state === 'refused') return createElement('div', null, refusedBlock(outcome), notice(model))
+  // The call settled in a state this client cannot read: the panel cannot say whether anything is pending, so
+  // it says that and shows the document with its verdict beside it.
+  if (outcome.state === 'unknown') return createElement('div', null, unknownBlock(outcome), notice(model))
+  // PENDING or ANSWERED: the document's verdict leads, as before, and the state follows it.
+  return createElement('div', null, notice(model), stateBlock(model))
 }
 
 /**
@@ -386,15 +452,70 @@ function notice(model: SpecSheetModel): ReactNode {
   return null
 }
 
-/** The decision under way, in the gate's own words, plus the fact that the controls live elsewhere. */
-function questionBlock(model: SpecSheetModel): ReactNode {
-  const recorded = decisionLine(model.args.answer)
+/**
+ * THE TWO SETTLED-OR-LIVE STATES THAT FOLLOW THE DOCUMENT'S VERDICT.
+ *
+ * ⚠ THIS IS THE DEFECT'S FIX. This block used to be ONE unconditional paragraph, so the sheet announced "The
+ * question about this document is …" and described Start run / Hold for EVERY call it rendered — including a
+ * call the gate had REFUSED, where no question exists and no card can appear. The warning block above it said
+ * "there is no spec to approve yet" in the same panel, so the two halves of one sheet contradicted each other
+ * and a reader could not tell a refused gate from a pending one. Each state now gets its own words, chosen
+ * from what the call returned; the refused and unreadable states are answered by `stateHead` instead, because
+ * they also decide what the reader is told FIRST.
+ */
+function stateBlock(model: SpecSheetModel): ReactNode {
+  const outcome = model.call
+  return outcome.state === 'answered' ? answeredBlock(model, outcome) : pendingBlock()
+}
+
+/**
+ * GATE REFUSED — no question exists, and the panel says so with the refusal the caller actually received.
+ *
+ * ⚠ IT PRINTS NO QUESTION AND NO OPTION MEANINGS. "Start run records the approval and arms the run goal" is
+ * true of the gate, but it is a description of a decision that is not on offer here, and printing it beside a
+ * refusal is how the panel came to read as though something were waiting on the reader.
+ */
+function refusedBlock(outcome: Extract<CallOutcome, { state: 'refused' }>): ReactNode {
+  return createElement('div', { className: 'rec-spec-state rec-spec-state-refused', role: 'status' },
+    createElement('p', { className: 'rec-spec-state-lead' }, refusedNotice(outcome.refusal)),
+  )
+}
+
+/**
+ * THE STATE THE CLIENT CANNOT READ — said as such, with the reason, and with no question invented for it.
+ *
+ * ⚠ `kind-absent` IS THE SUBTLE ONE, and it is deliberate rather than defensive: a REFUSED gate ships the
+ * question text with its refusal (`recursive_ask.tool.ts`, the ordering guard's return), so the mere PRESENCE
+ * of a `question` in a payload is not evidence that anybody was asked. A panel that treated it as evidence
+ * would reproduce this defect on the next refusal shape it did not recognise.
+ */
+function unknownBlock(outcome: Extract<CallOutcome, { state: 'unknown' }>): ReactNode {
+  return createElement('div', { className: 'rec-spec-state rec-spec-state-unknown', role: 'status' },
+    createElement('p', { className: 'rec-spec-state-lead' }, unknownNotice(outcome.reason)),
+  )
+}
+
+/**
+ * ALREADY ANSWERED — the call settled with a recorded decision, so nothing is pending.
+ *
+ * ⚠ IT DOES NOT SAY THE DECISION WAS AN APPROVAL. Whether the recorded label arms the run goal is decided by
+ * `decisionLine` from the LABEL, exactly as before, and a `Hold` still reads as a hold.
+ */
+function answeredBlock(model: SpecSheetModel, outcome: Extract<CallOutcome, { state: 'answered' }>): ReactNode {
+  const recorded = decisionLine(outcome.answer ?? model.args.answer)
+  return createElement('div', { className: 'rec-spec-state rec-spec-state-answered', role: 'status' },
+    createElement('p', { className: 'rec-spec-state-lead' }, CALL_ANSWERED_LEAD),
+    recorded === null ? null : createElement('p', { className: 'rec-spec-decision' }, recorded),
+  )
+}
+
+/** GATE PENDING — the question, and the fact that the decision belongs to the card that asked it. */
+function pendingBlock(): ReactNode {
   return createElement('div', { className: 'rec-spec-question' },
-    createElement('p', { className: 'rec-spec-question-lead' }, 'The question about this document is: “' + RUN_START_QUESTION + '”'),
+    createElement('p', { className: 'rec-spec-question-lead' }, CALL_PENDING_LEAD + RUN_START_QUESTION + CALL_PENDING_TAIL),
     createElement('p', { className: 'rec-spec-question-options' }, RUN_START_OPTION_MEANING),
     createElement('p', { className: 'rec-spec-question-where' },
       'The decision controls are the question card\'s. This panel is read-only: it casts no vote and writes nothing.'),
-    recorded === null ? null : createElement('p', { className: 'rec-spec-decision' }, recorded),
   )
 }
 

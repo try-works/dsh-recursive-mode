@@ -195,3 +195,127 @@ describe('FU-17 acceptance: the main agent delegates the work, judges it, and th
     expect(captured.followups[captured.followups.length - 1]!.text).toContain('rollback')
   }, 120000)
 })
+
+/**
+ * ⚠ FU-20 — THE SETTING REACHES THE CHILD, THROUGH THE REAL PLUGIN AND THE REAL TOOL.
+ *
+ * The unit specs prove `loadRouterPolicy` merges a `roles`/`phases` override. That is not the same claim as "a
+ * user setting a model makes the delegated child run on it", which is what the directive asks for — the
+ * difference is every hop between the Config schema and the start request: the Loader's config, `index.ts`
+ * forwarding the section, `setRouterOverrides`, the policy merge, the ladder, the capability gate, and the
+ * request. This test crosses all of them with the plugin mounted for real and a real `recursive_delegate` call.
+ *
+ * ⚠ THE PROVIDER ADVERTISES `agentOptions` HERE, AND THAT MATTERS. `list()` may return descriptors, not just
+ * names, and this seam returns the object form so the capability gate opens. With the capabilitY absent the model
+ * would be correctly WITHHELD, and the test would then be asserting nothing about the setting at all.
+ */
+describe('FU-20 — a model configured in the SETTINGS reaches the delegated child', () => {
+  let root = ''
+  let captured: Captured = { starts: [], followups: [], providerLists: 0 }
+
+  /** A seam whose provider DECLARES the override capability, so a configured model can actually be applied. */
+  function capableSeam(): Record<string, unknown> {
+    return {
+      list: () => [{ name: 'spawn', capabilities: { agentOptions: true, outputSchema: true, toolFilter: true, depthLimit: true } }],
+      getProvider: (name: string) => ({ name, capabilities: { agentOptions: true } }),
+      startContinuable: async (spec: Record<string, unknown>) => {
+        captured.starts.push(spec)
+        const reserved = (spec as { childId?: string }).childId
+        return { childId: reserved ?? 'child-cap', messageId: 'msg-' + captured.starts.length }
+      },
+      followup: async () => undefined,
+      interrupt: () => undefined,
+      drainContinuableChildren: async () => undefined,
+    }
+  }
+
+  beforeEach(() => {
+    captured = { starts: [], followups: [], providerLists: 0 }
+    root = mkdtempSync(join(tmpdir(), 'rm-work-model-'))
+    const runDir = join(root, '.recursive', 'run', 'work-run')
+    mkdirSync(runDir, { recursive: true })
+    mkdirSync(join(root, '.recursive', 'config'), { recursive: true })
+    // The scaffolded policy, byte for byte: `external-cli` with NO cli. Nothing here asks for a CLI.
+    writeFileSync(
+      join(root, '.recursive', 'config', 'recursive-router.json'),
+      JSON.stringify({
+        version: 1,
+        defaults: {
+          when_role_unconfigured: 'ask',
+          when_cli_unavailable: 'fallback-local',
+          when_model_unknown: 'ask',
+          allow_auto_assign_if_single_cli: false,
+          probe_timeout_ms: 50000,
+          invoke_timeout_ms: 180000,
+        },
+        role_routes: { analyst: { enabled: true, mode: 'external-cli', cli: null, model: null, fallback: 'self-audit' } },
+      }),
+      'utf8',
+    )
+    writeFileSync(join(runDir, '03-implementation-summary.md'), 'Run: `x`\nStatus: `DRAFT`\n\n## TODO\n', 'utf8')
+  })
+
+  afterEach(() => { rmSync(root, { recursive: true, force: true }) })
+
+  async function delegateWith(config: Record<string, unknown>, seam: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    ctx.provide('subagents', seam as never)
+    ;(ctx as unknown as { set: (k: string, v: unknown) => void }).set('subagents', seam)
+    await ctx.plugin(plugin as never, { repoRoot: root, ...config } as never)
+    try {
+      return await (ctx as unknown as { tools: { execute: (c: unknown) => Promise<unknown> } }).tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('work-model-1'),
+        name: 'recursive_delegate',
+        arguments: { runId: 'work-run', phase: '03', instruction: 'Write the implementation summary.' },
+        agent: { session: { header: { cwd: root } } },
+      } as never) as Record<string, unknown>
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  }
+
+  const startedModel = (): unknown =>
+    (captured.starts[0] as { request?: { agentOptions?: { model?: string } } })?.request?.agentOptions?.model
+
+  it('WITH NOTHING CONFIGURED the child gets no model override, so it inherits the session model', async () => {
+    await delegateWith({}, capableSeam())
+    expect(captured.starts.length, 'the child WAS started — no self-audit happened').toBe(1)
+    expect(startedModel(), 'absent means INHERIT: the harness gives the child the session’s own model').toBeUndefined()
+  }, 60000)
+
+  it('a ROLE-level setting is honoured: the child runs on the model the user configured', async () => {
+    await delegateWith({ router: { roles: { analyst: { model: 'deepseek-pro' } } } }, capableSeam())
+    expect(startedModel()).toBe('deepseek-pro')
+  }, 60000)
+
+  it('a PHASE-level setting OVERRIDES the role-level one, through the same path', async () => {
+    await delegateWith({
+      router: {
+        roles: { analyst: { model: 'role-level' } },
+        phases: { '03': { model: 'phase-level' } },
+      },
+    }, capableSeam())
+    expect(startedModel()).toBe('phase-level')
+  }, 60000)
+
+  it('⚠ and with NO provider to create a child, the tool result itself names the lost independence', async () => {
+    // ⚠ THE VISIBILITY REQUIREMENT, AT THE BOUNDARY A MODEL ACTUALLY READS. The live defect was not that a
+    // fallback happened — it was that the fallback READ as a routing preference. A seam that enumerates no
+    // provider is exactly the situation the live run was in.
+    const bare = {
+      list: () => [],
+      getProvider: () => undefined,
+      startContinuable: async () => ({ childId: 'c', messageId: 'm' }),
+      followup: async () => undefined,
+    }
+    const result = await delegateWith({}, bare)
+    const text = JSON.stringify(result)
+    expect(text).toContain('INDEPENDENCE LOST')
+    expect(text).toContain('SELF-AUDIT')
+    expect(text, 'and the reader is told how to get an independent reviewer back').toContain('configure a DSH model')
+  })
+})
+

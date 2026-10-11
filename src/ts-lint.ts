@@ -24,6 +24,7 @@ import {
   AUDIT_REQUIRED_HEADINGS,
   DIFF_BASIS_FIELDS,
   getArtifactRequiredSections,
+  sectionFormatRulesFor,
 } from './phase-rules.ts'
 
 // ---- remaining constants not in phase-rules.ts ----
@@ -549,6 +550,31 @@ export function getGitChangedFiles(repoRoot: string, diffBasis: Record<string, s
   }
 }
 
+/**
+ * expectedRowDetail: the EXPECTED SHAPE of a missing entry row, appended to the failure that reports it.
+ *
+ * ⚠ WHY THIS IS ADDITIVE TO A MESSAGE THAT ALREADY FAILED THE RUN. "Inventory is missing explicit
+ * requirement IDs: R1..R24" tells a writer what is ABSENT; it does not tell them what a correct line looks
+ * like, so the only way forward is to infer the format from further failures — MEASURED, in a live run's own
+ * transcript, as a very large number of turns spent reverse-engineering the parser ("the lint logic is a black
+ * box"), ending in a workaround the agent itself called a hack. A failure that teaches its own remedy is the
+ * fix. The example comes from `SECTION_FORMAT_RULES` in `phase-rules.ts` — the SAME table the `recursive_phase`
+ * payload carries — so the message and the instruction cannot drift apart. The existing code and the existing
+ * sentence are unchanged; this only appends to the detail.
+ *
+ * Returns `''` for a profile or artifact with no format rule, so a v1/legacy run's message is byte-identical
+ * to what it was before this existed. `recursive-mode-audit-v1` really does run the Requirement Completion
+ * Status lint (it is a STRICT profile), which is why the PROFILE is a parameter rather than assumed: a v1
+ * phase 2 uses the CLOSEOUT statuses, so appending the v2 PLANNING row there would teach a vocabulary the
+ * profile rejects. The detail is scoped to the profile whose shape the linter is actually enforcing.
+ */
+export function expectedRowDetail(fileName: string, section: string, workflowProfile: string = CURRENT_WORKFLOW_PROFILE): string {
+  const rule = sectionFormatRulesFor(fileName, workflowProfile).find((candidate) => candidate.section === section)
+  if (!rule) return ''
+  return ' (expected row: ' + rule.example
+    + '. Each id needs its own bullet with the id ALONE as the first | field; a row that is backtick-wrapped is skipped silently.)'
+}
+
 /** get_phase_owned_actual_changed_files: which changed files belong to this phase. */
 export function getPhaseOwnedActualChangedFiles(fileName: string, actualChangedFiles: string[] | null, repoRoot?: string): string[] | null {
   if (actualChangedFiles === null) return null
@@ -936,12 +962,17 @@ export function lintSourceRequirementInventory(filePath: string, content: string
   const [entries, entryIssues] = parseSourceRequirementInventoryEntries(body)
   issues.push(...entryIssues)
   if (Object.keys(entries).length === 0) {
-    issues.push('Source Requirement Inventory must contain at least one requirement inventory entry')
+    // ⚠ THE DETAIL MATTERS MOST HERE, which is not obvious: this branch fires when NO row parsed at all, and
+    // it RETURNS before the missing-id check below — so an agent whose every row was silently dropped would
+    // otherwise be told the shape of the section ("must contain at least one ... entry") while looking at a
+    // section full of rows it wrote. MEASURED in the probe for this change: a bold id and a backtick-wrapped
+    // row both unparse, and this is the only message they produce.
+    issues.push('Source Requirement Inventory must contain at least one requirement inventory entry' + expectedRowDetail('01-as-is.md', 'Source Requirement Inventory'))
     return [...new Set(issues)].sort()
   }
   const explicitIds = parseRequirementIds(requirementsContent)
   const missingExplicit = explicitIds.filter(id => !(id in entries))
-  if (missingExplicit.length > 0) issues.push(`Source Requirement Inventory is missing explicit requirement IDs from 00-requirements.md: ${missingExplicit.join(', ')}`)
+  if (missingExplicit.length > 0) issues.push(`Source Requirement Inventory is missing explicit requirement IDs from 00-requirements.md: ${missingExplicit.join(', ')}` + expectedRowDetail('01-as-is.md', 'Source Requirement Inventory', workflowProfile))
   for (const [requirementId, fields] of Object.entries(entries)) {
     const disposition = trimMdValue(fields['Disposition'] ?? '').toLowerCase()
     const sourceQuote = fields['Source Quote'] ?? ''
@@ -976,7 +1007,7 @@ export function lintRequirementMapping(content: string, workflowProfile: string,
   const [mappingEntries, mappingIssues] = parseRequirementMappingEntries(body)
   issues.push(...mappingIssues)
   const missingEntries = Object.keys(inventoryEntries).filter(id => !(id in mappingEntries))
-  if (missingEntries.length > 0) issues.push(`Requirement Mapping is missing source inventory items: ${missingEntries.join(', ')}`)
+  if (missingEntries.length > 0) issues.push(`Requirement Mapping is missing source inventory items: ${missingEntries.join(', ')}` + expectedRowDetail('02-to-be-plan.md', 'Requirement Mapping', workflowProfile))
   const requirementsContent = readFileSync(requirementsPath, 'utf8')
   for (const [requirementId, fields] of Object.entries(mappingEntries)) {
     const coverage = trimMdValue(fields['Coverage'] ?? '').toLowerCase()
@@ -1240,7 +1271,18 @@ export function lintRequirementCompletionStatus(
   if (!body) return ['Missing or empty section: ## Requirement Completion Status']
   const [entries, issues] = parseRequirementCompletionEntries(body)
   const missing = requirementIds.filter(id => !(id in entries))
-  if (missing.length > 0) issues.push(`Requirement Completion Status is missing in-scope requirements: ${missing.join(', ')}`)
+  // ⚠ THE DETAIL NAMES THE SHAPE FOR THE PROFILE IN PLAY: phase 2's rows carry PLANNING statuses
+  // (`planned`, `planned-via-merge`, ...) while the audited closeout phases carry `implemented`/`verified`
+  // — and that split is itself v2-only, so a v1 phase 2 is described with the CLOSEOUT row it really
+  // requires rather than the planning row it would reject. The example comes from the row this artifact's
+  // own table documents, the same one the `recursive_phase` payload shows; a profile with no format rule
+  // appends nothing.
+  if (missing.length > 0) {
+    const exampleArtifact = workflowProfile === CURRENT_WORKFLOW_PROFILE && basename(filePath) === '02-to-be-plan.md'
+      ? '02-to-be-plan.md'
+      : '03-implementation-summary.md'
+    issues.push(`Requirement Completion Status is missing in-scope requirements: ${missing.join(', ')}` + expectedRowDetail(exampleArtifact, 'Requirement Completion Status', workflowProfile))
+  }
   const repoRoot = dirname(dirname(dirname(runDir)))
   if (workflowProfile === CURRENT_WORKFLOW_PROFILE && basename(filePath) === '02-to-be-plan.md') {
     for (const [requirementId, fields] of Object.entries(entries)) {

@@ -22,7 +22,7 @@
     "",
     "WHY EACH RULE EXISTS (the harness documents why an id is denied; so does this file)",
     "  `recursive_lock*` -> lock-order: phases lock monotonically. Locking 02 before 01 is locked silently skips the work 01 certifies, so the guard refuses before dispatch and names the blocking artifact and its status.",
-    "  `write` / `edit` / `fs_write` / `fs-write` -> locked-write: a LOCKED artifact is the run's evidence. Editing one - even by a character - invalidates every later phase that cited it, and the fold can no longer tell an approved document from a rewritten one. Reopen the artifact explicitly first.",
+    "  `write` / `edit` / `fs_write` / `fs-write` -> locked-write: a SETTLED artifact is the run's evidence - LOCKED (the work is done and hashed) or SKIPPED (a recorded decision that the phase does not apply, Status: SKIPPED + SkippedAt + SkipReason). Editing one - even by a character - invalidates every later phase that cited it, and the fold can no longer tell an approved document from a rewritten one, nor a recorded skip from a quietly dropped phase. Reopen the artifact explicitly first (`recursive_lock` with `reopen: true`), which also withdraws a skip record and invalidates the receipt the skip pinned.",
     "  `pwsh` / `shell` / `bash` / `run_code` -> locked-write: a shell or code runner can redirect into a locked artifact. The guard inspects the call's first path-like argument, so a command that names a locked run artifact is refused.",
     "  each write id, again -> phase-order: only ONE phase may be active at a time, and the active phase must be locked before the next phase is written. The lock-order rule above binds `recursive_lock` only, so before this rule an agent could write 08-memory-impact.md while the run sat at phase 0 - and a live run did exactly that (twelve artifacts, none locked, written out of order). The ACTIVE phase is the LOWEST-numbered phase artifact that is not LOCKED (the selector is `currentPhaseArtifact` in src/enforcement.ts, and the act of writing is judged against the same answer every other guard call uses). A write to the ACTIVE artifact, or to another artifact sharing its phase number (00-requirements.md and 00-worktree.md are both phase 0; 01-as-is.md and 01.5-root-cause.md are both phase 1), is ALLOWED - the run must always be able to author the phase it is in. A write to a LATER phase is refused as working ahead. A write to an EARLIER phase is decided by the locked-artifact rule above, because an earlier phase is locked by construction. Run support files - evidence/, scratch/, addenda/, subagents/, operations/ and any other file that is not a phase artifact directly in the run directory - are NOT phases and are unaffected.",
     "  each write id, again -> memory-read: the owner's rule, verbatim - *the memory must be read before writing requirements.md*. Memory reaches a run at PHASE ENTRY (`recursive_phase` calls `selectMemory` and returns what it found), and `recursive_init` reads none, so a run could author the artifact that defines the whole run before anything from the memory plane had reached it. This rule refuses a write to a PHASE-0 artifact (`00-requirements.md` or `00-worktree.md` - they share phase number 0, as the phase-order rule above already treats them) while the run holds no READ RECEIPT for phase 0; `recursive_phase` writes that receipt on every entry, whether or not anything was injected, so an EMPTY memory plane SATISFIES this gate and a fresh workspace is never bricked by it. The refusal names the recovery, because it costs one call. A LOCKED phase-0 artifact and every non-phase-0 target (a later phase, an earlier phase, an ordinary product file, a run support file) are untouched by this rule.",
@@ -44,49 +44,49 @@
     {
       "pattern": "write",
       "verdict": "deny",
-      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "edit",
       "verdict": "deny",
-      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "fs_write",
       "verdict": "deny",
-      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "fs-write",
       "verdict": "deny",
-      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "pwsh",
       "verdict": "deny",
-      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "shell",
       "verdict": "deny",
-      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "bash",
       "verdict": "deny",
-      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {
       "pattern": "run_code",
       "verdict": "deny",
-      "reason": "locked-artifact write denial: the target carries Status: LOCKED (reopen explicitly to edit)",
+      "reason": "settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker (reopen explicitly to edit or to withdraw a skip)",
       "label": "locked-write"
     },
     {

@@ -1,8 +1,27 @@
+/**
+ * One phase of the run's canonical sequence.
+ *
+ * ⚠ `requiredForCompletion` IS THE WORK-OPTIONALITY DECLARATION, AND IT IS DELIBERATELY NOT CALLED
+ * `optional` ANY MORE — see `MAY_BE_ABSENT_PHASES` in `src/lock.ts` for the other declaration and
+ * for the live defect the shared word caused. The two are different claims with different
+ * memberships (7 may be absent, 10 are required for completion), and a reader must be able to tell
+ * which one is speaking:
+ *
+ *   MAY BE ABSENT (chain, `lock.ts`)       — an artifact that was NEVER CREATED does not stop the
+ *                                            legal-phase selector.
+ *   requiredForCompletion (work, here)     — the run is only COMPLETE when this phase is SETTLED
+ *                                            (LOCKED, or deliberately SKIPPED and recorded in the
+ *                                            artifact). False means the run's work does not include
+ *                                            this phase at all.
+ *
+ * NEITHER of them says "this phase may be skipped by deleting its artifact": the fold refuses a
+ * removal whatever the flags say, and the legitimate skip is a recorded marker (`src/skip.ts`).
+ */
 export interface PhaseDef {
   key: string
   label: string
   file: string
-  optional: boolean
+  requiredForCompletion: boolean
   phaseName: string
 }
 
@@ -30,8 +49,13 @@ export interface ArtifactState {
  * them nothing to disagree about.
  *
  * Closed vocabulary, total and disjoint (see `phasePosition`):
- *   `absent`       the artifact does not exist
- *   `skipped`      an optional (or legacy-profile late) phase that is not present
+ *   `absent`       the artifact does not exist and the run's work requires it
+ *   `skipped`      SETTLED WITHOUT BEING LOCKED, in one of two shapes a reader can tell apart by
+ *                  `exists`: the artifact is PRESENT and records a deliberate skip in itself
+ *                  (`Status: SKIPPED` + `SkippedAt` + `SkipReason`), or it is ABSENT and the run's
+ *                  work does not require it (a phase that was never created — see
+ *                  `requiredForCompletion` — or a legacy-profile late phase). Never an absent,
+ *                  required phase, and never a deletion.
  *   `draft`        present and unlocked, with no blockers
  *   `blocked`      present and unlocked, with at least one blocker
  *   `invalid-lock` LOCKED but failing a condition other than its hash
@@ -47,7 +71,12 @@ export interface PhaseState {
   key: string
   label: string
   file: string
-  optional: boolean
+  /**
+   * The phase's WORK-OPTIONALITY, carried so a consumer does not have to re-declare the set (the
+   * client used to, and disagreed). Same meaning as {@link PhaseDef.requiredForCompletion}: a run is
+   * complete when every required phase is settled, where settled = LOCKED or deliberately SKIPPED.
+   */
+  requiredForCompletion: boolean
   exists: boolean
   status: string
   lockValid: boolean

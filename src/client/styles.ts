@@ -1217,6 +1217,33 @@ dl.rec-settings-rows {
   color: var(--board-muted-fg);
 }
 
+/* THE CALL'S OWN STATE, when it is NOT a pending question: the gate refused (no question exists) or the
+   result could not be read. Both are statements of fact about the call rather than an offer of a decision,
+   so they are bordered like the other notices and deliberately carry no option list. The refused variant is
+   coloured by the error token, because "nothing was asked" is the one thing this seat must never dress up. */
+.rec-spec-state {
+  margin: 0 0 var(--board-space-8);
+  padding: var(--board-space-8) var(--board-space-12);
+  border: 1px solid var(--board-border);
+  border-radius: var(--board-radius-md);
+  background: var(--board-muted);
+}
+
+.rec-spec-state-refused {
+  border-color: var(--board-error);
+}
+
+.rec-spec-state-lead {
+  margin: 0;
+  font-size: var(--board-text-xs);
+  line-height: 1.5;
+}
+
+.rec-spec-state-refused .rec-spec-state-lead {
+  font-weight: var(--board-fw-medium);
+  color: var(--board-error);
+}
+
 .rec-spec-decision {
   margin: 0;
   font-size: var(--board-text-xs);

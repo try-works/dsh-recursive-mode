@@ -7,7 +7,7 @@
  */
 import { existsSync, readdirSync } from 'node:fs'
 import { join, isAbsolute, resolve, sep } from 'node:path'
-import { getLockStatus } from './lock.ts'
+import { getLockStatus, isSettledStatus } from './lock.ts'
 import { runIdProblem } from './run-id.ts'
 import { validateTransition, type GateCheckResult } from './lifecycle.ts'
 import {
@@ -299,7 +299,13 @@ export function currentPhaseArtifact(worktreeRoot: string, runId: string): strin
     const phase = phaseNumberForArtifact(name)
     if (!phase) continue
     const value = Number(phase)
-    if (getLockStatus(join(runDir, name)) === 'LOCKED') continue
+    // ⚠ SETTLED, NOT MERELY LOCKED. The phase in force is the lowest-numbered artifact still
+    // OUTSTANDING, and a deliberately SKIPPED artifact is not outstanding — it was considered and
+    // recorded as not applicable. Counting only LOCKED here would leave a skipped phase as the active
+    // one forever, so the phase-order rule would refuse every write to the NEXT phase (and
+    // `recursive_phase` would keep returning the skipped phase): the run would be wedged by the very
+    // mechanism that exists to unwedge it. `isSettledStatus` is the one definition of settled.
+    if (isSettledStatus(getLockStatus(join(runDir, name)))) continue
     if (value < inForcePhase) {
       inForcePhase = value
       inForce = name
@@ -500,6 +506,44 @@ function consultTransitionGate(
   }
 }
 
+/**
+ * ISSUE 3 — THE TWO LINES A CALLER SEES MUST BE TELLABLE APART.
+ *
+ * MEASURED, IN A LIVE DIAGNOSTIC RUN, and it produced a wrong finding: a `recursive_lock` in a
+ * non-git workspace was refused by the TOOL (`Artifact … does not meet the phase standard …, so it
+ * was not locked: … Unable to verify git diff basis: … not a git repository`), and the diagnostic
+ * report attributed the refusal to THIS advisory line instead — *"the guard layer blamed a
+ * different cause ('## Effective Inputs Re-read', not in phase-0's required sections)"* — because
+ * `transition gate (report-only) failed: …` was the other line the plugin emitted about the call,
+ * and it is the only one of the two that reads like a verdict.
+ *
+ * ⚠ WHAT THE OLD SENTENCE GOT WRONG, stated precisely, because both halves are the defect class
+ * this project keeps fixing — text asserting a state that is not so:
+ *
+ *   1. "failed" WAS READ AS "REFUSED". The gate does NOT refuse and CANNOT: `advisory()` below attaches
+ *      the verdict to an ALLOW, `index.ts` logs it and RETURNS CONTINUE, and the call runs. So the
+ *      line now says out loud that the call was not refused and that the tool's own refusal — if any
+ *      — comes after it. The warn-on-allow semantics are untouched.
+ *   2. ITS FAILURE LIST IS NOT THIS PHASE'S STANDARD. `validateTransition` enforces a SUPERSET
+ *      (documented on `consultTransitionGate` above), and one member of it — `## Effective Inputs
+ *      Re-read` — belongs to the AUDITED phases (`ts-lint.ts` `lintEffectiveInputAddenda` gates it on
+ *      `AUDITED_PHASE_FILES`), so phase 0, which does not owe it, is reported as failing it on every
+ *      lock. The tail names the real authority rather than leaving a reader to conclude the section
+ *      is owed: the artifact is held to the phase standard, which the linter judges.
+ *
+ * THE MARKER PREFIX IS KEPT VERBATIM (`transition gate (report-only) failed: `): it is the phrase
+ * `tests/guard-path.spec.ts` pins as the discriminator against the OLD `tool guard (advisory)`
+ * wording, and re-wording a string a spec pins as evidence would trade one unreadable line for a
+ * weaker test. What changed is what surrounds it — the text now carries its own kind, so a reader
+ * scanning the log can tell which line stopped the work without reading the source.
+ */
+const TRANSITION_REPORT_ONLY_MARKER = 'transition gate (report-only) failed: '
+const TRANSITION_REPORT_ONLY_TAIL =
+  ' [REPORT ONLY: this did NOT refuse the call, which was ALLOWED - the transition gate reports and never changes a'
+  + ' verdict, and its failure list is deliberately broader than this phase\'s requirements (it asks every phase doc'
+  + ' to carry `## Effective Inputs Re-read`, which the audited phases owe and phase 0 does not). The only refusal a'
+  + ' lock call meets is the artifact\'s own phase standard, checked by the tool.]'
+
 /** Attach the transition verdict, and warn when the guard allows against it. */
 function advisory(decision: ToolGuardDecision, transition: GateCheckResult | undefined): ToolGuardDecision {
   if (!transition) return decision
@@ -517,7 +561,7 @@ function advisory(decision: ToolGuardDecision, transition: GateCheckResult | und
   return {
     ...decision,
     rule: 'transition',
-    warn: 'transition gate (report-only) failed: ' + transition.failures.join('; '),
+    warn: TRANSITION_REPORT_ONLY_MARKER + transition.failures.join('; ') + TRANSITION_REPORT_ONLY_TAIL,
     transition,
   }
 }

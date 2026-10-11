@@ -109,14 +109,33 @@ function tampersOf(status: ReturnType<typeof foldRun>): Record<string, Recursive
 
 /**
  * Derive the run-level state from the folded status. The fs stores no run-level
- * state file, so the honest mapping is: 'complete' when every non-optional phase
- * exists and is lock-valid, else 'active'. Tamper facts ARE fs-recoverable and
- * are derived by tampersOf above; gateBlocked and subagent activity are not
- * (recorded limitation; future enhancement).
+ * state file, so the honest mapping is: 'complete' when every phase the run's WORK
+ * requires is SETTLED, else 'active'.
+ *
+ * ⚠ TWO DELIBERATE CHANGES, both from the skip mechanism (`src/skip.ts`), and both stated because a
+ * reader of a completeness calculation deserves to know what moved:
+ *
+ *   1. THE FIELD IS NAMED `requiredForCompletion`, NOT `optional`. It used to read the same word as
+ *      `lock.ts`'s `OPTIONAL_PHASES` while holding a DIFFERENT set (2 members vs 7) and meaning a
+ *      different thing (a work claim vs a chain-traversal tolerance), so a reader could not tell which
+ *      declaration was speaking — and the page that rendered both as a badge said as much. The two
+ *      claims now have two names: MAY BE ABSENT (chain) and REQUIRED FOR COMPLETION (work).
+ *
+ *   2. SETTLED IS NOT "LOCKED" ANY MORE. A phase that was deliberately SKIPPED is a decision the run
+ *      recorded, so it counts as settled — otherwise a legitimate skip would make a run permanently
+ *      incomplete, which is the same dead end that made deleting the artifact look like the only way
+ *      forward. The shape is unambiguous: a skip is only ever honoured on an artifact that EXISTS and
+ *      says so in itself, while the fold's other SKIPPED statuses are synthesized for ABSENT phases
+ *      only — so `exists && status === 'SKIPPED'` cannot be reached by a missing file, and a required
+ *      phase that is merely absent still holds the run open (preserved, and asserted).
+ *
+ * Tamper facts ARE fs-recoverable and are derived by tampersOf above; gateBlocked and subagent
+ * activity are not (recorded limitation; future enhancement).
  */
 function runStateOf(status: ReturnType<typeof foldRun>): RecursiveRunState {
-  const mandatory = status.phases.filter(p => !p.optional)
-  const complete = mandatory.every(p => p.exists && p.lockValid)
+  const settled = (p: ReturnType<typeof foldRun>['phases'][number]) => p.lockValid || (p.exists && p.status === 'SKIPPED')
+  const required = status.phases.filter(p => p.requiredForCompletion)
+  const complete = required.every(settled)
   return complete ? 'complete' : 'active'
 }
 

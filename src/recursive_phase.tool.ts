@@ -19,8 +19,14 @@ import type { RecursiveRuntime } from './runtime.ts'
  * reason — so the defect was that the contract was SILENT about it, not that the mechanism was absent.
  * Every sentence below is a claim about what this call actually returns: the payload's `memory` and
  * `memoryReason` fields come from `selectMemory`, `runId`/`phase` from the resolved run, `requiredSections`
- * / `audited` / `tdd` / `qa` / `memoryWrite` from `phaseRulesFor`, and `ask` from `pendingGateFor`. A
- * description that advertised a field the payload does not carry would be worse than the silence it fixes.
+ * / `audited` / `tdd` / `qa` / `memoryWrite` / `sectionFormats` from `phaseRulesFor`, and `ask` from
+ * `pendingGateFor`. A description that advertised a field the payload does not carry would be worse than the
+ * silence it fixes.
+ *
+ * ⚠ AND `sectionFormats` IS NAMED THERE FOR DISCOVERY, which is the whole point of it existing: the format of
+ * an entry-row section used to be knowable only from the linter's failures, so an agent had to reverse-engineer
+ * it (see `SECTION_FORMAT_RULES` in `phase-rules.ts` for the measured transcript). A payload field nobody is
+ * told about is a fact the agent still has to discover, so the one line in the description is load-bearing.
  *
  * ⚠ AND AN EMPTY PLANE IS SAID TO BE NORMAL, because that is the honest reading and the one a model needs:
  * `selectMemory` answers *"the memory plane is empty, so nothing is injected"*, which is a RESULT — the
@@ -39,13 +45,19 @@ export function createRecursivePhaseTool(recursive: RecursiveRuntime) {
   return defineTool({
     name: 'recursive_phase',
     description: 'Enter the current recursive-mode phase: returns that phase\'s lint rules and instructions'
-      + ' (required sections, gates, TDD/QA notes) AND the prior-run memory selected for this run and phase.'
+      + ' (required sections, gates, TDD/QA notes, and `sectionFormats` — the exact entry-row format plus a passing'
+      + ' example for every section whose shape is not obvious from its heading, e.g. `## Source Requirement Inventory`'
+      + ' and `## Requirement Completion Status`; write to those, not to a shape inferred from a lint failure)'
+      + ' AND the prior-run memory selected for this run and phase.'
       + ' `memory` carries the shards to use, each titled so it can be cited, and `memoryReason` says why'
       + ' nothing was injected when it is empty — an EMPTY memory plane is a normal result of a read, never'
       + ' a failure, so do not retry because of it. Nothing from the memory plane reaches a run before this'
       + ' call, so MAKE IT ONCE WHEN ENTERING A PHASE and before authoring that phase\'s artifact'
       + ' (`00-requirements.md` included: a write to it is refused until a read is recorded for the run).'
-      + ' The same rules are also auto-injected once per phase transition.',
+      + ' The same rules are also auto-injected once per phase transition. `gitRequired` is null when git is'
+      + ' available and otherwise SAYS WHAT IS WRONG: in a workspace that is not a git repository no artifact'
+      + ' can be locked at all — the lock hash and the executable diff basis are git facts — so read it BEFORE'
+      + ' authoring and `git init` first rather than writing a phase-0 artifact that cannot be locked.',
     parameters: {
       runId: { type: 'string', description: 'Optional run id — the NAME of the run directory under .recursive/run/ (e.g. 03-something), never a path: ' + RUN_ID_RULE + '. Omit it for the latest run by mtime.' },
     },

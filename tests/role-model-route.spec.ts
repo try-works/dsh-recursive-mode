@@ -12,8 +12,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RecursiveRuntime } from '../src/runtime.ts'
-import { roleKindOf, routeForRole, modelForRole } from '../src/role-route.ts'
-import { resolveRole, type RouterPolicy } from '../src/router.ts'
+import { roleKindOf, routeForRole, modelForRole, resolveSubagentTarget } from '../src/role-route.ts'
+import { resolveRole, loadRouterPolicy, type RouterPolicy } from '../src/router.ts'
 
 function policy(routes: Record<string, { model?: string | null }>): RouterPolicy {
   return {
@@ -206,3 +206,163 @@ describe('T9 — the delegation request declares the role’s model', () => {
     expect((out.routingNotes ?? []).join(' ')).toContain('rigorous')
   })
 })
+
+/**
+ * ⚠ FU-20 — THE PRECEDENCE, STATED AS PRECEDENCE RATHER THAN LEFT TO BE READ OFF THE CODE.
+ *
+ *   per-call override  →  phase route  →  role route  →  general subagent default  →  THE SESSION'S OWN MODEL
+ *
+ * WHY THIS ORDER. The narrowest statement of intent wins, and "narrowest" is measured in how much the user had to
+ * know to make it: naming a phase ("3.5 needs the strong model") is more specific than naming a role
+ * ("reviewers need the strong model"), and a per-call override is the caller asking for something for one
+ * delegation only. The SESSION's model is the floor and not a competing level: it is what every child already
+ * inherits when nobody has said anything, which is exactly why the owner wants it as the default — and why it
+ * must never outrank a setting the user actually made.
+ *
+ * The levels are also resolved PER VALUE, not wholesale: a phase that names only a model keeps the role's
+ * provider. That tolerance is what makes "configure a subagent per phase or role" usable, because a user setting
+ * one field does not have to restate the level beneath it.
+ */
+describe('FU-20 — the per-phase and per-role model ladder, and where the session default sits', () => {
+  const base = loadRouterPolicy().defaults
+  const SESSION = {
+    available: true,
+    provider: 'deepseek-official',
+    model: 'deepseek-flash',
+    source: 'request-header' as const,
+    note: 'read from the parent session\'s request header config',
+  }
+  const reviewRole = { enabled: true, mode: 'native', cli: null, model: 'role-model', fallback: 'self-audit' }
+
+  it('ROLE level is honoured, and reported as the level that chose it', () => {
+    const target = resolveSubagentTarget({
+      role: 'code-reviewer',
+      phase: '03',
+      policy: { ...loadRouterPolicy(), role_routes: { 'code-reviewer': reviewRole } },
+      ladderProvider: 'spawn',
+      sessionModel: SESSION,
+    })
+    expect(target.model).toBe('role-model')
+    expect(target.chosen.model).toBe('role')
+    expect(target.effectiveModel).toBe('role-model')
+  })
+
+  it('PHASE OVERRIDES ROLE — the deliberate precedence, asserted as such', () => {
+    const target = resolveSubagentTarget({
+      role: 'code-reviewer',
+      phase: '3.5',
+      policy: {
+        ...loadRouterPolicy(),
+        role_routes: { 'code-reviewer': reviewRole },
+        phase_routes: { '3.5': { model: 'phase-model' } },
+      },
+      ladderProvider: 'spawn',
+      sessionModel: SESSION,
+    })
+    expect(target.model, 'the phase is the narrower statement of intent, so it wins').toBe('phase-model')
+    expect(target.chosen.model).toBe('phase')
+    expect(target.reason).toContain('the phase 3.5 override')
+  })
+
+  it('a phase that names ONLY a model keeps the role’s provider — levels merge per value', () => {
+    const target = resolveSubagentTarget({
+      role: 'code-reviewer',
+      phase: '3.5',
+      policy: {
+        ...loadRouterPolicy(),
+        role_routes: { 'code-reviewer': { ...reviewRole, provider: 'fork' } },
+        phase_routes: { '3.5': { model: 'phase-model' } },
+      },
+      ladderProvider: 'spawn',
+      sessionModel: SESSION,
+    })
+    expect(target.model).toBe('phase-model')
+    expect(target.provider, 'the phase named no provider, so the role level still supplies one').toBe('fork')
+  })
+
+  it('⚠ a phase may NAME THE ROLE it wants, and that field is now LIVE rather than decorative', () => {
+    // `router.ts` documents `phase_routes: { '08': { role: 'memory-auditor' } }` and `provider-model-policy.spec`
+    // writes exactly that — while the resolver read only the phase's provider and model, so a user could name
+    // the auditor for a phase and silently get the requested role's configuration instead.
+    const target = resolveSubagentTarget({
+      role: 'code-reviewer',
+      phase: '08',
+      policy: {
+        ...loadRouterPolicy(),
+        role_routes: {
+          'code-reviewer': reviewRole,
+          'memory-auditor': { enabled: true, mode: 'native', cli: null, model: 'auditor-model', fallback: 'self-audit' },
+        },
+        phase_routes: { '08': { role: 'memory-auditor' } },
+      },
+      ladderProvider: 'spawn',
+    })
+    expect(target.role).toBe('memory-auditor')
+    expect(target.model).toBe('auditor-model')
+    expect(target.chosen.model).toBe('role')
+  })
+
+  it('a phase naming a role with NO route falls back to the requested role, rather than to nothing', () => {
+    const target = resolveSubagentTarget({
+      role: 'code-reviewer',
+      phase: '08',
+      policy: {
+        ...loadRouterPolicy(),
+        role_routes: { 'code-reviewer': reviewRole },
+        phase_routes: { '08': { role: 'unconfigured-role' } },
+      },
+      ladderProvider: 'spawn',
+    })
+    expect(target.model, 'a named-but-unrouted role must not silently erase the configured model').toBe('role-model')
+  })
+
+  it('carries the LLM provider that SERVES the model, with its own provenance', () => {
+    const target = resolveSubagentTarget({
+      role: 'code-reviewer',
+      phase: '03',
+      policy: {
+        ...loadRouterPolicy(),
+        role_routes: {
+          'code-reviewer': { enabled: true, mode: 'native', cli: null, model: 'role-model', modelProvider: 'deepseek-official', fallback: 'self-audit' },
+        },
+      },
+      ladderProvider: 'spawn',
+    })
+    expect(target.modelProvider).toBe('deepseek-official')
+    expect(target.chosenModelProvider).toBe('role')
+    expect(target.reason).toContain('served by deepseek-official')
+  })
+
+  it('⚠ THE FLOOR NAMES THE SESSION MODEL instead of saying “the session default” and naming nothing', () => {
+    const target = resolveSubagentTarget({
+      role: 'analyst',
+      phase: '03',
+      policy: loadRouterPolicy(),
+      ladderProvider: 'spawn',
+      sessionModel: SESSION,
+    })
+    expect(target.model).toBeNull()
+    expect(target.effectiveModel).toBe('deepseek-official/deepseek-flash')
+    expect(target.reason).toContain('inherits the session default')
+    expect(target.reason, 'the inherited model is NAMED when it could be read').toContain('deepseek-flash')
+  })
+
+  it('and with NO reading it reports UNKNOWN rather than substituting a plausible model', () => {
+    const target = resolveSubagentTarget({ role: 'analyst', policy: loadRouterPolicy(), ladderProvider: 'spawn' })
+    expect(target.effectiveModel).toContain('UNKNOWN')
+    expect(target.reason).toContain('rather than naming a model it did not read')
+  })
+
+  it('the general default still sits BELOW the role and ABOVE the session', () => {
+    const target = resolveSubagentTarget({
+      role: 'implementer',
+      phase: '03',
+      policy: { ...loadRouterPolicy(), defaults: { ...base, subagent: { model: 'general-model' } } },
+      ladderProvider: 'spawn',
+      sessionModel: SESSION,
+    })
+    expect(target.model).toBe('general-model')
+    expect(target.chosen.model).toBe('general')
+  })
+})
+

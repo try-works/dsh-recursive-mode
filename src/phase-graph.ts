@@ -29,6 +29,12 @@ export interface PhaseNode {
   present?: boolean
   /** Whether the artifact is locked, when the caller knows. */
   locked?: boolean
+  /**
+   * Whether the artifact carries a DELIBERATE SKIP record (`Status: SKIPPED`), when the caller
+   * knows. A skipped node is SETTLED without being locked: it may be walked past, and it satisfies
+   * its dependents' prerequisites — while never being reported as locked work.
+   */
+  skipped?: boolean
 }
 
 /** One directed edge: `to` depends on `from`. */
@@ -55,6 +61,8 @@ export function buildPhaseGraph(input: {
   sequence: readonly string[]
   present: readonly string[]
   locked?: readonly string[]
+  /** Artifacts carrying a deliberate skip record. Settled without being locked — see `nextLegalPhase`. */
+  skipped?: readonly string[]
   /** Declared dependencies: `from` must be settled before `to`. Order is irrelevant. */
   citations?: ReadonlyArray<{ from: string; to: string }>
   /**
@@ -71,6 +79,7 @@ export function buildPhaseGraph(input: {
 }): PhaseGraph {
   const presentSet = new Set(input.present)
   const lockedSet = new Set(input.locked ?? [])
+  const skippedSet = new Set(input.skipped ?? [])
   const queriedSet = new Set(input.queried ?? [])
   const nodes: PhaseNode[] = input.sequence
     .map((id, index) => ({ id, index }))
@@ -81,6 +90,7 @@ export function buildPhaseGraph(input: {
       // question, not a dependency.
       present: presentSet.has(node.id),
       locked: lockedSet.has(node.id),
+      skipped: skippedSet.has(node.id),
     }))
 
   const indexOf = new Map(input.sequence.map((id, index) => [id, index]))
@@ -146,13 +156,17 @@ export function reachableFrom(graph: PhaseGraph, id: string): string[] {
  * The next phase a run may work on.
  *
  * ⚠ THIS MODELS THE SHIPPED RULES EXACTLY, because `lock.ts` delegates to it and `lock.parity.spec.ts`
- * is the proof. Three of them are easy to miss and are asserted in the spec:
- *   1. a LOCKED node is skipped;
- *   2. a node that is **absent and declared OPTIONAL** is skipped — an optional phase nobody created
- *      must not stop the run;
- *   3. if the first node that survives 1 and 2 has a prerequisite that is not LOCKED, the answer is
+ * is the proof. Four of them are easy to miss and are asserted in the spec:
+ *   1. a SETTLED node is skipped — LOCKED (the work is done and hashed) or deliberately SKIPPED (a
+ *      record in the artifact saying the phase was considered and does not apply);
+ *   2. a node that is **absent and declared MAY BE ABSENT** is skipped — an artifact nobody ever
+ *      created must not stop the run;
+ *   3. if the first node that survives 1 and 2 has a prerequisite that is not SETTLED, the answer is
  *      **`null`, NOT the next node** — the run is BLOCKED, and returning the node after it would
- *      silently skip a dependency.
+ *      silently skip a dependency;
+ *   4. `skipped` is carried as its OWN node attribute rather than folded into `locked`, because a
+ *      caller that receives a skip for an approval would report skipped work as approved. The walk
+ *      treats the two alike; every reader keeps them apart.
  *
  * ⚠ RULE 3 IS WHERE A GRAPH EARNS ITS KEEP, and it is invisible in a linear array: with a back-edge
  * (an `upstream-gap` addendum citing a LATER artifact), an EARLY unlocked node can be blocked by a
@@ -167,12 +181,14 @@ export function nextLegalPhase(
   options: { optional?: ReadonlySet<string> } = {},
 ): string | null {
   const optional = options.optional ?? new Set<string>()
-  const locked = new Set(graph.nodes.filter((node) => node.locked === true).map((node) => node.id))
+  const settled = new Set(
+    graph.nodes.filter((node) => node.locked === true || node.skipped === true).map((node) => node.id),
+  )
   const ordered = [...graph.nodes].sort((a, b) => a.index - b.index)
   for (const node of ordered) {
-    if (locked.has(node.id)) continue
+    if (settled.has(node.id)) continue
     if (node.present !== true && optional.has(node.id)) continue
-    const blocked = prerequisitesOf(graph, node.id).some((from) => !locked.has(from))
+    const blocked = prerequisitesOf(graph, node.id).some((from) => !settled.has(from))
     if (blocked) return null
     return node.id
   }

@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { contentSha256 } from './review.ts'
+import { describeSessionModel, readSessionModel, type SessionModelReading } from './model-inventory.ts'
 
 /**
  * Opaque handle to the live direct-parent Agent. The live continuable service
@@ -17,11 +18,28 @@ import { contentSha256 } from './review.ts'
  * parent` (authorizeLineage), `ancestry.has(parent)` (interrupt/drain), and a
  * `WeakSet` of live ancestry — so this must be the real live `Agent`, never a
  * structural `{ id }` copy. The seam only ever reads `id`/`session.header.cwd`
- * for attribution, and never serializes or inspects the live object.
+ * for attribution — and, since FU-20, `session.requestHeader().config` to name
+ * the model an inheriting child will actually run on (see the field). It never
+ * serializes or inspects the live object.
  */
 export interface SubagentParentHandle {
   readonly id?: string
-  readonly session?: { readonly header?: { readonly cwd?: string } }
+  readonly session?: {
+    readonly header?: { readonly cwd?: string }
+    /**
+     * ⚠ FU-20 — THE SESSION'S OWN MODEL, READ THE WAY THE HARNESS READS IT.
+     *
+     * The T3/T4 contract below says this handle is read only for `id` and `session.header.cwd`. Adding a third
+     * read is a change to that contract, so it is stated here rather than slipped in: `requestHeader().config`
+     * is DSH's own public Session accessor, it is the FIRST source the harness itself consults
+     * (`child-agent.ts:69`, `parentAgentOptionsForDelegation`), and reading it is what lets this plugin NAME the
+     * model an unconfigured child will inherit instead of saying "the session default" and naming nothing. It is
+     * still only a READ: nothing here serializes, clones, or inspects the live object.
+     */
+    readonly requestHeader?: () => { readonly config?: { readonly provider?: string; readonly model?: string } } | undefined
+  }
+  /** FU-20: the harness's fallback source for a session's model, before its first request. */
+  readonly options?: { readonly provider?: string; readonly model?: string }
 }
 
 /** Durable identity of one continuable child session (string-branded in the host). */
@@ -251,6 +269,18 @@ export interface ContinuableDelegationLike {
    * report of "the child is still working".
    */
   parked?: boolean
+  /**
+   * ⚠ FU-20 — WHAT THIS CHILD RUNS ON, AND WHETHER THAT MAKES IT INDEPENDENT.
+   *
+   * Reported from the delegation itself because this is the one place that holds the live parent Agent and the
+   * requested `agentOptions` at the same time. A review's independence is a property of the CHILD'S MODEL against
+   * THE AUTHOR'S, so it cannot be answered by the router (which never sees a session) or by the caller's record
+   * (which sees only what it was told). One sentence, unqualified: either the child is on a different model, or
+   * it is on the author's own model and the independence is of agent and context only.
+   */
+  childRoute?: string
+  /** FU-20: the session-model reading this outcome was resolved against. */
+  sessionModel?: SessionModelReading
 }
 
 /** Verdict vocabulary shared by T3/T4 (matches the delegated review schema). */
@@ -421,6 +451,46 @@ export function readRepairFromReply(replyText: string): string {
 }
 
 /**
+ * ⚠ FU-20 — "IS THIS CHILD INDEPENDENT OF ITS AUTHOR, AND ON WHAT?" — ONE SENTENCE, FROM EVIDENCE.
+ *
+ * Two facts decide it, and this plugin can establish both:
+ *
+ *   1. what the child was ASKED to run on — `requested`, the model the router put on the start request;
+ *   2. what the session it was spawned from is running on — read from the live parent Agent the way the harness
+ *      reads it (`model-inventory.readSessionModel`).
+ *
+ * When the child was asked for NO model, the harness copies the parent's (`child-agent.ts:99`), so the child runs
+ * on the SESSION'S model by construction — the owner explicitly wants that as the default, and this sentence
+ * says what it costs: the delegation is independent by AGENT and CONTEXT, not by MODEL.
+ *
+ * ⚠ IT NEVER CLAIMS MORE THAN IT READ. With no reading available it says the model is unknown rather than
+ * assuming either answer, because "independence" is the one property a reader of a delegated review must be able
+ * to trust, and an unqualified claim that turns out to be false is worse than a stated unknown.
+ */
+export function describeChildRoute(input: {
+  requested: string | null
+  session: SessionModelReading
+}): string {
+  const { requested, session } = input
+  if (requested !== null && requested.trim() !== '') {
+    const model = requested.trim()
+    if (!session.available) {
+      return 'child runs on the configured model ' + model + '; this session\'s own model could not be read ('
+        + session.note + '), so whether the two DIFFER — and therefore whether the review is independent by model '
+        + 'as well as by agent — is UNKNOWN here and is not claimed.'
+    }
+    return session.model === model
+      ? 'SEPARATE AGENT, SAME MODEL: the child runs on ' + model + ', which IS the model this session runs on, so '
+        + 'the review is independent by AGENT and CONTEXT but NOT by model.'
+      : 'child runs on ' + model + ', a DIFFERENT model from this session\'s (' + describeSessionModel(session)
+        + '), so the review is independent by agent and by model.'
+  }
+  return 'SEPARATE AGENT, SAME MODEL: no model was configured for this child, so the harness gives it this '
+    + 'session\'s own model — ' + describeSessionModel(session) + ' — and the review is independent by AGENT and '
+    + 'CONTEXT but NOT by model.'
+}
+
+/**
  * Run a multi-round delegated task on ONE durable continuable child:
  * 1. `startContinuable` (initial prompt) — `start()` is never called.
  * 2. `awaitRoundResult` observes the child's settlement for that round.
@@ -459,6 +529,12 @@ export async function delegateContinuable(input: {
   const maxRounds = input.maxRounds ?? 3
   const readVerdict = input.readVerdict ?? readVerdictFromStructured
   const readRepair = input.readRepair ?? readRepairFromStructured
+  // ⚠ FU-20 — RESOLVED ONCE, AT THE ENTRY, so every return path of this function carries the same answer. This is
+  // the only place in the plugin holding BOTH the live parent Agent and the model the child was asked for, which
+  // is exactly the pair a claim of independence needs. It is a read: nothing is sent as a result of it, and the
+  // child's model is still the caller's decision (see `agentOptions` below).
+  const sessionModel = readSessionModel(parent)
+  const childRoute = describeChildRoute({ requested: input.agentOptions?.model ?? null, session: sessionModel })
 
   const startContinuable = subagents?.startContinuable
   const followup = subagents?.followup
@@ -497,9 +573,11 @@ export async function delegateContinuable(input: {
         accepted: verdict === 'APPROVE' && evaluateDelegationResult(oneShot).accepted,
         fellBackToOneShot: true,
         reason: fallbackReason,
+        childRoute,
+        sessionModel,
       }
     } catch (err) {
-      return { ok: false, reason: err instanceof Error ? err.message : String(err), rounds: [], accepted: false, fellBackToOneShot: true }
+      return { ok: false, reason: err instanceof Error ? err.message : String(err), rounds: [], accepted: false, fellBackToOneShot: true, childRoute, sessionModel }
     }
   }
 
@@ -570,12 +648,14 @@ export async function delegateContinuable(input: {
           ok: false,
           reason: 'no settlement has landed for round ' + (round + 1) + ' yet, so the round is PARKED, not failed: '
             + 'the child may still be working. Resume it on a later turn with childId ' + String(childId)
-            + ' (the `resumeChild` argument) — do not start a second child.',
+            + ' (the `resumeChild` argument) — do not start a second child. Route: ' + childRoute,
           childId,
           messageIds,
           rounds,
           accepted: false,
           parked: true,
+          childRoute,
+          sessionModel,
         }
       }
       current.result = observed
@@ -589,12 +669,14 @@ export async function delegateContinuable(input: {
           messageIds,
           rounds,
           accepted,
+          childRoute,
+          sessionModel,
         }
       }
       // REVISE: send the repair instruction to the SAME child (FIFO, context retained).
       const repair = readRepair(observed)
       if (!repair) {
-        return { ok: false, reason: 'REVISE verdict without a repair instruction', childId, messageIds, rounds, accepted: false }
+        return { ok: false, reason: 'REVISE verdict without a repair instruction', childId, messageIds, rounds, accepted: false, childRoute, sessionModel }
       }
       const followupId = await followup(
         parent,
@@ -607,12 +689,12 @@ export async function delegateContinuable(input: {
       current.repair = repair
       rounds.push({ text: repair })
     }
-    return { ok: false, reason: 'max rounds reached without an APPROVE', childId, messageIds, rounds, accepted: false }
+    return { ok: false, reason: 'max rounds reached without an APPROVE', childId, messageIds, rounds, accepted: false, childRoute, sessionModel }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     // Failure preserves the child (a later followup may still resume it); the
     // kill switch is explicit (interruptContinuable), never implicit.
-    return { ok: false, reason: message, childId, messageIds, rounds, accepted: false }
+    return { ok: false, reason: message, childId, messageIds, rounds, accepted: false, childRoute, sessionModel }
   }
 }
 

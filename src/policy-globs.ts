@@ -486,10 +486,15 @@ function lockOrderRule(artifact: unknown, runDir: string | undefined, runId?: st
 }
 
 /**
- * Locked-artifact write rule: a denial when the target carries
- * `Status: LOCKED`, `null` otherwise. Only a run-tree `*.md` is a candidate —
+ * Settled-artifact write rule: a denial when the target carries `Status: LOCKED` or a recorded
+ * `Status: SKIPPED`, `null` otherwise. Only a run-tree `*.md` is a candidate —
  * the same admission test the pre-T16 branch used, now asked of the RESOLVED
  * path as well (see the ADMISSION note below).
+ *
+ * ⚠ A RECORDED SKIP IS EVIDENCE, WHICH IS WHY IT IS IN THIS RULE AND NOT IN A NEW ONE. The whole
+ * point of a legitimate skip is that the artifact KEEPS saying what happened; a record the party it
+ * constrains can rewrite is not a record. The recovery stays one call (`recursive_lock` with
+ * `reopen: true`), which withdraws the marker and invalidates the receipt the skip pinned.
  *
  * A caller with no `worktreeRoot` still gets `null` for every target, absolute
  * ones included: that is the pre-existing behaviour and it is left alone here —
@@ -517,7 +522,17 @@ function lockedWriteRule(target: string | null, worktreeRoot: string | undefined
   // (`…/.recursive/run/../…`) is still admitted, exactly as before.
   const resolved = abs.replace(/\\/g, '/')
   if (!normalized.includes('/.recursive/run/') && !resolved.includes('/.recursive/run/')) return null
-  if (getLockStatus(abs) !== 'LOCKED') return null
+  const status = getLockStatus(abs)
+  // ⚠ A SKIP RECORD IS EVIDENCE TOO, so it is write-protected by this same rule. The agent is told
+  // (by the fold's refusal, by the lock tool's description, by the skip's own result) that a phase
+  // which does not apply is SKIPPED IN PLACE — and the record it writes is what a later reader trusts.
+  // Leaving it editable would let the one party with a motive to look finished hand-edit the reason, or
+  // flip the marker back, through the ordinary write path; the recovery is one call, because reopen
+  // withdraws the record explicitly and invalidates the receipt the skip pinned.
+  if (status === 'SKIPPED') {
+    return { verdict: 'deny', detail: normalized + ' carries Status: SKIPPED (a recorded skip is evidence; call recursive_lock with reopen: true to work on this phase again)' }
+  }
+  if (status !== 'LOCKED') return null
   return { verdict: 'deny', detail: normalized + ' carries Status: LOCKED (reopen explicitly to edit)' }
 }
 
@@ -725,7 +740,7 @@ export function builtInToolPolicyRules(): ToolPolicyRule[] {
     rules.push({
       pattern: name,
       verdict: 'deny',
-      reason: 'locked-artifact write denial: the target carries Status: LOCKED',
+      reason: 'settled-artifact write denial: the target carries Status: LOCKED or a recorded SKIPPED marker',
       label: 'locked-write',
       predicate: (id, args, ctx) => (WRITE_TOOL_NAMES.has(id) ? lockedWriteRule(policyTargetPath(args), ctx.worktreeRoot) : null),
     })

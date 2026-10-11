@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getArtifactRequiredSections } from '../src/phase-rules.ts'
+import { SECTION_FORMAT_RULES, getArtifactRequiredSections } from '../src/phase-rules.ts'
 
 const EXPECTED: Record<string, string[]> = {
   '00-requirements.md': ['TODO','Requirements','Out of Scope','Constraints','Coverage Gate','Approval Gate'],
@@ -28,5 +28,34 @@ describe('phase-rules parity (canonical lint-recursive-run.py get_artifact_requi
   it('non-strict profile omits audit headings', () => {
     const got = getArtifactRequiredSections('01-as-is.md', 'memory-phase8')
     expect(got).not.toContain('Audit Verdict')
+  })
+})
+
+/**
+ * ⚠ NO PINNED LIST MOVED FOR THE FORMAT GUIDANCE, and this is the assertion that keeps it that way.
+ *
+ * The twelve lists above are byte-parity with the canonical linter's `get_artifact_required_sections`, so the
+ * only safe way to tell an agent HOW to write an entry row was to add guidance BESIDE those lists rather than
+ * a section to them. `SECTION_FORMAT_RULES` is therefore keyed by artifact and may only name artifacts and
+ * sections this spec already pins: a table entry for an artifact outside the canonical twelve, or a rule for
+ * a section the artifact does not require, is guidance nobody can act on — and, in the second case, a hint
+ * that would have had to move a parity list to be reachable.
+ */
+describe('phase-rules parity — the format guidance rides the canonical lists, never extends them', () => {
+  it('names no artifact outside the canonical twelve', () => {
+    for (const file of Object.keys(SECTION_FORMAT_RULES)) {
+      expect(Object.keys(EXPECTED), 'SECTION_FORMAT_RULES key ' + file).toContain(file)
+    }
+  })
+
+  it('describes only sections the pinned list for that artifact already requires', () => {
+    for (const [file, rules] of Object.entries(SECTION_FORMAT_RULES)) {
+      for (const rule of rules) {
+        expect(EXPECTED[file], file + ' :: ' + rule.section).toContain(rule.section)
+      }
+      // And the FUNCTION and the PIN still agree for that artifact, so the table cannot be describing a
+      // list other than the one this spec pins.
+      expect(getArtifactRequiredSections(file, 'recursive-mode-audit-v2')).toEqual(EXPECTED[file])
+    }
   })
 })

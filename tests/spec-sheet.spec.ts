@@ -27,14 +27,31 @@ import { create as createRenderer, act, type ReactTestInstance, type ReactTestRe
 import {
   RunStartSpecSheet,
   RunStartSpecSheetBody,
+  CALL_ANSWERED_LEAD,
+  CALL_PENDING_LEAD,
+  CALL_PENDING_TAIL,
+  CALL_REFUSED_LEAD,
+  CALL_REFUSED_NEXT,
+  CALL_REFUSED_QUOTE_LEAD,
+  CALL_REFUSED_UNQUOTED,
+  CALL_UNKNOWN_LEAD,
+  RUN_START_OPTION_MEANING,
+  RUN_START_APPROVE_LABEL,
+  RUN_START_HOLD_LABEL,
+  RUN_START_QUESTION,
   RUN_START_SPEC_FILE,
   RUN_START_TOOL_NAME,
   decisionLine,
   parseRecursiveAskArgs,
+  readCall,
+  readCallOutcome,
+  refusedNotice,
   resolveSpecRoot,
   specPath,
   specSheetModel,
   UNFILLED_NOTICE,
+  unknownNotice,
+  type SpecSheetBlock,
 } from '../src/client/spec-sheet.tsx'
 // ⚠ THE PARSER IS IMPORTED FROM ITS OWN HOME. The sheet renders through `doc-viewer.tsx`'s `parseDoc` /
 // `PreviewLines` and does NOT re-export them: a spec that reached them through the sheet would let a second
@@ -185,6 +202,73 @@ function startBlock(args: Record<string, unknown>): { phase: 'start'; argsRaw: s
   return { phase: 'start', argsRaw: JSON.stringify(args) }
 }
 
+/* ---------------- the SETTLED call: what a refusal and a decision actually look like on the wire ------------- */
+
+/**
+ * ⚠ THE PROVENANCE OF THESE TWO FIXTURES IS DIFFERENT, AND THEY ARE LABELLED SEPARATELY ON PURPOSE — a spec
+ * that claimed both were verbatim would be making the same kind of false claim this defect is about.
+ *
+ * `LIVE_CHANNEL_REFUSAL` IS VERBATIM. It was read out of a real `tool/result` event in this machine's session
+ * store (decompressed from `~/.dsh/sessions/--D-DEV-dsh-recursive-mode--/*.session.v4.jsonl.zstd`) and it is
+ * what measured the two facts the fix rests on: the refusal is the call's PAYLOAD, and the recorded
+ * `isError` for it is `false`.
+ *
+ * `SPEC_UNFILLED_REFUSAL` IS RECONSTRUCTED, not quoted, and this is the honest reason: NO live transcript on
+ * this machine contains the run-start TEMPLATE refusal — the one the owner's screenshot shows — because a
+ * refused call is exactly the call whose transcript nobody went looking for. It is rebuilt from the two pieces
+ * that DO exist: `toolError`'s own sentence format (`<code> <class>: <problem> - <detail>. Next: <next>.`,
+ * `src/errors.ts`) driven by the `RUN_START_SPEC_UNFILLED` registry entry, and the detail the guard composes
+ * (`src/run-start.ts::runStartSpecGuard`) — whose wording the owner's screenshot corroborates character for
+ * character: *"still carries the template scaffold"*, *"1 unfinished marker(s) of its own"*,
+ * *"line 274: Approval: FAIL"*.
+ */
+
+/** VERBATIM from a live transcript: a channel refusal, recorded with `isError: false`. */
+const LIVE_CHANNEL_REFUSAL =
+  'RM5503 runtime: the user-questions channel mounted in this composition refused the run-start question, so '
+  + 'no person was asked. Next: use recursive_ask without an answer to surface the question, and retry it with '
+  + 'answer: "Start run" once the user has approved the run start.'
+
+/** RECONSTRUCTED (see above) from `toolError('RUN_START_SPEC_UNFILLED', …)` and the guard's own detail. */
+const SPEC_UNFILLED_REFUSAL =
+  'RM4404 state: the Phase 0 requirements document is still the unfilled template, so there is no run spec for '
+  + 'a person to approve - 00-requirements.md for run "r1" still carries the template scaffold (it also '
+  + 'carries 1 unfinished marker(s) of its own, starting at line 274): line 23: <short title>, line 31: '
+  + '[observable condition 1]. Next: fill the requirements document in (define the requirement ids and their '
+  + 'acceptance criteria, and complete the TODO list) and then call recursive_ask with gate: run-start again.'
+
+/** The tool's own output renderer: `JSON.stringify(value, null, 2)` into ONE text block. */
+function payloadText(value: Record<string, unknown>): string {
+  return JSON.stringify(value, null, 2)
+}
+
+/** A DISPATCHED call with no result yet: the owner's `start` phase, i.e. the call in flight. */
+function blockWithNoResult(args: Record<string, unknown> = { gate: 'run-start', runId: 'r1' }): SpecSheetBlock {
+  return { phase: 'start', argsRaw: JSON.stringify(args) } as SpecSheetBlock
+}
+
+/**
+ * A SETTLED call block, shaped as the toolview owner shapes it.
+ *
+ * ⚠ `isError` IS A PARAMETER WITH A `false` DEFAULT FOR A REASON: every refusal measured live came back with
+ * `isError: false`, because this tool refuses in its PAYLOAD rather than by throwing. A fixture that set
+ * `isError: true` for a refusal would let a client that branches on that flag pass these tests while failing
+ * on the real transcript.
+ */
+function resultBlock(
+  args: Record<string, unknown>,
+  payload: string | null,
+  options: { isError?: boolean; error?: string | null } = {},
+): SpecSheetBlock {
+  return {
+    phase: 'result',
+    call: { name: RUN_START_TOOL_NAME, argsRaw: JSON.stringify(args) },
+    result: payload === null
+      ? null
+      : { text: [payload], isError: options.isError ?? false, error: options.error ?? null },
+  } as SpecSheetBlock
+}
+
 /* ---------------- 1. the view model: what the call is, and what it asks for ---------------- */
 
 describe('the spec sheet claims exactly the run-start call', () => {
@@ -207,6 +291,54 @@ describe('the spec sheet claims exactly the run-start call', () => {
     expect(RUN_START_TOOL_NAME).toBe('recursive_ask')
   })
 
+  /**
+   * ⚠ EVERY NAME THIS MODULE RE-EXPORTS MUST ACTUALLY ARRIVE, AND THIS IS NOT PARANOIA — IT IS A MEASURED
+   * VACUITY. `toContain(undefined)` does not throw in vitest; it matches NOTHING and the assertion passes. So
+   * when the re-export list was rewritten and `RUN_START_QUESTION` was left out, the two assertions that pin
+   * the sheet's wording to the gate's own words kept passing while asserting nothing. A spec whose assertions
+   * silently stop running is worse than no spec, so the names are resolved here as VALUES first.
+   */
+  it('re-exports the gate\'s own words as real strings (a missing name would make assertions vacuous)', async () => {
+    const sheet = await import('../src/client/spec-sheet.tsx')
+    for (const name of [
+      'RUN_START_QUESTION',
+      'RUN_START_OPTION_MEANING',
+      'RUN_START_APPROVE_LABEL',
+      'RUN_START_HOLD_LABEL',
+      'CALL_PENDING_LEAD',
+      'CALL_PENDING_TAIL',
+      'CALL_REFUSED_LEAD',
+      'CALL_REFUSED_NEXT',
+      'CALL_REFUSED_QUOTE_LEAD',
+      'CALL_REFUSED_UNQUOTED',
+      'CALL_UNKNOWN_LEAD',
+      'CALL_ANSWERED_LEAD',
+      'UNFILLED_NOTICE',
+      'UNFILLED_SHORT',
+      'NO_CALL_NOTICE',
+      'PREPARING_NOTICE',
+      'TRUNCATED_NOTICE',
+      'SPEC_DEFAULT_MODE',
+    ] as const) {
+      const value = (sheet as unknown as Record<string, unknown>)[name]
+      expect(typeof value, name + ' must be re-exported as a value').toBe('string')
+      expect(String(value).length, name + ' must not be empty').toBeGreaterThan(0)
+    }
+    // The three RECORD-shaped exports, checked as records: a mode whose label went missing would print
+    // `undefined` on the control face rather than failing anywhere.
+    for (const name of ['SPEC_MODE_LABEL', 'SPEC_MODE_NOTE', 'SPEC_TOGGLE_LABEL'] as const) {
+      const value = (sheet as unknown as Record<string, unknown>)[name] as Record<string, unknown>
+      expect(value, name + ' must be re-exported as a value').toBeTruthy()
+      for (const mode of ['preview', 'raw']) {
+        expect(typeof value[mode], name + '.' + mode).toBe('string')
+        expect(String(value[mode]).length, name + '.' + mode + ' must not be empty').toBeGreaterThan(0)
+      }
+    }
+    // The two constants the sheet QUOTES are non-empty and distinct, so the wording assertions above bite.
+    expect(RUN_START_QUESTION.length).toBeGreaterThan(0)
+    expect(RUN_START_OPTION_MEANING.length).toBeGreaterThan(0)
+  })
+
   it('names the document it is about, and never invents a root it does not have', () => {
     expect(specPath('r1', '/ws', RUN_START_SPEC_FILE)).toBe('.recursive/run/r1/00-requirements.md  (in /ws)')
     expect(specPath(null, null, RUN_START_SPEC_FILE)).toBe('.recursive/run/<runId>/00-requirements.md')
@@ -222,6 +354,112 @@ describe('the spec sheet claims exactly the run-start call', () => {
     expect(decisionLine('Start run')).toContain('approving label')
     expect(decisionLine('Hold')).toContain('not the approving label')
     expect(decisionLine('Hold')).not.toContain('arms the run goal')
+  })
+})
+
+/* ------------- 1b. WHAT THE VIEW MODEL CAN TELL ABOUT THE CALL: the three states, and the code that decides ------- */
+
+/**
+ * ⚠ THIS IS THE DEFECT'S ROOT CAUSE, ASSERTED DIRECTLY.
+ *
+ * The sheet registers into `tool.call.toolview` keyed by the `recursive_ask` tool, so it renders for the CALL.
+ * The owner's run showed the sheet rendering while its own warning block said "there is no spec to approve
+ * yet" — and, in the same panel, announcing a question and describing Start run / Hold. The gate had REFUSED
+ * (nothing was asked, no card could appear, which is correct); the panel simply had no way to know, because
+ * the block it was handed was read for its ARGUMENTS ONLY.
+ *
+ * The four `readCallOutcome` branches below are the whole discrimination, and each is asserted on a payload
+ * shaped the way the tool actually returns one (`JSON.stringify(value, null, 2)` in one text block).
+ */
+describe('the view model tells a REFUSED call from a PENDING one', () => {
+  it('reads a refusal out of the call\'s own result — and NOT out of `isError`, which is false for it', () => {
+    // The measured shape: a refusal in the payload, with the harness's error flag left false.
+    const outcome = readCallOutcome({ text: [payloadText({ error: LIVE_CHANNEL_REFUSAL })], isError: false })
+    expect(outcome.state).toBe('refused')
+    // The refusal is carried VERBATIM: the panel prints the sentence the caller received, not a paraphrase of
+    // it, which is what "name what refused it" has to mean when the panel did not make the decision.
+    expect(outcome).toEqual({ state: 'refused', refusal: LIVE_CHANNEL_REFUSAL })
+    // …and the same holds for the template refusal, whose `question` rides along WITH the error — the case
+    // that makes "does the payload carry a question?" the wrong test for "is a question live?".
+    const withQuestion = readCallOutcome({
+      text: [payloadText({ error: SPEC_UNFILLED_REFUSAL, gate: 'run-start', runId: 'r1', question: { id: 'run-start' } })],
+      isError: false,
+    })
+    expect(withQuestion).toEqual({ state: 'refused', refusal: SPEC_UNFILLED_REFUSAL })
+  })
+
+  it('the harness\'s OWN failure record is a refusal too, and its sentence is what gets printed', () => {
+    // The other way a refusal can arrive: the host marks the call failed. It is still not a question, and the
+    // panel prints the host's sentence rather than inventing one.
+    expect(readCallOutcome({ text: [], isError: true, error: 'the tool call was aborted' }))
+      .toEqual({ state: 'refused', refusal: 'the tool call was aborted' })
+    // …and a host failure with no sentence at all is a refusal WITH THE GAP STATED, never a blank.
+    expect(readCallOutcome({ text: [], isError: true })).toEqual({ state: 'refused', refusal: null })
+  })
+
+  it('reads a RECORDED DECISION as settled — including the payload whose label must come from the arguments', () => {
+    expect(readCallOutcome({
+      text: [payloadText({ gate: 'run-start', answer: 'Start run', artifact: '00-requirements.md', path: 'p', replaced: false, armed: true })],
+      isError: false,
+    })).toEqual({ state: 'answered', answer: 'Start run' })
+    // ⚠ A `Hold` IS ANSWERED, NOT APPROVED: the state says the call settled, and WHICH label it recorded is
+    // `decisionLine`'s job. A model that folded the two would report a hold as a start.
+    expect(readCallOutcome({ text: [payloadText({ gate: 'run-start', answer: 'Hold', armed: false })], isError: false }))
+      .toEqual({ state: 'answered', answer: 'Hold' })
+    // ⚠ AND A SETTLED CALL WITH NO LABEL IS STILL SETTLED. `armed` alone is a returning record whose `answer`
+    // this client did not see; reporting it as PENDING would announce a question that has already been answered.
+    expect(readCallOutcome({ text: [payloadText({ gate: 'run-start', armed: true })], isError: false }))
+      .toEqual({ state: 'answered', answer: null })
+  })
+
+  it('says it CANNOT TELL rather than guessing, and keeps the three reasons apart', () => {
+    // No result was handed to the view at all.
+    expect(readCallOutcome(null)).toEqual({ state: 'unknown', reason: 'no-result' })
+    // A result that carries no JSON payload (a spill, a truncation, a format this client does not know).
+    expect(readCallOutcome({ text: ['<persisted-output>see E:\\tmp\\spill.txt</persisted-output>'], isError: false }))
+      .toEqual({ state: 'unknown', reason: 'unreadable' })
+    expect(readCallOutcome({ text: [], isError: false })).toEqual({ state: 'unknown', reason: 'kind-absent' })
+    // ⚠ THE SUBTLE ONE, and the reason it is not `refused`: a payload carrying ONLY the question text is the
+    // shape a refusal ships TOO (measured above), so its presence proves nothing about a live question. The
+    // panel says it cannot tell instead of borrowing the words of a question nobody may have been asked.
+    expect(readCallOutcome({ text: [payloadText({ gate: 'run-start', question: { id: 'run-start' } })], isError: false }))
+      .toEqual({ state: 'unknown', reason: 'kind-absent' })
+  })
+
+  it('a block with no settled result is PENDING, and a block with one carries what it said', () => {
+    // The `start` phase: the call is in flight, which is the window in which the gate asks the channel — and
+    // also the moment after a person answers, before the result lands. The state is `pending`; the panel's own
+    // words (below) are what keep that from claiming a card is on screen at this instant.
+    expect(readCall(blockWithNoResult())).toEqual({
+      ok: true,
+      args: { gate: 'run-start', runId: 'r1', artifact: null, answer: null },
+      outcome: { state: 'pending' },
+    })
+    // A settled block carries its outcome, so the component cannot render a refusal as a question.
+    const settled = readCall(resultBlock({ gate: 'run-start', runId: 'r1' }, payloadText({ error: LIVE_CHANNEL_REFUSAL })))
+    expect(settled.ok && settled.outcome).toEqual({ state: 'refused', refusal: LIVE_CHANNEL_REFUSAL })
+    // …and a settled block the owner sent WITHOUT a result is `unknown`, never `pending`: the difference is
+    // the whole fix, because a settled call has no question left to ask.
+    const bare = readCall(resultBlock({ gate: 'run-start', runId: 'r1' }, null))
+    expect(bare.ok && bare.outcome).toEqual({ state: 'unknown', reason: 'no-result' })
+  })
+
+  it('builds the refusal notice from the refusal, and states the gap when there is none', () => {
+    const notice = refusedNotice(SPEC_UNFILLED_REFUSAL)
+    expect(notice).toContain(CALL_REFUSED_LEAD)
+    expect(notice).toContain(CALL_REFUSED_QUOTE_LEAD)
+    expect(notice).toContain(SPEC_UNFILLED_REFUSAL)
+    expect(notice).toContain(CALL_REFUSED_NEXT)
+    // A refusal that did not reach the panel says SO, rather than leaving "it was refused" standing alone.
+    const bare = refusedNotice(null)
+    expect(bare).toContain(CALL_REFUSED_UNQUOTED)
+    expect(bare).not.toContain(CALL_REFUSED_QUOTE_LEAD)
+    expect(refusedNotice('   ')).toContain(CALL_REFUSED_UNQUOTED)
+    // Each unreadable reason names itself, and none of them claims a question exists.
+    for (const reason of ['no-result', 'unreadable', 'kind-absent'] as const) {
+      expect(unknownNotice(reason)).toContain(CALL_UNKNOWN_LEAD)
+    }
+    expect(unknownNotice('unreadable')).not.toBe(unknownNotice('kind-absent'))
   })
 })
 
@@ -555,6 +793,120 @@ describe('the sheet can swap the preview for the verbatim source, and back', () 
   })
 })
 
+/* ---------------- 3d. THE DEFECT: a REFUSED call must not render as a PENDING one ---------------- */
+
+/**
+ * ⚠ THE TWO ASSERTIONS THE OWNER'S RUN NEEDED, AND WHY THEY ARE PAIRED.
+ *
+ * The owner's screenshot showed one panel doing both things at once: warning that the document is still the
+ * unfilled template — "there is no spec to approve yet" — and announcing "The question about this document is:
+ * 'Approve phase 0 and start this run?'" with a description of Start run / Hold. The gate had REFUSED, so
+ * nothing was asked and no dialog could appear, which is correct; the PANEL was wrong.
+ *
+ * A positive assertion alone ("the refusal explanation is rendered") would not have caught it, because the
+ * defect was an EXTRA claim, not a missing one. So the refusal case asserts BOTH halves: the refusal
+ * explanation is present, and the question text and the option meanings are ABSENT. The pending case asserts
+ * the opposite half, so neither assertion can be satisfied by weakening the other.
+ */
+describe('a REFUSED run-start call renders the refusal, and NOT a question', () => {
+  /** The sheet body for one settled block, exactly as the seat builds it. */
+  function renderSettled(block: SpecSheetBlock) {
+    const read = readCall(block)
+    if (!read.ok) throw new Error('the fixture block must be readable')
+    const model = specSheetModel({
+      args: read.args,
+      root: '/ws',
+      fetch: { state: 'loaded', text: requirementsContent('r1', 'feature') },
+      call: read.outcome,
+    })
+    return createRenderer(createElement(RunStartSpecSheetBody, { model }))
+  }
+
+  it('GATE REFUSED: prints the refusal and DOES NOT print the question or the options', () => {
+    const r = renderSettled(resultBlock(
+      { gate: 'run-start', runId: 'r1' },
+      payloadText({ error: SPEC_UNFILLED_REFUSAL, gate: 'run-start', runId: 'r1', artifact: '00-requirements.md' }),
+    ))
+    const text = textOf(r.toJSON())
+
+    // 1. IT SAYS PLAINLY THAT NOTHING IS BEING ASKED, and names what refused it — using the refusal the call
+    //    actually came back with, which is the only part of this the panel did not decide itself.
+    expect(text).toContain(CALL_REFUSED_LEAD)
+    expect(text).toContain(SPEC_UNFILLED_REFUSAL)
+    expect(text).toContain('still carries the template scaffold')
+
+    // 2. ⚠ AND IT DOES NOT ANNOUNCE A QUESTION. These are the exact sentences the live defect printed.
+    expect(text).not.toContain('The question about this document is')
+    expect(text).not.toContain(RUN_START_QUESTION)
+    expect(text).not.toContain(RUN_START_OPTION_MEANING)
+    // The option labels are not offered as a choice either. (`Start run` still appears — inside the quoted
+    // refusal, whose own `Next:` clause names it — so the assertion is on the MEANING sentence, which is what
+    // described the decision as available, and on the question itself.)
+    expect(text).not.toContain(CALL_PENDING_LEAD)
+
+    // 3. THE DOCUMENT IS STILL SHOWN, and its verdict is unchanged: the refusal usually names the document as
+    //    its reason, so the reader gets the refusal and the document it is about from the same panel.
+    expect(text).toContain(UNFILLED_NOTICE)
+    expect(text).toContain('### `R1` <short title>')
+    expect(text).toContain(CALL_REFUSED_NEXT)
+
+    // 4. NOTHING HERE CASTS A VOTE. The only control is still the preview/source toggle.
+    const buttons = r.root.findAllByType('button')
+    expect(buttons.length, 'a refused call adds no control at all').toBe(1)
+    expect(textOfNode(buttons[0])).toBe('View source')
+    r.unmount()
+  })
+
+  it('GATE REFUSED, refusal not readable: states the gap instead of leaving "it was refused" bare', () => {
+    const r = renderSettled(resultBlock({ gate: 'run-start', runId: 'r1' }, null))
+    const text = textOf(r.toJSON())
+    expect(text).toContain(CALL_UNKNOWN_LEAD)
+    // It does not claim a question, and it does not claim a refusal either — it does not know which.
+    expect(text).not.toContain('The question about this document is')
+    expect(text).not.toContain(RUN_START_QUESTION)
+    r.unmount()
+  })
+
+  it('GATE PENDING still renders the question and the options — the other half of the pair', () => {
+    const read = readCall(blockWithNoResult())
+    if (!read.ok) throw new Error('the fixture block must be readable')
+    const model = specSheetModel({
+      args: read.args,
+      root: '/ws',
+      fetch: { state: 'loaded', text: requirementsContent('r1', 'feature') },
+      call: read.outcome,
+    })
+    const r = createRenderer(createElement(RunStartSpecSheetBody, { model }))
+    const text = textOf(r.toJSON())
+    // The question is quoted, and the panel says the decision belongs to the card that asked it.
+    expect(text).toContain(CALL_PENDING_LEAD + RUN_START_QUESTION + CALL_PENDING_TAIL)
+    expect(text).toContain(RUN_START_OPTION_MEANING)
+    expect(text).toContain('The decision controls are the question card\'s')
+    // ⚠ IT ALSO SAYS NOTHING WAS REFUSED. The pending block is the one state that may describe Start run /
+    // Hold as available, and a stricter reading of "distinguishable" is that this state does NOT carry the
+    // refusal sentence either.
+    expect(text).not.toContain(CALL_REFUSED_LEAD)
+    expect(text).not.toContain(CALL_ANSWERED_LEAD)
+    r.unmount()
+  })
+
+  it('ALREADY ANSWERED says the call SETTLED, and quotes the label it recorded', () => {
+    const r = renderSettled(resultBlock(
+      { gate: 'run-start', runId: 'r1' },
+      payloadText({ gate: 'run-start', answer: 'Hold', artifact: '00-requirements.md', armed: false }),
+    ))
+    const text = textOf(r.toJSON())
+    expect(text).toContain(CALL_ANSWERED_LEAD)
+    // The recorded label is printed, and a Hold is still not an approval. NO question is announced: the call
+    // is over, so there is nothing pending to answer.
+    expect(text).toContain('This call records: Hold')
+    expect(text).toContain('not the approving label')
+    expect(text).not.toContain('The question about this document is')
+    expect(text).not.toContain(RUN_START_OPTION_MEANING)
+    r.unmount()
+  })
+})
+
 /* ---------------- 4. accessibility + reduced motion ---------------- */
 
 describe('the spec sheet is reachable, named, and moves only if it may', () => {
@@ -648,6 +1000,58 @@ describe('the spec sheet is reachable, named, and moves only if it may', () => {
 const SESSIONS = { ids: ['s1'], byId: { s1: { id: 's1', cwd: '/ws' } }, current: 's1' }
 const sessionsHook = ((sel: (s: unknown) => unknown) => sel(SESSIONS)) as never
 
+/**
+ * A live-events stub, because the SEAT subscribes without being asked to.
+ *
+ * ⚠ THIS IS NOT TEST DECORATION. `RunStartSpecSheet` calls `useLiveProjection` UNCONDITIONALLY (the run 13
+ * lesson: a conditional hook changed the hook count across renders), so mounting the real seat opens an
+ * `EventSource` in jsdom, where there is none. The three tests that mount it with a `preparing` / truncated /
+ * other-gate block return before the subscription matters, so only the two full-path tests below need this —
+ * and what they assert (the refusal reaching the screen) is upstream of the route entirely.
+ */
+function withEventSourceStub<T>(body: () => Promise<T>): Promise<T> {
+  const g = globalThis as { EventSource?: unknown; document?: unknown }
+  const originalEventSource = g.EventSource
+  const hadDocument = 'document' in g && g.document !== undefined
+  const originalDocument = g.document
+  class StubEventSource {
+    onmessage: ((event: unknown) => void) | null = null
+    onerror: ((event: unknown) => void) | null = null
+    constructor(public readonly url: string) {}
+    addEventListener(_type: string, _listener: (event: unknown) => void): void { /* no stream in a test */ }
+    removeEventListener(_type: string, _listener: (event: unknown) => void): void { /* no stream in a test */ }
+    close(): void { /* no stream in a test */ }
+  }
+  g.EventSource = StubEventSource
+  // `visibilityState` is deliberately NOT 'visible': the visible branch re-opens the stream, which would make
+  // the sheet re-subscribe in a loop and turn this fixture into a test of the retry path.
+  g.document = {
+    visibilityState: 'hidden',
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }
+  return body().finally(() => {
+    g.EventSource = originalEventSource
+    if (hadDocument) g.document = originalDocument
+    else delete g.document
+  })
+}
+
+/**
+ * Unmount a seat mounted under `withEventSourceStub` WITHOUT a detached-tree React warning.
+ *
+ * ⚠ THIS IS NOT PADDING. The seat subscribes to the live route in a PASSIVE effect, and React flushes passive
+ * effects asynchronously — so unmounting and then restoring `globalThis` in the same tick leaves that
+ * subscription's teardown to run against a `document` that no longer exists. React reports it as an internal
+ * commit-phase error in a detached tree, which reads like a broken test when nothing is broken. Flushing the
+ * effect queue inside the stub (and letting the next macrotask drain) keeps the reporter honest.
+ */
+async function unmountSeat(r: { unmount: () => void }): Promise<void> {
+  await act(async () => { await Promise.resolve() })
+  act(() => { r.unmount() })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
 describe('RunStartSpecSheet claims the run-start call and nothing else', () => {
   it('renders NOTHING for another gate — the generic tool row keeps its call', async () => {
     let r: ReturnType<typeof createRenderer> | undefined
@@ -688,6 +1092,70 @@ describe('RunStartSpecSheet claims the run-start call and nothing else', () => {
     })
     expect(textOf(r!.toJSON())).toContain('left this call\'s own arguments outside it')
     r!.unmount()
+  })
+
+  /**
+   * ⚠ THE WHOLE CHAIN, FROM THE SEAT THE HARNESS MOUNTS TO THE SENTENCES ON SCREEN.
+   *
+   * The two tests above drive `RunStartSpecSheetBody` with a model a spec built by hand; this one drives the
+   * REGISTERED component with a BLOCK shaped as the toolview owner shapes it, because that is where the defect
+   * lived: the seat rendered for the call, the view model read the call's ARGUMENTS, and the state the call
+   * came back in never reached the body at all. A model-only spec cannot see that link — this can.
+   */
+  it('a REFUSED call renders the refusal through the REGISTERED seat, and announces no question', async () => {
+    let r: ReturnType<typeof createRenderer> | undefined
+    let text = ''
+    let readOnly: unknown
+    // ⚠ THE UNMOUNT HAPPENS INSIDE THE STUB, not after it: the seat's live subscription is torn down on
+    // unmount, and restoring `globalThis.document` first would make that teardown throw a `document is not
+    // defined` into the reporter — noise that looks like a failure and is not one. (The region's attributes are
+    // read BEFORE the unmount for the same reason `react-test-renderer` gives: a tree that is gone has no root.)
+    await withEventSourceStub(async () => {
+      await act(async () => {
+        r = createRenderer(createElement(RunStartSpecSheet, {
+          block: resultBlock(
+            { gate: 'run-start', runId: 'r1' },
+            payloadText({ error: LIVE_CHANNEL_REFUSAL, gate: 'run-start', runId: 'r1' }),
+          ),
+          useSessions: sessionsHook,
+        }))
+      })
+      text = textOf(r!.toJSON())
+      const section = r!.root.find((n) => String((n.props as Record<string, unknown>).className ?? '') === 'rec-spec')
+      readOnly = section.props['aria-readonly']
+      await unmountSeat(r!)
+    })
+    // The refusal reaches the screen, verbatim, from the call's own result…
+    expect(text).toContain(CALL_REFUSED_LEAD)
+    expect(text).toContain(LIVE_CHANNEL_REFUSAL)
+    // …and the question block the defect printed is GONE.
+    expect(text).not.toContain('The question about this document is')
+    expect(text).not.toContain(RUN_START_QUESTION)
+    expect(text).not.toContain(RUN_START_OPTION_MEANING)
+    // The region is still the read-only region, and the escape invariant is untouched.
+    expect(readOnly).toBe('true')
+    // ⚠ AND THE REFUSAL IS INDEPENDENT OF THE DOCUMENT'S FETCH. The route is not mounted in this fixture, so
+    // the document never loads — and the refusal still renders, because it comes from the CALL rather than
+    // from the file. That independence is the point: the gate refuses on the document's CONTENT, which this
+    // panel cannot see until the route answers, so a sheet that waited for the fetch before saying "refused"
+    // would leave the reader with an empty box and no explanation.
+    expect(text).toContain('Reading the document')
+    expect(text).toContain('No document text to show')
+  })
+
+  it('a DISPATCHED call with no result yet still renders the question through the registered seat', async () => {
+    let r: ReturnType<typeof createRenderer> | undefined
+    let text = ''
+    await withEventSourceStub(async () => {
+      await act(async () => {
+        r = createRenderer(createElement(RunStartSpecSheet, { block: blockWithNoResult(), useSessions: sessionsHook }))
+      })
+      text = textOf(r!.toJSON())
+      await unmountSeat(r!)
+    })
+    expect(text).toContain(RUN_START_QUESTION)
+    expect(text).toContain(RUN_START_OPTION_MEANING)
+    expect(text).not.toContain(CALL_REFUSED_LEAD)
   })
 })
 

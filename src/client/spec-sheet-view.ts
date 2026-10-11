@@ -75,28 +75,99 @@ export function parseRecursiveAskArgs(argsRaw: string | null): RecursiveAskArgs 
 }
 
 /**
+ * What the sheet reads out of a SETTLED call's result.
+ *
+ * ⚠ WITHOUT THIS, THE PANEL CANNOT TELL A REFUSED GATE FROM A PENDING ONE, and that is a live defect rather
+ * than a hypothetical: the owner's own run rendered a sheet whose warning block said "there is no spec to
+ * approve yet" while the panel beneath it announced a question and described Start run / Hold ("it showed the
+ * requirement preview without any accept dialog"). The gate had REFUSED — nothing was asked, so no card could
+ * appear, which is correct — but this seat renders for the CALL, and a refused call is a settled call like any
+ * other.
+ *
+ * ⚠ THE PAYLOAD IS REACHED, AND THE FIX DEPENDS ON IT. `tool.call.toolview` hands the view the settled
+ * `ToolResultNode`, whose `content` is the recorded result of the tool call (see
+ * `ui-conversation/src/client/contract/records.ts`). `recursive_ask`'s output renderer serializes its return
+ * value into that content as JSON text, so a refusal is READABLE here: the `error` key is the refusal the
+ * caller received, verbatim. Only `name`/`argsRaw` are used for the arguments — the refusal is never inferred
+ * from them.
+ */
+export interface SpecCallResult {
+  /** The text blocks of the recorded result, in order. */
+  readonly text: readonly string[]
+  /**
+   * `ToolResultNode.isError`, carried rather than trusted: MEASURED against a live transcript, the harness
+   * leaves this `false` for a REFUSED `recursive_ask` call — the plugin refuses in its PAYLOAD, not by
+   * throwing — so an `isError` test alone reports a refusal as a success. It is read so a host that DOES mark
+   * one is still read as a failure; it is never the reason a refusal is believed.
+   */
+  readonly isError: boolean
+  /** `ToolResultNode.error`: the host's own failure record, present only when the call itself failed. */
+  readonly error?: string | null
+}
+
+/**
  * The parts of the owner's call block this sheet reads.
  *
  * Structurally typed rather than imported: the toolview owner passes one of three phase shapes
  * (`preparing` carries no arguments, `start` carries `argsRaw`, `result` carries the paired call — which is
- * NULL when window truncation left the call outside the loaded window).
+ * NULL when window truncation left the call outside the loaded window — plus the result itself).
  */
 export type SpecSheetBlock =
   | { readonly phase: 'preparing' }
   | { readonly phase: 'start'; readonly argsRaw: string }
-  | { readonly phase: 'result'; readonly call?: { readonly name: string; readonly argsRaw: string } | null }
+  | {
+    readonly phase: 'result'
+    readonly call?: { readonly name: string; readonly argsRaw: string } | null
+    readonly result?: SpecCallResult | null
+  }
   | null
 
-/** What the sheet could read from the call: its arguments, or WHY it could not. */
+/** What the sheet could read from the call: its arguments, its result, or WHY it could read neither. */
 export type CallRead =
   /** The call's arguments were dispatched and parsed. */
-  | { readonly ok: true; readonly args: RecursiveAskArgs }
+  | { readonly ok: true; readonly args: RecursiveAskArgs; readonly outcome: CallOutcome }
   /** No block was supplied at all. */
   | { readonly ok: false; readonly reason: 'missing' }
   /** The call is still PREPARING: the owner dispatches no arguments until the call starts. */
   | { readonly ok: false; readonly reason: 'preparing' }
   /** The call settled, but the loaded window left its call head outside, so no arguments are available. */
   | { readonly ok: false; readonly reason: 'truncated' }
+
+/**
+ * WHY THE PANEL CANNOT READ A SETTLED CALL, when it cannot.
+ *
+ * ⚠ THE THREE ARE KEPT APART for the same reason `readCall` keeps its three apart: "the tool refused", "this
+ * client could not read the payload" and "the payload carries no decision" are three different facts, and a
+ * panel that collapsed them would advise a person to re-run a call that actually succeeded, or would blame a
+ * broken client for a clean refusal.
+ */
+export type CallUnknownReason =
+  /** No result content reached this view at all (the owner supplied none). */
+  | 'no-result'
+  /** The result was read, but not one of its text blocks is a JSON payload (spilled or formatted output). */
+  | 'unreadable'
+  /** The payload parsed, and carries NEITHER a refusal nor a recorded decision. */
+  | 'kind-absent'
+
+/**
+ * What the call's own block can say about the STATE of the decision.
+ *
+ * ⚠ THE ONLY EVIDENCE EVER USED IS THE CALL'S OWN PAYLOAD. A refused call carries `{ error: <the refusal> }`;
+ * a call that asked a question carries `{ question: … }`; a call that RECORDED a decision carries
+ * `{ answer, armed, … }`; and a call that has not settled carries nothing, because the owner's `start`-phase
+ * block is the call without a result. None of these is inferred from the arguments, from the verdict of the
+ * document, or from the presence of the sheet itself — the sheet renders for the CALL, and a call is not a
+ * question.
+ */
+export type CallOutcome =
+  /** The gate REFUSED this call: it came back as a refusal, and no question was put to anybody. */
+  | { readonly state: 'refused'; readonly refusal: string | null }
+  /** The call has not settled, so a question it raised is the live one. */
+  | { readonly state: 'pending' }
+  /** The call SETTLED with a recorded decision: nothing is pending, and the call records the answer. */
+  | { readonly state: 'answered'; readonly answer: string | null }
+  /** The call settled and this panel cannot tell what it did — the reason is stated, never guessed. */
+  | { readonly state: 'unknown'; readonly reason: CallUnknownReason }
 
 /**
  * Read the call's arguments out of whichever phase the owner supplied.
@@ -109,9 +180,91 @@ export type CallRead =
 export function readCall(block: SpecSheetBlock | undefined): CallRead {
   if (block === null || block === undefined) return { ok: false, reason: 'missing' }
   if (block.phase === 'preparing') return { ok: false, reason: 'preparing' }
-  if (block.phase === 'start') return { ok: true, args: parseRecursiveAskArgs(block.argsRaw) }
+  if (block.phase === 'start') {
+    // ⚠ `pending` IS NOT "A QUESTION IS ON SCREEN". The owner dispatches this phase while the call is IN
+    // FLIGHT — which is exactly the window in which the gate asks the channel — so a question it raised is
+    // the live one. It is also the phase a call sits in for a moment AFTER a person answers the card and
+    // before the result is recorded; the sheet therefore says what it knows (the call has not settled) and
+    // never claims a card is on screen at this instant.
+    return { ok: true, args: parseRecursiveAskArgs(block.argsRaw), outcome: { state: 'pending' } }
+  }
   const carried = block.call ?? null
-  return carried === null ? { ok: false, reason: 'truncated' } : { ok: true, args: parseRecursiveAskArgs(carried.argsRaw) }
+  if (carried === null) return { ok: false, reason: 'truncated' }
+  return {
+    ok: true,
+    args: parseRecursiveAskArgs(carried.argsRaw),
+    outcome: readCallOutcome(block.result ?? null),
+  }
+}
+
+/**
+ * Read the state of a SETTLED call out of its own result.
+ *
+ * ⚠ AN `isError` FLAG IS NOT THE TEST, AND THAT IS MEASURED. A live transcript of a refused run-start call
+ * recorded `isError: false` with the refusal sitting in the content as `{"error":"RM5503 …"}` — so a panel
+ * that looked for a failed call would have reported this refusal as a success and gone on to announce a
+ * question nobody was asked. The refusal is therefore read from the payload's own `error` key: the sentence
+ * the caller actually received, printed from there rather than paraphrased here.
+ *
+ * ⚠ AND A PAYLOAD THAT IS NOT A REFUSAL IS NOT ASSUMED TO BE A DECISION. The three outcomes are decided from
+ * what the payload CARRIES (`error` / `answer`-or-`armed`), and anything else — no content, unreadable
+ * content, or a payload with neither key — is `unknown` with the reason attached, because "I cannot tell" is
+ * a fact this seat may state and a guess about a decision is not.
+ */
+export function readCallOutcome(result: SpecCallResult | null): CallOutcome {
+  if (result === null) return { state: 'unknown', reason: 'no-result' }
+  if (result.isError) {
+    // The host's own failure record: still a refusal — the call came back as a failure, so no question was put
+    // to anybody — but the sentence printed is the HOST's, and it may not have carried one.
+    return { state: 'refused', refusal: result.error ?? null }
+  }
+  const failure = readRefusal(result)
+  if (failure !== null) return { state: 'refused', refusal: failure }
+  const payload = readPayload(result)
+  if (payload === undefined) return { state: 'unknown', reason: 'unreadable' }
+  if (payload === null) return { state: 'unknown', reason: 'kind-absent' }
+  const answer = typeof payload.answer === 'string' && payload.answer.trim() !== '' ? payload.answer : null
+  // ⚠ `armed` IS READ FOR THE SAME REASON `answer` IS: the returning record of a decision carries
+  // `{ gate, answer, path, replaced, armed, goal }`, and a recorded `armed` boolean is a settlement on its
+  // own. It is reported as a settlement with no label this panel can print — never as a pending question.
+  if (answer !== null || typeof payload.armed === 'boolean') return { state: 'answered', answer }
+  // The remaining payloads carry `question` (what the gate WOULD ask) or nothing this client knows. Neither
+  // is evidence that a question is live — a refused gate ships the question text with its refusal — so the
+  // sheet says it cannot tell rather than borrowing the words of a question nobody was asked.
+  return { state: 'unknown', reason: 'kind-absent' }
+}
+
+/** The refusal's own sentence, when this result is a refusal this seat can PRINT. */
+function readRefusal(result: SpecCallResult): string | null {
+  const payload = readPayload(result)
+  if (payload === undefined || payload === null) return null
+  const error = payload.error
+  if (typeof error === 'string' && error.trim() !== '') return error
+  return null
+}
+
+/**
+ * The result's JSON payload, as far as this client can read it.
+ *
+ * `undefined` is the UNREADABLE case and `null` is "the content is there but carries no payload at all":
+ * a spilled or truncated result must not be read as a call that recorded nothing, which is a claim about
+ * the RUN made on evidence about the CLIENT.
+ */
+function readPayload(result: SpecCallResult): Record<string, unknown> | null | undefined {
+  const blocks = result.text.filter((block) => block.trim() !== '')
+  if (blocks.length === 0) return null
+  for (const block of blocks) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(block)
+    } catch {
+      continue
+    }
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
+    }
+  }
+  return undefined
 }
 
 /** Is this the run-start gate? Everything else keeps the generic tool row. */
@@ -154,6 +307,11 @@ export interface SpecSheetModel {
   evidence: ArtifactMarkerHit[]
   /** The call's own arguments, so the sheet can show which decision is being asked. */
   args: RecursiveAskArgs
+  /**
+   * The STATE of the decision, read from the call's own result — the field that keeps a REFUSED gate from
+   * rendering as a pending one.
+   */
+  call: CallOutcome
 }
 
 /**
@@ -167,6 +325,16 @@ export function specSheetModel(input: {
   root: string | null
   fetch: SpecFetch
   file?: string
+  /**
+   * What the call's own block said about the state of the decision.
+   *
+   * ⚠ IT DEFAULTS TO `pending`, WHICH IS THE HONEST DEFAULT FOR A CALLER THAT DID NOT SAY — and it is the
+   * one default this model may take, because a directly-constructed model (the specs do this, and so does any
+   * caller holding only arguments) is a description of a question being shown, not of a settled call. The
+   * COMPONENT never relies on it: it always passes what its own block carried, so a refusal reaches the
+   * screen as a refusal.
+   */
+  call?: CallOutcome
 }): SpecSheetModel {
   const file = input.file ?? RUN_START_SPEC_FILE
   const text = input.fetch.state === 'loaded' ? input.fetch.text ?? null : null
@@ -181,6 +349,7 @@ export function specSheetModel(input: {
     verdict: verdict === null ? null : verdict.verdict,
     evidence: verdict === null ? [] : verdict.hits,
     args: input.args,
+    call: input.call ?? { state: 'pending' },
   }
 }
 
@@ -322,4 +491,88 @@ export function decisionLine(answer: string | null): string | null {
   return answer.trim() === RUN_START_APPROVE_LABEL
     ? 'This call records: ' + answer + ' — the approving label, which arms the run goal.'
     : 'This call records: ' + answer + ' — not the approving label, so no run goal is armed.'
+}
+
+/* ============================ THE STATE OF THE DECISION ============================ */
+
+/**
+ * THE REFUSED STATE, SAID PLAINLY.
+ *
+ * ⚠ THIS IS THE SENTENCE THE LIVE DEFECT NEEDED. The sheet's warning block and its question block used to
+ * CONTRADICT each other in one panel: "there is no spec to approve yet … approving here would record a
+ * decision about a spec that does not exist" immediately above "The question about this document is …" and a
+ * description of Start run / Hold. The gate had refused, nothing was asked, and no card could appear — the
+ * correct behaviour — but a reader could not tell that from a question waiting on them. So this notice names
+ * the refusal, says outright that no question exists, and quotes what the caller actually received.
+ */
+export const CALL_REFUSED_LEAD =
+  'This call was REFUSED. There is NO question about this document: nothing was asked, no decision was '
+  + 'recorded, and no question card can appear for it.'
+
+/**
+ * What the refusal means for the document, in the terms the reader can act on.
+ *
+ * ⚠ IT DOES NOT NAME A CAUSE. The refusal's own sentence is printed VERBATIM beside this line, and it is the
+ * only thing here that knows WHY — the panel reads a payload, it did not make the decision.
+ */
+export const CALL_REFUSED_NEXT =
+  'The document below is unchanged by the refusal: it stays inert, and filling it in and asking again is what '
+  + 'moves the run forward.'
+
+/** The refusal, quoted as the caller received it rather than paraphrased by this panel. */
+export const CALL_REFUSED_QUOTE_LEAD = 'The refusal it came back with:'
+
+/**
+ * What the panel says when a call settled as a refusal and the refusal's own words did not reach it.
+ *
+ * ⚠ THE GAP IS STATED, NOT FILLED. A panel that dropped this line would leave "This call was REFUSED" standing
+ * on its own, and a reader would have to guess what refused it; a panel that invented a cause would be
+ * guessing. This says which half is missing.
+ */
+export const CALL_REFUSED_UNQUOTED =
+  'The refusal itself did not reach this panel, so the cause it named is not shown here. Nothing about this '
+  + 'document was decided.'
+
+/** The pending state: a question exists, and the answer belongs to the card that asked it. */
+export const CALL_PENDING_LEAD = 'The question about this document is: “'
+
+/** The sentence that closes the quoted question. */
+export const CALL_PENDING_TAIL = '”'
+
+/** What the panel says when the call settled and it cannot tell whether anything was asked. */
+export const CALL_UNKNOWN_LEAD =
+  'This panel cannot tell what this call did: it settled, and what it returned is not readable here.'
+
+/** The three ways that happens, named separately so the reader is not told a cause the client does not know. */
+export const CALL_UNKNOWN_REASON: Record<CallUnknownReason, string> = {
+  'no-result':
+    'No result was supplied with this call block, so whether a question was asked is unknown.',
+  'unreadable':
+    'The call\'s result was supplied but carries no readable payload — a spill, a truncation or a format this '
+    + 'client does not know — so whether a question was asked is unknown.',
+  'kind-absent':
+    'The call\'s result carries no refusal and no recorded decision — including the case where it carries only '
+    + 'the question TEXT, which a refusal ships too — so whether a question is live is unknown.',
+}
+
+/**
+ * What the panel says when the call settled with a recorded decision.
+ *
+ * ⚠ IT DOES NOT CLAIM THE DECISION WAS AN APPROVAL. Which label was recorded is `decisionLine`'s job below,
+ * from the label itself; this line only reports that the call is finished and that no question is left over.
+ */
+export const CALL_ANSWERED_LEAD =
+  'This call has SETTLED: the decision was recorded, so there is no question pending for it now.'
+
+/** The refusal notice, built from the refusal the caller actually received. */
+export function refusedNotice(refusal: string | null): string {
+  const quoted = refusal === null || refusal.trim() === ''
+    ? CALL_REFUSED_UNQUOTED
+    : CALL_REFUSED_QUOTE_LEAD + ' ' + refusal.trim()
+  return CALL_REFUSED_LEAD + ' ' + quoted + ' ' + CALL_REFUSED_NEXT
+}
+
+/** The unreadable-state notice, naming which half is missing. */
+export function unknownNotice(reason: CallUnknownReason): string {
+  return CALL_UNKNOWN_LEAD + ' ' + CALL_UNKNOWN_REASON[reason]
 }

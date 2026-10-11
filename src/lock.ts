@@ -10,7 +10,7 @@ import { buildPhaseGraph, nextLegalPhase, prerequisitesOf } from './phase-graph.
  * Ports recursive-lock.py / verify-locks.py / recursive_phase_rules.py
  * semantics (byte-for-byte where observable):
  * - lockHashFromContent: LF-normalize, strip LockHash lines, SHA-256 hex
- * - getLockStatus: MISSING / DRAFT / STALE_LOCK / LOCKED
+ * - getLockStatus: MISSING / DRAFT / STALE_LOCK / LOCKED / SKIPPED
  * - getPrerequisites / getPrerequisiteBlockers: sequence ordering
  * - validateChain: per-phase validity + break + next legal phase
  * - receipts: read/write/invalidate with Python-identical JSON
@@ -33,7 +33,28 @@ export const PHASE_SEQUENCE = [
   '08-memory-impact.md',
 ] as const
 
-export const OPTIONAL_PHASES = new Set([
+/**
+ * CHAIN-OPTIONAL — the phases whose ABSENCE does not stop the legal-phase selector.
+ *
+ * ⚠ WHAT THIS SET IS, AND THE ONE THING IT IS NOT. Its only consumer is
+ * `nextLegalPhase(graph, { optional: MAY_BE_ABSENT_PHASES })`, where it means exactly:
+ * *a member whose artifact was NEVER CREATED does not stop the selector*. It says nothing
+ * about the phase's WORK, and it is NOT a licence to remove an artifact that exists.
+ *
+ * ⚠ THE NAME IS THE FIX FOR A LIVE DEFECT. This set used to be called `OPTIONAL_PHASES`, and
+ * a live agent read that word as "this phase may be skipped", found phase 1.5 blocking a run
+ * with nothing to investigate, and deleted the artifact with `git rm`. The fold then refused
+ * the turn — correctly, because a run artifact is evidence — leaving the agent with a refusal
+ * and no legitimate way to skip a phase. The word was doing the damage: **"optional" is not a
+ * property this set has**, while "may be absent" is precisely what it means. The deliberate
+ * skip is a DIFFERENT fact with its own word and its own record, in the artifact itself
+ * (`Status: SKIPPED` + `SkippedAt` + `SkipReason`, see `src/skip.ts`) — never an absence and
+ * never a deletion.
+ *
+ * The seven members are unchanged: this is a rename that removes a false promise, not a
+ * change to which phases tolerate absence.
+ */
+export const MAY_BE_ABSENT_PHASES = new Set([
   '01-as-is.md',
   '01.5-root-cause.md',
   '02-to-be-plan.md',
@@ -42,6 +63,17 @@ export const OPTIONAL_PHASES = new Set([
   '04-test-summary.md',
   '05-manual-qa.md',
 ])
+
+/**
+ * The former name of {@link MAY_BE_ABSENT_PHASES}, kept so a published consumer does not
+ * break on a rename.
+ *
+ * @deprecated THE NAME CAUSED A LIVE DEFECT — do not use it in new code, and do not read it as
+ * "may be skipped": the set tolerates an artifact that was never created, and removal of an
+ * existing artifact is refused by the fold whatever this set says. Use `MAY_BE_ABSENT_PHASES`
+ * for the traversal fact, and `recursive_lock` with `skip` for the deliberate skip.
+ */
+export const OPTIONAL_PHASES = MAY_BE_ABSENT_PHASES
 
 const LOCK_HASH_LINE_RE = /^[ \t]*LockHash:.*(?:\n|$)/gm
 const STATUS_RE = new RegExp('^[ \\t]*Status:\\s*(?:`|")?(\\w+)(?:`|")?\\s*$', 'm')
@@ -58,7 +90,30 @@ export interface LockReceipt {
   receipt_hash: string
 }
 
-export type LockStatus = 'MISSING' | 'DRAFT' | 'STALE_LOCK' | 'LOCKED'
+export type LockStatus = 'MISSING' | 'DRAFT' | 'STALE_LOCK' | 'LOCKED' | 'SKIPPED'
+
+/**
+ * THE TWO WORDS THIS MODULE USED TO CONFLATE, now named apart.
+ *
+ *   MAY BE ABSENT (chain) — an artifact that was NEVER CREATED does not stop
+ *     `nextLegalPhase`. That is {@link MAY_BE_ABSENT_PHASES}, and it is a fact about a
+ *     traversal, not about work.
+ *   SETTLED (work) — a phase nobody has to work on any more, because it is LOCKED (the work
+ *     is done and hashed) or deliberately SKIPPED (a record in the artifact saying the phase
+ *     was considered and does not apply). {@link isSettledStatus}.
+ *
+ * A phase that is neither is OUTSTANDING, and it is the only thing that blocks a later phase
+ * or holds a run open. The distinction is what makes "the chain should only grow" survivable:
+ * a phase that does not apply is settled IN PLACE, never removed.
+ */
+export function isSettledStatus(status: string): boolean {
+  return status === 'LOCKED' || status === 'SKIPPED'
+}
+
+/** Whether the artifact carries a DELIBERATE SKIP record (`Status: SKIPPED`) — a marker, not an absence. */
+export function isSkippedStatus(status: string): boolean {
+  return status === 'SKIPPED'
+}
 
 export interface PrerequisiteBlocker {
   artifact: string
@@ -124,14 +179,25 @@ export function getPrerequisites(runDir: string, artifactFile: string): string[]
 
 /**
  * Canonical lock-validity classifier:
- * MISSING (no file) / DRAFT (not LOCKED) / STALE_LOCK (missing or mismatched hash fields) / LOCKED.
+ * MISSING (no file) / DRAFT (not LOCKED) / STALE_LOCK (missing or mismatched hash fields) /
+ * LOCKED / SKIPPED (a deliberate skip recorded in the artifact — see `src/skip.ts`).
+ *
+ * ⚠ `SKIPPED` IS READ FROM THE ARTIFACT'S OWN `Status:` FIELD, and therefore only a file that
+ * EXISTS can be SKIPPED. `foldRun` synthesizes the same status for an absent phase whose work the
+ * run does not require, but that synthesis happens in the fold and never reaches this function —
+ * so "an absent file" and "a phase recorded as skipped" cannot be confused by a caller here.
  */
 export function getLockStatus(artifactPath: string): LockStatus {
   if (!existsSync(artifactPath)) return 'MISSING'
   let content: string
   try { content = readFileSync(artifactPath, 'utf8') } catch { return 'MISSING' }
   const statusMatch = STATUS_RE.exec(content)
-  if (!statusMatch || statusMatch[1] !== 'LOCKED') return 'DRAFT'
+  if (!statusMatch) return 'DRAFT'
+  // A DELIBERATE SKIP. Checked before the LOCKED branch and REQUIRED to be spelled in the file
+  // (not inferred from a missing lock field): a skip is a recorded decision, and a record that
+  // cannot be read is not a record. No LockHash is expected — nothing was locked.
+  if (isSkippedStatus(statusMatch[1])) return 'SKIPPED'
+  if (statusMatch[1] !== 'LOCKED') return 'DRAFT'
   const hashMatch = LOCK_HASH_RE.exec(content)
   const lockedAtMatch = LOCKED_AT_RE.exec(content)
   if (!hashMatch || !lockedAtMatch) return 'STALE_LOCK'
@@ -141,12 +207,20 @@ export function getLockStatus(artifactPath: string): LockStatus {
   return 'LOCKED'
 }
 
-/** Every prerequisite whose status is not LOCKED, in PHASE_SEQUENCE order. */
+/**
+ * Every prerequisite that is not SETTLED, in PHASE_SEQUENCE order.
+ *
+ * ⚠ SETTLED, NOT MERELY LOCKED, and the difference is the whole skip mechanism: a deliberately
+ * SKIPPED prerequisite was considered and recorded as not applicable, so it cannot block the
+ * phase after it — otherwise a legitimate skip would wedge the run exactly where the removal
+ * used to (the phase after it could never lock, and the agent would be back to deleting files).
+ * An OUTSTANDING prerequisite (MISSING / DRAFT / STALE_LOCK) still blocks, with the status named.
+ */
 export function getPrerequisiteBlockers(runDir: string, artifactFile: string): PrerequisiteBlocker[] {
   const blockers: PrerequisiteBlocker[] = []
   for (const prereq of getPrerequisites(runDir, artifactFile)) {
     const status = getLockStatus(join(runDir, prereq))
-    if (status !== 'LOCKED') {
+    if (!isSettledStatus(status)) {
       blockers.push({ artifact: prereq, status, path: join(runDir, prereq) })
     }
   }
@@ -180,8 +254,13 @@ export function writeReceipt(runDir: string, artifactFile: string, artifactPath:
     const prereqPath = join(runDir, prereq)
     if (existsSync(prereqPath)) {
       const prereqStatus = getLockStatus(prereqPath)
-      if (prereqStatus !== 'LOCKED') {
-        throw new Error(`Cannot write receipt for '${artifactFile}': prerequisite '${prereq}' is not LOCKED (status: ${prereqStatus})`)
+      // SETTLED, not merely LOCKED: a SKIPPED prerequisite is cited by its CONTENT HASH rather
+      // than by a lock hash, which is what pins the skip record into the chain — an edit to a
+      // skip record after the fact therefore shows up as a stale downstream receipt, exactly
+      // like an edit to a locked artifact. A receipt for the skipped artifact itself is written
+      // by the skip (see `src/skip.ts`), so `validateReceiptChain`'s gap check stays satisfied.
+      if (!isSettledStatus(prereqStatus)) {
+        throw new Error(`Cannot write receipt for '${artifactFile}': prerequisite '${prereq}' is not settled (status: ${prereqStatus})`)
       }
       prereqHashes[prereq] = lockHashFromContent(readFileSync(prereqPath, 'utf8'))
     }
@@ -252,14 +331,21 @@ export function getStaleDownstreamPhases(runDir: string, artifactFile: string): 
 }
 
 export function getNextLegalPhase(runDir: string): string | null {
-  // T17: delegated to the graph, which now models all three shipped rules (skip LOCKED; skip an
-  // ABSENT OPTIONAL phase; report BLOCKED rather than moving past a blocked node). `queried` carries
-  // the WHOLE sequence because an absent, required phase is a legitimate answer here, and the parity
-  // specs are the proof — the same goldens that caught the previous attempt.
+  // T17: delegated to the graph, which now models all four shipped rules (skip LOCKED; skip a
+  // deliberately SKIPPED phase; skip an ABSENT MAY-BE-ABSENT phase; report BLOCKED rather than
+  // moving past a blocked node). `queried` carries the WHOLE sequence because an absent, required
+  // phase is a legitimate answer here, and the parity specs are the proof — the same goldens that
+  // caught the previous attempt.
+  //
+  // ⚠ THE SKIPPED SET IS PASSED SEPARATELY FROM `locked`, deliberately: a skip is not a lock, and a
+  // caller that receives one for the other would report a phase as approved work. The graph's walk
+  // treats both as SETTLED, which is the only sense in which they are the same thing.
   const present = PHASE_SEQUENCE.filter((phase) => existsSync(join(runDir, phase)))
-  const locked = present.filter((phase) => getLockStatus(join(runDir, phase)) === 'LOCKED')
-  const graph = buildPhaseGraph({ sequence: PHASE_SEQUENCE, present, locked, queried: PHASE_SEQUENCE })
-  return nextLegalPhase(graph, { optional: OPTIONAL_PHASES })
+  const statuses = new Map(present.map((phase) => [phase, getLockStatus(join(runDir, phase))]))
+  const locked = present.filter((phase) => statuses.get(phase) === 'LOCKED')
+  const skipped = present.filter((phase) => isSkippedStatus(statuses.get(phase) ?? 'MISSING'))
+  const graph = buildPhaseGraph({ sequence: PHASE_SEQUENCE, present, locked, skipped, queried: PHASE_SEQUENCE })
+  return nextLegalPhase(graph, { optional: MAY_BE_ABSENT_PHASES })
 }
 
 /** All receipts whose prerequisite_hashes reference a missing or changed artifact. */
@@ -287,6 +373,13 @@ export function getAllStaleReceipts(runDir: string): StaleDownstream[] {
 /**
  * Validate the full lock chain of a run: per-phase lock status, break phase,
  * next legal phase, completion, and stale receipts.
+ *
+ * ⚠ `complete` MEANS "NOTHING IS OUTSTANDING", and that is a DELIBERATE widening (it used to mean
+ * "every phase is LOCKED"). A deliberately SKIPPED phase is a decision the run recorded, so it does
+ * not break the chain and does not hold the run open — while `lockValid` stays FALSE for it, so a
+ * caller that asks "is this phase locked?" still gets the honest answer and can tell the two apart.
+ * Without this, a legitimate skip would leave the run permanently incomplete, which is the same
+ * dead end that made deleting the artifact look like the only way forward.
  */
 export function validateChain(runDir: string, runId: string): LockChainResult {
   const phases: ChainPhaseResult[] = []
@@ -296,12 +389,13 @@ export function validateChain(runDir: string, runId: string): LockChainResult {
     const phasePath = join(runDir, phase)
     const status = getLockStatus(phasePath)
     const problems: string[] = []
+    const settled = isSettledStatus(status)
     const lockValid = status === 'LOCKED'
-    if (!lockValid && breakPhase === null) {
+    if (!settled && breakPhase === null) {
       breakPhase = phase
       complete = false
     }
-    if (!lockValid && status !== 'MISSING') {
+    if (!settled && status !== 'MISSING') {
       if (status === 'DRAFT') problems.push(`Status is not LOCKED (${status})`)
       else if (status === 'STALE_LOCK') problems.push('LockHash mismatch or missing lock fields')
     }

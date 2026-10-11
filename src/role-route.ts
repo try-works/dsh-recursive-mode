@@ -23,6 +23,7 @@
  * A module that claimed more than that would be lying about where the choice is made. The comment above is the
  * second half of that lesson: a stale rationale is how a working feature gets deleted by accident.
  */
+import type { SessionModelReading } from './model-inventory.ts'
 import type { RouterPolicy } from './router.ts'
 
 /** What kind of work a role does — the distinction the item is about. */
@@ -158,6 +159,27 @@ export interface SubagentTarget {
   chosen: { provider: string; model: string }
   /** One sentence a reader can act on. */
   reason: string
+  /**
+   * ⚠ FU-20 — WHICH LLM PROVIDER SERVES `model`, when a level named one. The policy has always been able to
+   * carry `modelProvider`, and nothing read it: the model travelled and the provider that serves it did not, so
+   * a model available from two providers could not be disambiguated and an inventory check could not be told
+   * which provider to look in. Carried here, with the same per-value provenance as everything else.
+   */
+  modelProvider: string | null
+  /** FU-20: which level chose `modelProvider`, or `inherit` when no level named one. */
+  chosenModelProvider: ChoiceSource
+  /**
+   * ⚠ FU-20 — WHAT THE CHILD WILL ACTUALLY RUN ON, said in one place.
+   *
+   * `model: null` means INHERIT, and inheritance is not an absence — the harness copies the parent session's
+   * model onto an unconfigured child (`child-agent.ts:99`). So the honest report of the inherit case NAMES that
+   * model when the session's own model could be read, and says the name is unknown when it could not. What it
+   * must never do is leave the reader to assume a different model was chosen, which is what "inherits the
+   * session default" alone invited.
+   */
+  effectiveModel: string
+  /** FU-20: the session-model reading this target was resolved against, when one was supplied. */
+  sessionModel: SessionModelReading | null
 }
 
 /** Which level produced a value. `inherit` is a decision, not an absence. */
@@ -176,11 +198,28 @@ export function resolveSubagentTarget(input: {
   override?: { provider?: string | null; model?: string | null }
   /** What the tier ladder resolved. Used when no level named a provider, and labelled as the ladder's. */
   ladderProvider?: string | null
+  /**
+   * FU-20: this session's own model, when the caller could read it. Used ONLY to NAME what an inheriting child
+   * runs on — never to override a configured choice, because a session default must not silently outrank a
+   * setting the user made.
+   */
+  sessionModel?: SessionModelReading | null
 }): SubagentTarget {
   const { role, policy } = input
   const phase = input.phase?.trim() ?? ''
   const phaseRoute = phase === '' ? undefined : policy.phase_routes?.[phase]
-  const roleRoute = policy.role_routes?.[role]
+  /**
+   * ⚠ FU-20 — A PHASE ROUTE MAY NAME A DIFFERENT ROLE, AND UNTIL NOW NOTHING READ THAT FIELD.
+   *
+   * `router.ts` documents `phase_routes` as e.g. `{ '08': { role: 'memory-auditor' } }`, the schema test writes
+   * exactly that, and the resolver looked only at the phase's provider and model — so a user could name the
+   * auditor for a phase and silently get the original role's configuration instead. The field is now LIVE, and
+   * the fallback is deliberate: a phase that names a role with no route of its own still gets the requested
+   * role's route rather than dropping to nothing.
+   */
+  const phaseRole = nonEmpty(phaseRoute?.role)
+  const roleRoute = (phaseRole === null ? undefined : policy.role_routes?.[phaseRole]) ?? policy.role_routes?.[role]
+  const effectiveRole = phaseRole ?? role
   const general = policy.defaults.subagent
 
   const pick = (value: string | null | undefined, source: ChoiceSource): { value: string | null; source: ChoiceSource } =>
@@ -201,11 +240,22 @@ export function resolveSubagentTarget(input: {
     pick(general?.model, 'general'),
   ].find((candidate) => candidate.value !== null) ?? { value: null, source: 'inherit' as ChoiceSource }
 
+  // ⚠ The provider that SERVES the model, resolved with its own provenance rather than copied from the model's:
+  // a level may name a model and leave the serving provider to a broader level, which is the same per-value
+  // tolerance the two ladders above already have. There is deliberately NO per-call entry: the per-call override
+  // shape carries a provider (who creates the child) and a model, and inventing a per-call LLM provider from
+  // either of those would be exactly the two-kinds-of-provider confusion this module's header warns about.
+  const modelProviderChoice = [
+    pick(phaseRoute?.modelProvider, 'phase'),
+    pick(roleRoute?.modelProvider, 'role'),
+    pick(general?.modelProvider, 'general'),
+  ].find((candidate) => candidate.value !== null) ?? { value: null, source: 'inherit' as ChoiceSource }
+
   const where = (source: ChoiceSource): string => {
     switch (source) {
       case 'per-call': return 'this call'
       case 'phase': return 'the phase ' + phase + ' override'
-      case 'role': return 'the ' + role + ' role route'
+      case 'role': return 'the ' + effectiveRole + ' role route'
       case 'general': return 'the general subagent default'
       case 'ladder': return 'the provider ladder'
       default: return 'nothing — it is inherited'
@@ -215,16 +265,31 @@ export function resolveSubagentTarget(input: {
   const providerText = providerChoice.value === null
     ? 'no provider was resolved'
     : providerChoice.value + ' (from ' + where(providerChoice.source) + ')'
+  const session = input.sessionModel ?? null
   const modelText = modelChoice.value === null
     ? 'no model is sent, so the child inherits the session default'
+      + (session !== null && session.available
+        ? ' — which is ' + session.provider + '/' + session.model + ' (' + session.note + ')'
+        : ' — whose name could not be read here ('
+          + (session === null ? 'no session-model reading was supplied' : session.note)
+          + '), so the plugin reports it as UNKNOWN rather than naming a model it did not read')
     : modelChoice.value + ' (from ' + where(modelChoice.source) + ')'
+      + (modelProviderChoice.value === null || modelChoice.source === 'per-call'
+        ? ''
+        : ', served by ' + modelProviderChoice.value + ' (from ' + where(modelProviderChoice.source) + ')')
 
   return {
-    role,
+    role: effectiveRole,
     provider: providerChoice.value,
     model: modelChoice.value,
     chosen: { provider: providerChoice.source, model: modelChoice.source },
-    reason: 'child for role ' + role + (phase === '' ? '' : ' in phase ' + phase) + ': provider ' + providerText
+    modelProvider: modelProviderChoice.value,
+    chosenModelProvider: modelProviderChoice.source,
+    effectiveModel: modelChoice.value === null
+      ? (session !== null && session.available ? session.provider + '/' + session.model : 'UNKNOWN (the session default, unreadable here)')
+      : modelChoice.value,
+    sessionModel: session,
+    reason: 'child for role ' + effectiveRole + (phase === '' ? '' : ' in phase ' + phase) + ': provider ' + providerText
       + '; model ' + modelText + '.',
   }
 }

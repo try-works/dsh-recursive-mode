@@ -89,6 +89,7 @@ export { createRecursivePhaseTool } from './recursive_phase.tool.ts'
 export * from './status.ts'
 export {
   PHASE_SEQUENCE,
+  MAY_BE_ABSENT_PHASES,
   OPTIONAL_PHASES,
   normalizeForLockHash,
   lockHashFromContent,
@@ -96,6 +97,8 @@ export {
   isCoreArtifact,
   getPrerequisites,
   getLockStatus,
+  isSettledStatus,
+  isSkippedStatus,
   getPrerequisiteBlockers,
   receiptPath,
   readReceipt,
@@ -106,6 +109,7 @@ export {
   getAllStaleReceipts,
   validateChain,
 } from './lock.ts'
+export * from './skip.ts'
 export type {
   LockReceipt,
   LockStatus,

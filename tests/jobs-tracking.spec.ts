@@ -779,6 +779,16 @@ describe('T39 — a delegation round shows as a job', () => {
  * own suite, so this file's lock case cannot be green because the linter was never consulted.
  */
 describe('THE FROZEN-RUN DEFECT — a TRACKING failure must never fail the WORK', () => {
+  /**
+   * ⚠ AN EXPLICIT TIMEOUT, because these cases drive a REAL lock over a REAL compliant run through a real
+   * mounted runtime, and the lock path lints the whole run. Measured: ~2.2s alone on a quiet machine, but
+   * 5.8-7.6s while the suite's other files run in parallel — against vitest's 5000ms default that made this
+   * block fail for LOAD rather than for logic, which is how a green suite started reporting a defect that
+   * was not there. The assertion that proves the fix is expensive on purpose (it reaches the linter), so the
+   * budget is raised HERE rather than globally: a slow test is a fact about this test, not about the suite.
+   */
+  const LOCK_TIMEOUT_MS = 30_000
+
   /** A run whose artifacts meet the phase standard, so a lock can actually be reached. */
   const RUN = 'job-run'
   const ARTIFACT = '00-requirements.md'
@@ -975,7 +985,7 @@ describe('THE FROZEN-RUN DEFECT — a TRACKING failure must never fail the WORK'
       await ctx.fiber.dispose()
       rmSync(root, { recursive: true, force: true })
     }
-  })
+  }, LOCK_TIMEOUT_MS)
 
   it('⚠ A LOCK IS NOT BLOCKED BY A REGISTRY THAT REFUSES EVERY JOB — the live freeze, reproduced', async () => {
     // ⚠ THE USER-FACING ACCEPTANCE, AND THE CASE THAT FAILS ON THE UNFIXED CODE. This is the live defect
@@ -1007,7 +1017,7 @@ describe('THE FROZEN-RUN DEFECT — a TRACKING failure must never fail the WORK'
       await ctx.fiber.dispose()
       rmSync(root, { recursive: true, force: true })
     }
-  })
+  }, LOCK_TIMEOUT_MS)
 
   it('⚠ THE STANDARD GATE STILL BITES: the lock is still REFUSED when the artifact is below standard', async () => {
     // ⚠ THE OTHER HALF OF THE ACCEPTANCE, and the reason the case above is not evidence that the gate was
@@ -1043,5 +1053,5 @@ describe('THE FROZEN-RUN DEFECT — a TRACKING failure must never fail the WORK'
       await ctx.fiber.dispose()
       rmSync(root, { recursive: true, force: true })
     }
-  })
+  }, LOCK_TIMEOUT_MS)
 })

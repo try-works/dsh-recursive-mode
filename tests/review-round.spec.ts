@@ -167,6 +167,83 @@ describe('T36 — a settled round, read from the child\'s reply', () => {
 })
 
 describe('T36 — the degraded and broken paths are NAMED', () => {
+  it('D4: a settled APPROVE is read from the SETTLEMENT when reply.md is absent', async () => {
+    // ⚠ THE LIVE DEFECT, AND WHY AN APPROVE WAS UNREACHABLE. The review tool filter grants a reviewer
+    // NO write tool (`read`, `read_image`, `grep`, `glob`), so a reviewer child CANNOT create
+    // reply.md — yet the verdict was read from reply.md alone. A live child settled with
+    // {"verdict":"APPROVE","findings":[]} and was still reported as "the reviewer approved, but the
+    // reply could not be read as an APPROVE; treated as REVISE on a technicality". Every live review
+    // was therefore downgraded, and the loop could never complete.
+    const runDir = runRoot()
+    try {
+      const settled: ContinuableDelegationLike = {
+        ok: true,
+        childId: 'child-1',
+        accepted: true,
+        rounds: [{
+          text: 'review it',
+          result: { structured: { verdict: 'APPROVE', findings: [], references: [] }, output: 'ok', stopReason: 'completed', success: true },
+        }],
+      }
+      // reply.md says NOTHING — exactly the live case.
+      const outcome = await drive(runDir, [settled], '').advance()
+      expect(outcome.status).toBe('approved')
+      expect(outcome.verdict).toBe('APPROVE')
+    } finally {
+      rmSync(runDir, { recursive: true, force: true })
+    }
+  })
+
+  it('D4: a settlement with NO structured verdict is NOT read as APPROVE (must stay fail-closed)', async () => {
+    // ⚠ THE GUARD THAT MATTERS MOST. `readVerdictFromStructured` FAILS OPEN — it returns APPROVE when
+    // a result carries no structured verdict ("a completed run with text output is a provisional
+    // APPROVE candidate"). Using that reader here would let a child that answered in prose, or
+    // answered the wrong question, be recorded as having approved the work. The reader used instead
+    // returns null, and this pins that: prose settles and is still a REVISE.
+    const runDir = runRoot()
+    try {
+      const proseOnly: ContinuableDelegationLike = {
+        ok: true,
+        childId: 'child-1',
+        accepted: false,
+        rounds: [{
+          text: 'review it',
+          result: { output: 'I looked at it and it seems fine to me.', stopReason: 'completed', success: true },
+        }],
+      }
+      const outcome = await drive(runDir, [proseOnly], '').advance()
+      expect(outcome.status).not.toBe('approved')
+      expect(outcome.verdict).not.toBe('APPROVE')
+      // And the child is KEPT, so the repair can still reach it.
+      expect(readReviewState(runDir, DELEGATION)?.childId).toBe('child-1')
+    } finally {
+      rmSync(runDir, { recursive: true, force: true })
+    }
+  })
+
+  it('D4: the child\'s own reply STILL WINS when it states a verdict', async () => {
+    // Precedence is deliberate: reply.md is the richer artifact (findings, references) and its reader
+    // also fails closed, so it outranks the settlement. A REJECT in the reply must not be masked by an
+    // APPROVE-shaped settlement.
+    const runDir = runRoot()
+    try {
+      const settledApprove: ContinuableDelegationLike = {
+        ok: true,
+        childId: 'child-1',
+        accepted: true,
+        rounds: [{
+          text: 'review it',
+          result: { structured: { verdict: 'APPROVE' }, output: 'ok', stopReason: 'completed', success: true },
+        }],
+      }
+      const outcome = await drive(runDir, [settledApprove], '```json\n{"verdict":"REJECT","findings":[{"title":"f"}]}\n```').advance()
+      expect(outcome.verdict).toBe('REJECT')
+      expect(outcome.status).toBe('rejected')
+    } finally {
+      rmSync(runDir, { recursive: true, force: true })
+    }
+  })
+
   it('a refused delegation is `unavailable` and says the review DID NOT RUN', async () => {
     // ⚠ THIS REPLACED A TEST THAT ASSERTED THE ONE-SHOT FALLBACK WAS AN ACCEPTABLE OUTCOME.
     // T35 forbids it: delegation is ALWAYS continuable unless the caller asks for one-shot, and a

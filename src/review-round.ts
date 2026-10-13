@@ -28,7 +28,15 @@
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { readRepairFromReply, readVerdictFromReply, type ContinuableDelegationLike, type DelegationVerdict } from './delegation.ts'
+import {
+  parseReplyVerdict,
+  readRepairFromReply,
+  readRepairFromStructured,
+  readVerdictFromSettledResult,
+  type ContinuableDelegationLike,
+  type DelegationVerdict,
+  type SubagentResultLike,
+} from './delegation.ts'
 
 /** The durable record of an in-flight review, so the next turn can resume it. */
 export interface ReviewState {
@@ -265,7 +273,18 @@ export async function advanceReview(input: {
 
   // A settled round: read the verdict from the child's own reply, FAIL-CLOSED.
   const replyText = childId === undefined ? '' : input.readReply(childId)
-  const verdict = readVerdictFromReply(replyText)
+  const parsedReply = parseReplyVerdict(replyText)
+  // ⚠ D4 — THE REPLY FILE IS NOT THE ONLY EVIDENCE, AND ON THE LIVE HOST IT IS NO EVIDENCE AT ALL.
+  // The review tool filter grants a reviewer no write tool, so a reviewer child CANNOT create
+  // reply.md; a live run settled with {"verdict":"APPROVE","findings":[]} and was still reported as
+  // "the reviewer approved, but the reply could not be read as an APPROVE" — so an APPROVE was
+  // UNREACHABLE and every review was downgraded to REVISE on a technicality. The settlement's
+  // structured result carries the child's own answer, and this reads it STRICTLY (null when absent)
+  // so the round still fails closed. Precedence is deliberate: the reply wins when it says anything,
+  // because it is the richer artifact.
+  const settled = result.rounds.length > 0 ? result.rounds[result.rounds.length - 1]?.result : undefined
+  const settledVerdict = readVerdictFromSettledResult(settled)
+  const verdict: DelegationVerdict = parsedReply.verdict ?? settledVerdict ?? 'REVISE'
 
   if (result.accepted && verdict === 'APPROVE') {
     clearReviewState(runDir, delegationId)
@@ -298,8 +317,17 @@ export async function advanceReview(input: {
   }
   let repairSent = false
   if (childId !== undefined && input.sendRepair !== undefined) {
+    // ⚠ D4, THE REPAIR HALF: when the reply file said nothing, the instruction must come from the
+    // SETTLEMENT's findings rather than from a sentence about a missing file the child cannot write.
+    // `readRepairFromStructured` synthesizes only from finding TITLES, so a child still cannot inject
+    // instruction text.
+    const repair = parsedReply.findings.length > 0 || parsedReply.verdict !== null
+      ? readRepairFromReply(replyText)
+      : settledVerdict !== null
+        ? readRepairFromStructured(settled as SubagentResultLike)
+        : readRepairFromReply(replyText)
     try {
-      await input.sendRepair(childId, readRepairFromReply(replyText))
+      await input.sendRepair(childId, repair)
       repairSent = true
     } catch {
       // The repair could not be delivered; the child is still kept, so a later turn

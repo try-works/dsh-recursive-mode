@@ -79,6 +79,20 @@ export function createRecursiveReviewTool(recursive: RecursiveRuntime, subagents
         const runDir = join(root, '.recursive', 'run', runId)
         const artifactPath = join(runDir, row.file)
         const parent = exec.agent as unknown as SubagentParentHandle
+        // ⚠ D3 — RESOLVE THE SEAM AT CALL TIME, NOT AT APPLY TIME.
+        //
+        // This tool declares `inject: ['tools']`, so `apply` can run BEFORE the `subagents` service
+        // exists — and the factory captured whatever `ctx.get('subagents')` returned then (usually
+        // undefined). The runtime was given a late-attach for exactly this reason (`attachSubagents`
+        // via `ctx.inject`); the tool wiring was not, so its repair path resolved `undefined` and
+        // threw 'no continuable followup seam' into a bare catch. MEASURED live: a prototype-level spy
+        // on `SubagentRuntime.sendMessage` logged ZERO invocations while the round still reported
+        // "The child is kept so the repair can be sent to it" — the capability was advertised and
+        // unreachable at the same time.
+        //
+        // The runtime's attachment is authoritative and live; the captured value is only a fallback for
+        // a host that never fires `ctx.inject` at all.
+        const seam = recursive.attachedSubagents() ?? subagents ?? undefined
 
         const outcome = await advanceReview({
           runDir,
@@ -110,7 +124,8 @@ export function createRecursiveReviewTool(recursive: RecursiveRuntime, subagents
                 'Do the artifact and the upstream artifacts it cites agree with each other?',
               ],
               requiredOutput: REPLY_CONTRACT,
-              subagents,
+              // ⚠ D3 — the LIVE seam, not the apply-time capture (see `seam` above).
+              subagents: seam,
               parent,
               mode: 'continuable',
               awaitRoundResult: settlementRoundObserver(runDir),
@@ -122,7 +137,7 @@ export function createRecursiveReviewTool(recursive: RecursiveRuntime, subagents
           // disagrees, so it must be able to deliver the repair itself.
           sendRepair: async (childId, instruction) => {
             // Either host name; `sendMessage` is the live one (see resolveFollowupSeam).
-            const followup = resolveFollowupSeam(subagents ?? undefined)
+            const followup = resolveFollowupSeam(seam)
             if (followup === undefined) throw new Error('no continuable followup seam')
             await followup(parent, childId, [{ type: 'text', text: instruction }], {
               source: { kind: 'coordinator', form: 'relay', senderSessionId: parent?.id ?? '' },

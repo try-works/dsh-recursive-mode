@@ -166,7 +166,10 @@ export function createRecursiveDelegateTool(recursive: RecursiveRuntime, subagen
                 : {}),
               // ⚠ AND THE CHILD MAY WRITE. Without this the worker is a reviewer with a read-only filter.
               toolFilter: WORK_TOOL_FILTER,
-              subagents,
+              // ⚠ D3 — THE LIVE SEAM, NOT THE APPLY-TIME CAPTURE. This tool also declares
+              // `inject: ['tools']`, so its captured `subagents` can predate the service; the runtime's
+              // late-attached seam is authoritative and exists for exactly this case.
+              subagents: recursive.attachedSubagents() ?? subagents,
               parent,
               mode: 'continuable',
               kind: 'work',
@@ -178,7 +181,7 @@ export function createRecursiveDelegateTool(recursive: RecursiveRuntime, subagen
           readReply: (childId) => readReplyText(root, runId, delegationId, childId),
           sendRepair: async (childId, repair) => {
             // Either host name; `sendMessage` is the live one (see resolveFollowupSeam).
-            const followup = resolveFollowupSeam(subagents ?? undefined)
+            const followup = resolveFollowupSeam(recursive.attachedSubagents() ?? subagents ?? undefined)
             if (followup === undefined) throw new Error('no continuable followup seam')
             await followup(parent, childId, [{ type: 'text', text: repair }], {
               source: { kind: 'coordinator', form: 'relay', senderSessionId: parent?.id ?? '' },

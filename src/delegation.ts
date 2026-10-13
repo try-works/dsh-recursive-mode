@@ -401,9 +401,36 @@ export function readVerdictFromStructured(result: SubagentResultLike): Delegatio
   return 'APPROVE'
 }
 
+/**
+ * ⚠ D4 — THE SETTLED RESULT'S VERDICT, READ STRICTLY (never the fail-open default).
+ *
+ * WHY THIS EXISTS AT ALL. `advanceReview` read a round's verdict from `reply.md` alone. But the
+ * review tool filter grants a reviewer NO write tool (`read`, `read_image`, `grep`, `glob`), so a
+ * reviewer child CANNOT create `reply.md` — a live run proved it: a child that settled with
+ * `{"verdict":"APPROVE","findings":[]}` was reported as
+ *   "the reviewer approved, but the reply could not be read as an APPROVE; treated as REVISE so it
+ *    is not accepted on a technicality."
+ * An APPROVE was therefore UNREACHABLE on the live host, and every review was downgraded to REVISE.
+ *
+ * WHY NOT `readVerdictFromStructured`: that reader FAILS OPEN — it returns `APPROVE` when the result
+ * carries no structured verdict at all (see its comment: "a completed run with text output is a
+ * provisional APPROVE candidate"). Using it here would let a child that answered in prose, or
+ * answered the wrong question, be read as having approved the work. Verification that fails open is
+ * not verification, so this reader returns `null` unless the settlement states a real verdict, and
+ * the caller keeps failing closed on that null.
+ *
+ * PRECEDENCE, deliberate: the child's own `reply.md` wins when it says anything, because it is the
+ * richer artifact (findings, references) and its reader also fails closed. This reader is the
+ * fallback for a round whose only surviving evidence is the settlement.
+ */
+export function readVerdictFromSettledResult(result: SubagentResultLike | undefined): DelegationVerdict | null {
+  if (result === undefined) return null
+  const verdict = (result.structured as { verdict?: unknown } | undefined)?.verdict
+  return normaliseVerdict(verdict)
+}
+
 /** Read the repair instruction from a review-schema structured result (pure). */
-export function readRepairFromStructured(result: SubagentResultLike): string {
-  // SAFETY: reviewOutputSchema() defines findings as an array of {severity,title,
+export function readRepairFromStructured(result: SubagentResultLike): string {  // SAFETY: reviewOutputSchema() defines findings as an array of {severity,title,
   // detail}; the cast reads leaf fields only (no live data, no mutation). The
   // repair instruction is ALWAYS synthesized from the findings — a child cannot
   // inject arbitrary instruction text (prompt-injection hygiene).

@@ -11,6 +11,11 @@ import { join, basename, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { verifyBranchBase, verifyWorktreeBranch } from './git-context.ts'
+// ⚠ THE RUN'S OWN OPERATION INDEX IS THE AUTHORITY FOR DELEGATION PROVENANCE. See
+// `lintSubagentDelegationProvenance`: it is the only artifact in the run that records what the plugin actually
+// dispatched, and `readOperationsOrNull` is what lets an absent or unreadable index degrade to no finding
+// rather than to a refused phase.
+import { readOperationsOrNull } from './identity.ts'
 import {
   CURRENT_WORKFLOW_PROFILE,
   STRICT_WORKFLOW_PROFILE,
@@ -1469,6 +1474,141 @@ export function parseSubagentActionRecordClaims(actionContent: string): Record<s
   return { current_artifact: currentArtifact, review_bundle: reviewBundle, upstream_artifacts: upstreamArtifacts, created, modified, reviewed, relevant_untouched: relevantUntouched, artifact_refs: artifactRefs }
 }
 
+/** Values that name no delegation, so a record carrying one of them has told us nothing. */
+const UNNAMED_DELEGATION_VALUES = new Set(['n/a', 'none', 'not applicable', '-'])
+
+/** What a cited action record says about WHERE it came from. */
+export interface CitedDelegationIdentity {
+  /** The `subagents/<delegationId>/…` segment, or the record's own `Delegation` field. */
+  delegationId: string | null
+  /** The `child-<childId>` segment, or the record's own `Subagent ID` field. */
+  childId: string | null
+}
+
+/**
+ * resolve_cited_delegation: which delegation and child a cited record belongs to.
+ *
+ * TWO SOURCES, ONE ANSWER, and the order between them is deliberate. A NESTED citation
+ * (`subagents/<delegationId>/child-<childId>/reply.md`) names both in its PATH, which is a
+ * fact about where the plugin itself filed the delegation. A FLAT citation — the shape the
+ * plugin's own `writeActionRecord` produces, `subagents/<millis>-<childId>-action.md` —
+ * names neither in the path, so the record's `## Metadata` supplies what it can: `Delegation`
+ * (written by `writeActionRecord` from the same value the operation index carries) and
+ * `Subagent ID` (the child the plugin started). Neither field is trusted on its own: the
+ * caller reconciles whatever is found here against the run's operation log, so a record that
+ * states a delegation this run never dispatched is refused rather than believed.
+ *
+ * A record whose path does not exist yields whatever its path said: the caller reports a
+ * missing citation with the rule that already owns it, and must not report it twice.
+ */
+export function resolveCitedDelegation(actionRecordPath: string, runDir: string, repoRoot: string): CitedDelegationIdentity {
+  const prefix = `.recursive/run/${basename(runDir)}/subagents/`
+  const relative = actionRecordPath.startsWith(prefix) ? actionRecordPath.slice(prefix.length) : ''
+  const segments = relative.split('/').filter(Boolean)
+  // A flat file (`subagents/x-action.md`) has one segment and names no delegation; anything
+  // deeper has the delegation directory as its first segment, exactly as `createHandoff` writes it.
+  let delegationId: string | null = segments.length > 1 ? (segments[0] ?? null) : null
+  let childId: string | null = null
+  for (const segment of segments) {
+    if (segment.startsWith('child-') && segment.length > 'child-'.length) childId = segment.slice('child-'.length)
+  }
+  let metadata = ''
+  try {
+    metadata = getHeadingBody(readFileSync(join(repoRoot, actionRecordPath), 'utf8'), 'Metadata')
+  } catch {
+    return { delegationId, childId }
+  }
+  if (delegationId === null) {
+    const stated = getMdFieldValue(metadata, 'Delegation')
+    if (hasMeaningfulValue(stated, UNNAMED_DELEGATION_VALUES)) delegationId = trimMdValue(stated as string).trim()
+  }
+  if (childId === null) {
+    const stated = getMdFieldValue(metadata, 'Subagent ID')
+    if (hasMeaningfulValue(stated, UNNAMED_DELEGATION_VALUES)) childId = trimMdValue(stated as string).trim()
+  }
+  return { delegationId, childId }
+}
+
+/**
+ * lint_subagent_delegation_provenance: a cited verdict must have a recorded delegation.
+ *
+ * ⚠ THE DEFECT THIS EXISTS FOR, from a finished run: a phase obtained SIX of its eight reviews
+ * outside the plugin, HAND-WROTE the action records and the `## Subagent Contribution
+ * Verification` section citing them, and locked — while the run's own
+ * `operations/operations.jsonl` held only the plugin's two real dispatches, both `unaccepted`.
+ * The gate that was supposed to catch it (`lintSubagentActionRecordFile` plus the
+ * `subagents/` prefix filter above) could only see WHERE a cited file lived and HOW it was
+ * written, so a well-formed document in the trusted directory passed on its face and a reader
+ * reconciling the operation log with `subagents/` found verdicts with no matching operation.
+ *
+ * WHAT IT ASKS NOW: did THIS run dispatch the delegation the citation belongs to? The answer is
+ * taken from the run's operation index — the one artifact that records what the plugin did —
+ * and never from the citation's own claims, which are merely what is being checked.
+ *
+ * WHY A `FAIL` AND NOT A `WARN`, stated because it decides whether a phase may lock: a warning
+ * would leave the defect exactly where it was, with the run locking on verdicts no operation
+ * produced and a line nobody has to answer. The plugin's own dispatch path now writes the
+ * delegation into BOTH artifacts, so the only citations this can refuse are ones this plugin
+ * did not write. The aggression is bounded on the other side by the degradation below.
+ *
+ * ⚠ DEGRADATION, and it is the fail-open half of the rule: when the index is ABSENT or
+ * UNREADABLE the gate returns no findings at all and the phase lints exactly as it did before.
+ * "This run cannot be reconciled" is not "this run fabricated something", and a missing log
+ * must never be the reason a phase cannot lock.
+ *
+ * ⚠ THE LIMIT, said plainly rather than implied: `operations.jsonl` is an ordinary file inside
+ * the run directory, written by the same agent that writes the artifacts. A run that can write
+ * the log can forge provenance — append a matching `delegate-review` line per citation and the
+ * two agree. This is a CONSISTENCY CHECK between two of the run's own records, not a signature,
+ * and it does not prove a child ever ran. What it does is raise a fabricated verdict from "write
+ * a file the linter already trusts" to "also write a plausible operation-log line, and keep the
+ * two agreeing" — and make the disagreement visible to the next reader.
+ */
+export function lintSubagentDelegationProvenance(actionRecordPaths: string[], runDir: string, repoRoot: string): string[] {
+  if (actionRecordPaths.length === 0) return []
+  const operations = readOperationsOrNull(runDir)
+  if (operations === null) return []
+  const dispatched = operations.filter((record) => record.act === 'delegate-review')
+  // ⚠ A RUN THAT PREDATES THIS CHECK IS NOT REFUSED, and without this line it would be.
+  //
+  // `OperationRecord.delegationId` was ADDED by this very change, so every `delegate-review` record written
+  // by an earlier version carries none. A run started under 0.9.x and locked under this build would
+  // therefore resolve a citation's delegation from its path, find no record naming it, and FAIL — refusing
+  // a phase whose review THIS PLUGIN ITSELF DISPATCHED. That is a false refusal, and by this project's own
+  // rule a refusal must be TRUE.
+  //
+  // The condition is deliberately narrow: the field is treated as NOT IN USE only when the log holds
+  // delegate-review records and NONE of them names a delegation. If even one does, the field is in use and
+  // a citation that matches nothing is the real gap this gate exists for — including a forger who has
+  // learned to write the field elsewhere. A log with NO delegate-review records at all is not exempt:
+  // delegation recording long predates this change, so a cited review with no dispatch of any kind is
+  // exactly the shape the finished run's six hand-written verdicts had.
+  if (dispatched.length > 0 && !dispatched.some((record) => typeof record.delegationId === 'string' && record.delegationId !== '')) {
+    return []
+  }
+  const issues: string[] = []
+  for (const actionRecordPath of [...new Set(actionRecordPaths)].sort()) {
+    // A citation that points at nothing is reported by the existence rule, with its own sentence.
+    if (!existsSync(join(repoRoot, actionRecordPath))) continue
+    const { delegationId, childId } = resolveCitedDelegation(actionRecordPath, runDir, repoRoot)
+    if (delegationId === null) {
+      issues.push('Subagent Contribution Verification cites a record that names no delegation, so its provenance cannot be checked against operations.jsonl: ' + actionRecordPath)
+      continue
+    }
+    const matching = dispatched.filter((record) => record.delegationId === delegationId)
+    if (matching.length === 0) {
+      issues.push(`Subagent Contribution Verification cites delegation '${delegationId}', which operations.jsonl records no delegate-review for: ${actionRecordPath}`)
+      continue
+    }
+    // The child is checked only when one is named: a citation that names none is judged on its
+    // delegation, which is the whole of what this gate claims to establish.
+    if (childId !== null && !matching.some((record) => record.childId === childId)) {
+      issues.push(`Subagent Contribution Verification cites child '${childId}' of delegation '${delegationId}', which operations.jsonl records no dispatch of: ${actionRecordPath}`)
+    }
+  }
+  return issues
+}
+
 /** lint_subagent_contribution_verification: SCV section rules for audited phases. */
 export function lintSubagentContributionVerification(
   filePath: string,
@@ -1498,6 +1638,11 @@ export function lintSubagentContributionVerification(
   if (auditMode === 'subagent' && actionRecordPaths.length === 0) issues.push('Audit Execution Mode subagent requires at least one reviewed subagent action record')
   const outOfRunRecords = allActionRecordPaths.filter(p => !actionRecordPaths.includes(p)).sort()
   if (outOfRunRecords.length > 0) issues.push(`Subagent Contribution Verification may only reference action records under the current run subagents/: ${outOfRunRecords.slice(0, 5).join(', ')}`)
+  // ⚠ PROVENANCE, ASKED BEFORE THE SHAPE. Every rule below this line reads the cited record and judges the
+  // DOCUMENT it finds; the first question is whether this run dispatched the delegation at all, and it is
+  // answered from the run's operation index rather than from the citation. A record this run never dispatched
+  // is reported here, once, and its shape is still linted below — the two findings are different facts.
+  issues.push(...lintSubagentDelegationProvenance(actionRecordPaths, runDir, repoRoot))
   if (actionRecordPaths.length > 0) {
     const reviewedRecordPaths = new Set([...extractPathsFromFieldValue(reviewedActionRecordsField)].map(normalizeRepoPath).filter(p => p.startsWith(`.recursive/run/${basename(runDir)}/subagents/`)))
     if (!reviewedActionRecordsField.trim()) {

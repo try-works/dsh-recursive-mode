@@ -1015,6 +1015,20 @@ export interface ActionRecordInput {
    * `success`: an unobserved round is never an acceptance, whatever a caller passes alongside it.
    */
   parked?: boolean
+  /**
+   * ⚠ THE DELEGATION THAT PRODUCED THIS RECORD, when the caller knows it.
+   *
+   * WHY THE RECORD HAS TO CARRY IT. A cited action record is the one artifact the delegation gate reads, and
+   * the record's own filename and location say nothing about who dispatched it. A live run hand-wrote six of
+   * these, cited them in `## Subagent Contribution Verification`, and locked, while the run's operation index
+   * held only the plugin's own two dispatches — the gate could see the file but had no way to ask whether this
+   * run had ever run that delegation. With this line, the record can be reconciled against
+   * `operations/operations.jsonl`, which is the same fact said once in the place it belongs.
+   *
+   * ADDITIVE BY CONSTRUCTION: emitted only when supplied, so a caller that says nothing (and every test that
+   * asserts the record's shape) writes exactly the record it always did.
+   */
+  delegationId?: string
 }
 
 /**
@@ -1098,6 +1112,11 @@ export function writeActionRecord(input: ActionRecordInput): string {
     '',
     '## Metadata',
     '- Subagent ID: ' + input.subagentId,
+    // ⚠ EMITTED ONLY WHEN THE CALLER NAMES A DELEGATION, for the same reason the `Parked:`/`Failure:` lines
+    // below are conditional: a caller that says nothing must produce the record it always did, because this
+    // shape is asserted across specs. `delegateReview` always passes it, so every plugin-written record carries
+    // it, and the delegation gate can reconcile the record with the run's operation index.
+    ...(input.delegationId ? ['- Delegation: ' + input.delegationId] : []),
     '- Run ID: ' + runId,
     '- Phase: ' + input.phase,
     '- Purpose: ' + input.purpose,

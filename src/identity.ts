@@ -145,6 +145,29 @@ export interface OperationRecord {
    * phase, which needs no new state and cannot drift from the operations it counts.
    */
   phase?: string
+  /**
+   * ⚠ THE DELEGATION THIS OPERATION DISPATCHED, when it dispatched one.
+   *
+   * WHY IT IS HERE AT ALL, and the defect that put it here: a live run obtained six
+   * of its eight reviews OUTSIDE the plugin, hand-wrote the action records and the
+   * `## Subagent Contribution Verification` sections that cite them, and locked —
+   * while this index held only the plugin's own two dispatches. The gate that was
+   * supposed to catch that could only see WHERE a cited file lived and HOW it was
+   * written, so a fabricated record in the right directory passed on its face.
+   * Reusing this index (rather than adding a second provenance file) is what lets the
+   * gate ask the one question that matters: did THIS run dispatch that delegation?
+   *
+   * ADDITIVE BY CONSTRUCTION: a record written before this field existed parses
+   * exactly as it always did, with no delegation to reconcile — which the gate reads
+   * as "cannot be checked", never as "fabricated".
+   */
+  delegationId?: string
+  /**
+   * The child this operation dispatched. Paired with `delegationId` so a citation of
+   * `subagents/<delegationId>/child-<childId>/…` can be matched to the child the
+   * plugin actually started, not merely to the right phase.
+   */
+  childId?: string
 }
 
 /** The run-scoped, append-only operation index. Bounded by use, git-ignored with the run. */
@@ -152,14 +175,17 @@ export function operationsPath(runDir: string): string {
   return join(runDir, 'operations', 'operations.jsonl')
 }
 
-/** Every recorded attempt, oldest first. Never throws; a corrupt line is skipped. */
-export function readOperations(runDir: string): OperationRecord[] {
-  let raw: string
+/** The raw contents of the index, or null when it cannot be read at all. */
+function readRawIndex(runDir: string): string | null {
   try {
-    raw = readFileSync(operationsPath(runDir), 'utf8')
+    return readFileSync(operationsPath(runDir), 'utf8')
   } catch {
-    return []
+    return null
   }
+}
+
+/** Parse an index body. Never throws; a corrupt line is skipped. */
+function parseOperations(raw: string): OperationRecord[] {
   const out: OperationRecord[] = []
   for (const line of raw.split('\n')) {
     const trimmed = line.trim()
@@ -175,12 +201,35 @@ export function readOperations(runDir: string): OperationRecord[] {
       }
       if (typeof parsed.outcome === 'string') record.outcome = parsed.outcome
       if (typeof parsed.phase === 'string') record.phase = parsed.phase
+      // ⚠ ADDITIVE: absent on every record written before these two fields existed, so an
+      // older index parses to exactly the records it always did.
+      if (typeof parsed.delegationId === 'string') record.delegationId = parsed.delegationId
+      if (typeof parsed.childId === 'string') record.childId = parsed.childId
       out.push(record)
     } catch {
       // A partially written line must not make the run unreadable.
     }
   }
   return out
+}
+
+/** Every recorded attempt, oldest first. Never throws; a corrupt line is skipped. */
+export function readOperations(runDir: string): OperationRecord[] {
+  const raw = readRawIndex(runDir)
+  return raw === null ? [] : parseOperations(raw)
+}
+
+/**
+ * Every recorded attempt, or `null` when the index cannot be READ AT ALL.
+ *
+ * The distinction `readOperations` deliberately erases is the one a provenance check needs:
+ * "this run recorded no delegations" and "this run's index is missing or unreadable" are the
+ * same empty array there, and only the first of them is evidence about a citation. A caller
+ * that must not fail a phase over an absent log asks this one and degrades to no finding.
+ */
+export function readOperationsOrNull(runDir: string): OperationRecord[] | null {
+  const raw = readRawIndex(runDir)
+  return raw === null ? null : parseOperations(raw)
 }
 
 /** The LATEST record for an id, or null when the operation has never been attempted. */

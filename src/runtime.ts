@@ -1296,6 +1296,14 @@ export class RecursiveRuntime extends Service {
         // what a parked round is — and it no longer claims the delegation was judged and rejected.
         outcome: parked ? 'parked' : (evaluation.accepted ? 'accepted' : 'unaccepted'),
         phase: input.phase,
+        // ⚠ WHAT THIS RECORD IS FOR, beyond the T19 repeat guard: it is the run's own answer to "did this run
+        // dispatch this delegation?". The id alone cannot answer it — it is a hash over the inputs, so a
+        // reader cannot recover the delegation from it — and until these two fields existed, a phase could
+        // cite a hand-written action record and lock, because the gate had nothing to match the citation
+        // against. Recorded for EVERY outcome, including a park and a refusal: the gate asks whether the
+        // plugin dispatched this delegation, not whether the dispatch succeeded.
+        delegationId: input.delegationId,
+        childId: input.childId,
       })
     }
 
@@ -1304,6 +1312,11 @@ export class RecursiveRuntime extends Service {
       root: input.root,
       runId: input.runId,
       subagentId: input.childId,
+      // ⚠ THE RECORD SAYS WHICH DELEGATION PRODUCED IT, which is what lets the delegation gate reconcile a
+      // citation in `## Subagent Contribution Verification` against the run's own operation index. Without it,
+      // the record is only a well-formed document in a directory the linter already trusts — the exact gap a
+      // live run walked through with six hand-written records.
+      delegationId: input.delegationId,
       phase: input.phase,
       // ⚠ FU-17 — the kind is stated in the record. `Status` says accepted, failed or parked; nothing said whether
       // the child PRODUCED the phase's work or JUDGED it, and a reader of a run could not tell the two apart.

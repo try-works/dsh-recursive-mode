@@ -70,14 +70,19 @@ describe('T36 — recursive_review is registered and callable', () => {
     }
   })
 
-  it('with NO continuable seam it reports `unavailable`, naming the lost repair path', async () => {
+  it('with NO continuable seam it reports `unavailable`, saying the review did NOT run', async () => {
     const m = await mount()
     try {
       const out = await review(m) as { isError?: boolean; value?: { status?: string; message?: string } }
-      // The tool ran fine; what it REPORTS is that the repair path does not exist.
+      // The tool ran fine; what it REPORTS is that no review happened at all.
+      // ⚠ THIS USED TO PIN "WITHOUT the continuable repair path", which was true only while a
+      // one-shot fallback existed: a review ran, just an unrepairable one. T35 forbids that fallback
+      // (delegation is ALWAYS continuable; one-shot must be ASKED for), so the delegation now refuses
+      // and NO child is dispatched. Reporting "ran without" would claim a review that does not exist.
       expect(out.isError).toBeFalsy()
       expect(out.value?.status).toBe('unavailable')
-      expect(out.value?.message).toContain('WITHOUT the continuable repair path')
+      expect(out.value?.message).toContain('DID NOT RUN')
+      expect(out.value?.message).toContain('must be continuable')
     } finally {
       await m.dispose()
     }

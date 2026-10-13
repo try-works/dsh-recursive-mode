@@ -173,11 +173,15 @@ describe('T35 — delegation is continuable by default', () => {
     expect(result.delegationMode).toBe('one-shot')
   })
 
-  it('a provider with no continuable capability is NAMED, not hidden behind success', async () => {
-    // The delegation still happens, but the review can no longer be sent back to
-    // the child that did the work — that loss must be visible to the caller.
+  it('a provider with no continuable capability is REFUSED, never given a one-shot child', async () => {
+    // ⚠ THE RULE, ENFORCED RATHER THAN DESCRIBED. This test used to assert the delegation "still
+    // happens" and only the repair path is lost (`calls` contained 'start'). That IS the violation
+    // T35 forbids: a silent down-grade to a one-shot child the caller never asked for, reported as a
+    // named-but-acceptable degradation. A one-shot child cannot be resumed, so it cannot receive the
+    // repair followup that is the whole point of delegating a review — the caller gets the opposite
+    // of what it requested. The delegation now REFUSES and dispatches nothing.
     const { result, calls } = await review({ continuable: false })
-    expect(calls).toContain('start')
+    expect(calls).not.toContain('start')
     expect(result.delegationMode).toBe('continuable-unavailable')
   })
 

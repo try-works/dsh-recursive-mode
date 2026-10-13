@@ -460,9 +460,13 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
 
       // (1) It reached the DELEGATION path — not a NO_PHASE refusal, which is what a wrong phase key gives.
       expect(payload, 'the review never reached the delegation: ' + payload.slice(0, 400)).toContain('unavailable')
-      // (2) It FAILED CLOSED with the reason, rather than reviewing without the repair path.
-      expect(payload).toContain('repair path')
-      expect(payload).toContain('cannot be sent back')
+      // (2) It FAILED CLOSED, and the sentence says the review DID NOT RUN — because it did not.
+      // ⚠ THIS ASSERTION USED TO PIN "ran WITHOUT the continuable repair path", which was true only
+      // while a one-shot fallback existed. That fallback violated T35 (delegation is ALWAYS
+      // continuable; one-shot must be ASKED for) and is now a refusal, so NO review happens. Saying
+      // "ran without" would report a review that does not exist.
+      expect(payload).toContain('DID NOT RUN')
+      expect(payload).toContain('must be continuable')
       // (3) And it did NOT take the one-shot lifecycle — the rule this item is about.
       expect(observed, 'lifecycles: [' + observed.join(', ') + ']').not.toContain('start(one-shot)')
       // The seam probe is REPORTED either way: whether the service was found is a fact about the

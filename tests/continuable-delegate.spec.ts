@@ -71,7 +71,7 @@ describe('delegation.ts — T4 continuable delegation', () => {
     expect(result.ok).toBe(true)
     expect(result.accepted).toBe(true)
     expect(result.childId).toBe('child-1')
-    expect(result.fellBackToOneShot).toBeUndefined()
+    expect(result.refused).toBeUndefined()
     expect(result.rounds.length).toBe(2)
     expect(result.rounds[0].revise).toBe(true)
     expect(result.rounds[0].repair).toContain('finding-a')
@@ -119,62 +119,52 @@ describe('delegation.ts — T4 continuable delegation', () => {
     expect(result.rounds.length).toBe(4)
   })
 
-  it('no continuable seam falls back to one-shot delegate (never drops)', async () => {
-    const oneShot: SubagentsRuntimeLike = {
-      start: async () => ({ output: 'one-shot', stopReason: 'completed', success: true }),
+  it('no continuable seam REFUSES — it never dispatches a one-shot child', async () => {
+    // ⚠ T35, ENFORCED. Delegation is ALWAYS continuable unless the caller asks for one-shot, and
+    // `delegateContinuable` is only reached by callers that did NOT ask. A one-shot child cannot be
+    // resumed (the harness rejects it), so substituting one silently forfeits the repair path — the
+    // capability the caller delegated to obtain — and reports it as success. This test previously
+    // asserted the opposite ("falls back to one-shot delegate (never drops)"), which is how the
+    // violation survived: the tests encoded the fallback as correct.
+    const calls: string[] = []
+    const oneShotOnly: SubagentsRuntimeLike = {
+      start: async () => { calls.push('start'); return { output: 'one-shot', stopReason: 'completed', success: true } },
     }
     const result = await delegateContinuable({
-      subagents: oneShot,
+      subagents: oneShotOnly,
       provider: 'spawn',
       label: 'rev-1',
       prompt: 'review',
     })
-    expect(result.fellBackToOneShot).toBe(true)
-    expect(result.ok).toBe(true)
-    expect(result.accepted).toBe(true)
-  })
-
-  it('one-shot fallback with a REVISE verdict is not accepted', async () => {
-    const oneShot: SubagentsRuntimeLike = {
-      start: async () => ({ structured: { verdict: 'REVISE' }, output: 'o', stopReason: 'completed', success: true }),
-    }
-    const result = await delegateContinuable({
-      subagents: oneShot,
-      provider: 'spawn',
-      label: 'rev-1',
-      prompt: 'review',
-    })
-    expect(result.fellBackToOneShot).toBe(true)
+    expect(result.refused).toBe('continuable-unavailable')
+    expect(result.ok).toBe(false)
     expect(result.accepted).toBe(false)
+    // THE POINT: no child was dispatched at all.
+    expect(calls).not.toContain('start')
+    // And the refusal names what is missing rather than leaving the cause undecidable.
+    expect(result.missing).toBeDefined()
+    expect(result.reason).toContain('REFUSED')
+    expect(result.reason).toContain('mode: "one-shot"')
   })
 
-  it('one-shot fallback carries a signal, because providers read request.signal.aborted bare', async () => {
-    // REPRODUCES THE LIVE FAILURE: the fallback at delegation.ts (the `else` branch when the
-    // continuable seam is absent) used to build a request with NO signal. The host forwards it
-    // verbatim, and subagent-in-process-driver reads `request.signal.aborted` bare
-    // (packages/subagent/subagent-in-process-driver/src/index.ts:109), throwing
-    // "Cannot read properties of undefined (reading 'aborted')" before any child starts.
-    // This fake reproduces that exact provider read; without the fix the delegate call throws.
-    let sawSignal: unknown
-    const providerRead: SubagentsRuntimeLike = {
-      start: async (_provider: string, request) => {
-        sawSignal = request.signal
-        // The exact bare read the driver performs. Throws TypeError when signal is undefined.
-        if ((request.signal as { aborted?: boolean }).aborted) throw new Error('aborted')
-        return { output: 'one-shot', stopReason: 'completed', success: true }
-      },
+  it('the refusal names EVERY missing piece (seam, runtime, or live parent)', async () => {
+    // Three distinct conditions land in the same branch. The report must say which, because a live
+    // run once spent three rounds on an undecidable "no continuable seam or no live parent".
+    const seamButNoParent: SubagentsRuntimeLike = {
+      start: async () => ({ output: 'x', stopReason: 'completed', success: true }),
+      startContinuable: async () => ({ childId: 'c1', messageId: 'm1' }),
+      sendMessage: async () => 'm2',
     }
     const result = await delegateContinuable({
-      subagents: providerRead,
+      subagents: seamButNoParent,
       provider: 'spawn',
       label: 'rev-1',
       prompt: 'review',
-      // no parent / no continuable seam → the fallback branch runs
+      awaitRoundResult: async () => null,
+      // no parent → the exact live Agent is the missing piece
     })
-    expect(result.ok).toBe(true)
-    expect(result.fellBackToOneShot).toBe(true)
-    expect(sawSignal).toBeDefined()
-    expect(typeof (sawSignal as { aborted?: boolean }).aborted).toBe('boolean')
+    expect(result.refused).toBe('continuable-unavailable')
+    expect(result.missing).toContain('parent')
   })
 
   it('binds the host\'s `sendMessage` as the follow-up seam, so the repair loop is reachable', async () => {
@@ -206,7 +196,7 @@ describe('delegation.ts — T4 continuable delegation', () => {
       awaitRoundResult: async () => rounds[Math.min(i++, rounds.length - 1)]!,
     })
     // The continuable path engaged: startContinuable once, sendMessage for the REVISE.
-    expect(result.fellBackToOneShot).toBeUndefined()
+    expect(result.refused).toBeUndefined()
     expect(calls).toContain('startContinuable')
     expect(calls).toContain('sendMessage')
     expect(calls).not.toContain('start')
@@ -214,6 +204,42 @@ describe('delegation.ts — T4 continuable delegation', () => {
     // and omitting it is the same class of defect that broke the one-shot fallback.
     expect(sentOptions).toBeDefined()
     expect(sentOptions!.signal).toBeDefined()
+  })
+
+  it('calls startContinuable BOUND — a host method using `this` must not be extracted loose', async () => {
+    // ⚠ THE DEFECT THIS CATCHES, AND IT WAS LIVE: the plugin captured
+    // `const startContinuable = subagents?.startContinuable`, detaching `this`. The real host method
+    // opens with `this.requireContinuations()` (packages/subagent/subagent/src/index.ts:261), so the
+    // first host call threw `Cannot read properties of undefined (reading 'requireContinuations')` and
+    // NO child was ever created — even after the seam name and the tool filter were correct. Verified
+    // live: binding the receiver is the difference between "no child" and a real durable child that
+    // runs, settles and is filed. This fake reproduces the host's receiver use, so an unbound
+    // extraction throws here instead of in production.
+    const service = {
+      // `this` is REQUIRED — exactly like the host.
+      requireContinuations(): string { return 'ok' },
+      async startContinuable(_spec: ContinuableStartSpecLike) {
+        if (this.requireContinuations() !== 'ok') throw new Error('unreachable')
+        return { childId: 'bound-child', messageId: 'm1' }
+      },
+      async sendMessage() { return 'm2' },
+      start: async () => ({ output: 'one-shot', stopReason: 'completed', success: true }),
+    }
+    const seen: string[] = []
+    const rounds = [makeRoundResult({ verdict: 'APPROVE' })]
+    let i = 0
+    const result = await delegateContinuable({
+      subagents: service as unknown as SubagentsRuntimeLike,
+      provider: 'spawn',
+      label: 'rev-1',
+      prompt: 'review',
+      parent: { id: 'parent-1' },
+      awaitRoundResult: async (childId) => { seen.push(String(childId)); return rounds[Math.min(i++, rounds.length - 1)]! },
+    })
+    // The bound call reached the host and produced the child, rather than throwing.
+    expect(result.childId).toBe('bound-child')
+    expect(seen).toContain('bound-child')
+    expect(result.refused).toBeUndefined()
   })
 
   it('defaultReviewToolFilter names tools that actually exist', () => {
@@ -241,7 +267,7 @@ describe('delegation.ts — T4 continuable delegation', () => {
     expect(filter.allow).not.toContain('edit')
   })
 
-  it('continuable seam WITHOUT an observer falls back to one-shot (never a fake APPROVE)', async () => {
+  it('continuable seam WITHOUT an observer REFUSES (never a fake APPROVE)', async () => {
     let startContinuableCalled = false
     const seamOnly: SubagentsRuntimeLike = {
       start: async () => ({ output: 'one-shot', stopReason: 'completed', success: true }),
@@ -256,12 +282,16 @@ describe('delegation.ts — T4 continuable delegation', () => {
       parent: { id: 'parent-1' },
       // no awaitRoundResult
     })
-    expect(result.fellBackToOneShot).toBe(true)
-    expect(result.accepted).toBe(true)
+    // ⚠ REFUSES and dispatches nothing. Without an observer the loop could never see a settlement,
+    // so any "result" would be an approval nobody observed. The old behaviour substituted a one-shot
+    // child and reported `accepted: true` from it — an approval the caller never asked for.
+    expect(result.refused).toBe('continuable-unavailable')
+    expect(result.accepted).toBe(false)
+    expect(result.ok).toBe(false)
     expect(startContinuableCalled).toBe(false)
   })
 
-  it('continuable seam WITHOUT a live parent falls back to one-shot (never fabricates authority)', async () => {
+  it('continuable seam WITHOUT a live parent REFUSES (never fabricates authority)', async () => {
     let startContinuableCalled = false
     const seamOnly: SubagentsRuntimeLike = {
       start: async () => ({ output: 'one-shot', stopReason: 'completed', success: true }),
@@ -276,8 +306,9 @@ describe('delegation.ts — T4 continuable delegation', () => {
       // no parent — the live followup authorizes by exact live Agent identity
       awaitRoundResult: async () => ({ output: 'x', stopReason: 'completed', success: true }),
     })
-    expect(result.fellBackToOneShot).toBe(true)
-    expect(result.accepted).toBe(true)
+    expect(result.refused).toBe('continuable-unavailable')
+    expect(result.missing).toContain('parent')
+    expect(result.accepted).toBe(false)
     expect(startContinuableCalled).toBe(false)
   })
 

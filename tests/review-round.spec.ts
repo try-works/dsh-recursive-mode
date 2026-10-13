@@ -167,12 +167,19 @@ describe('T36 — a settled round, read from the child\'s reply', () => {
 })
 
 describe('T36 — the degraded and broken paths are NAMED', () => {
-  it('a one-shot fallback is `unavailable` and says the repair path is missing', async () => {
+  it('a refused delegation is `unavailable` and says the review DID NOT RUN', async () => {
+    // ⚠ THIS REPLACED A TEST THAT ASSERTED THE ONE-SHOT FALLBACK WAS AN ACCEPTABLE OUTCOME.
+    // T35 forbids it: delegation is ALWAYS continuable unless the caller asks for one-shot, and a
+    // one-shot child cannot be repaired. The delegation now REFUSES, so no review happens at all —
+    // and the message must say so. It previously read "the review ran WITHOUT the continuable repair
+    // path", which claimed a review existed; reporting a review that never happened is the exact
+    // defect class this project keeps removing.
     const runDir = runRoot()
     try {
-      const outcome = await drive(runDir, [loopResult({ fellBackToOneShot: true })], '').advance()
+      const outcome = await drive(runDir, [loopResult({ refused: 'continuable-unavailable', missing: 'the exact live parent Agent', reason: 'REFUSED — a delegated subagent must be continuable' })], '').advance()
       expect(outcome.status).toBe('unavailable')
-      expect(outcome.message).toContain('WITHOUT the continuable repair path')
+      expect(outcome.message).toContain('DID NOT RUN')
+      expect(outcome.message).toContain('the exact live parent Agent')
       // Nothing is recorded: there is no child to resume.
       expect(readReviewState(runDir, DELEGATION)).toBeNull()
     } finally {

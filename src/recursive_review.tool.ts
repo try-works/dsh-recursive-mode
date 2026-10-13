@@ -97,6 +97,11 @@ export function createRecursiveReviewTool(recursive: RecursiveRuntime, subagents
               role,
               delegationId,
               childId,
+              // ⚠ T36 — CARRY THE RESUME. `childId` above is a RESERVED identity for a new child; when
+              // this round is resuming one that already exists, the id must ALSO travel as
+              // `resumeChild` or the host answers `subagent "<id>" already exists` and the retry can
+              // never progress. MEASURED live: a parked review failed every retry for exactly this.
+              ...(resumeChild === undefined ? {} : { resumeChild }),
               artifactPath,
               upstreamArtifacts: [],
               auditQuestions: [
@@ -154,23 +159,27 @@ export function readReplyText(root: string, runId: string, delegationId: string,
  * Project `delegateReview`'s result onto the loop shape the driver reads.
  *
  * The mapping is where the honest failure modes live: no continuable result at all
- * (self-audit, or the delegation never ran) becomes `fellBackToOneShot`, which the
- * driver reports as `unavailable` — the review happened without the repair path, and
- * saying so beats reporting a success that cannot be acted on.
+ * (self-audit, or the delegation never ran) becomes a REFUSAL, which the driver
+ * reports as `unavailable` — the review did not happen, and saying so beats
+ * reporting a one-shot review as though it could be repaired.
  */
 export function toContinuable(review: {
-  continuable: { rounds: unknown[]; childId?: string; fellBackToOneShot?: boolean; parked?: boolean; ok?: boolean; reason?: string } | null
+  continuable: { rounds: unknown[]; childId?: string; refused?: 'continuable-unavailable'; missing?: string; parked?: boolean; ok?: boolean; reason?: string } | null
   evaluation?: { accepted?: boolean }
   error?: string | null
   parked?: boolean
 }): ContinuableDelegationLike {
   if (review.continuable === null) {
+    // ⚠ NO CONTINUABLE DELEGATION AT ALL is the same condition the delegation itself refuses on:
+    // a reviewer that cannot be followed up. It is reported as the refusal, not as a degraded
+    // "one-shot fallback" — no one-shot child was dispatched here either.
     return {
       ok: false,
       reason: review.error ?? 'no continuable delegation ran',
       rounds: [],
       accepted: false,
-      fellBackToOneShot: true,
+      refused: 'continuable-unavailable',
+      missing: review.error ?? 'no continuable delegation ran',
     }
   }
   return {
@@ -185,7 +194,8 @@ export function toContinuable(review: {
     ...(review.continuable.childId === undefined ? {} : { childId: review.continuable.childId }),
     accepted: review.evaluation?.accepted === true,
     ...(review.continuable.parked === true ? { parked: true } : {}),
-    // ⚠ AND THE FALLBACK FLAG, which decides whether the driver reports "no continuable repair path" at all.
-    ...(review.continuable.fellBackToOneShot === true ? { fellBackToOneShot: true } : {}),
+    // ⚠ AND THE REFUSAL, which decides whether the driver reports that no review ran at all.
+    ...(review.continuable.refused === undefined ? {} : { refused: review.continuable.refused }),
+    ...(review.continuable.missing === undefined ? {} : { missing: review.continuable.missing }),
   }
 }

@@ -171,18 +171,21 @@ export async function advanceReview(input: {
     }
   }
 
-  // The delegation ran, but not continuably: the review happened without the repair
-  // path. Named, never hidden behind a success — this is T35's whole reason.
-  if (result.fellBackToOneShot === true) {
-    // ⚠ FU-9 — AND SAY WHICH CONDITION, when the delegation kept it. The sentence below used to name two
-    // possibilities for a branch that covers three, so a live run's cause was undecidable from its own report.
+  // ⚠ THE REVIEW DID NOT RUN. This branch used to read "the review ran WITHOUT the continuable repair
+  // path", which was true only while a one-shot fallback existed: a review DID happen, just an
+  // unrepairable one. The fallback is gone (T35: delegation is ALWAYS continuable; one-shot must be
+  // asked for), so the delegation REFUSES when the continuable path is unavailable and NO review
+  // happens at all. Reporting that as "ran without" would claim a review that does not exist — the
+  // precise defect class this project keeps removing.
+  if (result.refused === 'continuable-unavailable') {
     return {
       status: 'unavailable',
-      rounds: result.rounds.length,
-      message: 'the review ran WITHOUT the continuable repair path'
-        + (result.reason !== undefined
-          ? ' — ' + result.reason + ' — so a failed review cannot be sent back to the child that did the work'
-          : ' (no continuable seam or no live parent), so a failed review cannot be sent back to the child that did the work'),
+      rounds: 0,
+      childId: resumeChild,
+      message: 'the review DID NOT RUN: a delegated reviewer must be continuable, and the service cannot '
+        + 'provide one — missing ' + (result.missing ?? 'the continuable seam or the live parent Agent')
+        + '. No one-shot substitute was dispatched, because a one-shot child cannot receive a repair '
+        + 'followup. ' + (result.reason ?? ''),
     }
   }
 

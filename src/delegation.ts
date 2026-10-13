@@ -330,8 +330,18 @@ export interface ContinuableDelegationLike {
   rounds: ContinuableRoundLike[]
   /** Final outcome accepted (last verdict APPROVE + result accepted). */
   accepted: boolean
-  /** True when the fallback one-shot `delegate()` was used (no continuable seam). */
-  fellBackToOneShot?: boolean
+  /**
+   * ⚠ THE ONE-SHOT FALLBACK IS GONE, AND THIS FIELD REPLACED `fellBackToOneShot`.
+   *
+   * `fellBackToOneShot` recorded that the delegation had silently degraded to a one-shot child. That
+   * degradation violated T35 ("delegation is ALWAYS continuable; one-shot must be ASKED FOR") and is
+   * now a REFUSAL instead, so a boolean saying "we degraded" can never be true again. What the caller
+   * needs to distinguish is WHY the continuable path was unavailable, so the code is carried here and
+   * the human-readable prose stays in `reason`.
+   */
+  refused?: 'continuable-unavailable'
+  /** The pieces that were absent when `refused === 'continuable-unavailable'`. */
+  missing?: string
   /**
    * True when the round ended because NO settlement has landed yet — the caller's
    * signal to resume on a later turn with the SAME `childId`, not a failure. The
@@ -606,56 +616,65 @@ export async function delegateContinuable(input: {
   const sessionModel = readSessionModel(parent)
   const childRoute = describeChildRoute({ requested: input.agentOptions?.model ?? null, session: sessionModel })
 
-  const startContinuable = subagents?.startContinuable
+  // ⚠⚠ A METHOD EXTRACTED FROM A SERVICE MUST BE BOUND — `startContinuable` WAS NOT, AND THAT MADE
+  // THE WHOLE CONTINUABLE PATH DEAD ON THE HOST EVEN AFTER THE SEAM NAME WAS FIXED.
+  //
+  // `const startContinuable = subagents?.startContinuable` captures the function with `this` detached.
+  // The host's implementation opens with `this.requireContinuations()`
+  // (packages/subagent/subagent/src/index.ts:261), so the very first host call threw
+  //   Cannot read properties of undefined (reading 'requireContinuations')
+  // — a live-verified failure, caught only by binding the receiver in a scratch shim: with it, a real
+  // durable child is created, runs, settles and is filed; without it, no child is ever created.
+  //
+  // MEASURED in a live A/B: 0.9.3 entered the continuable branch (no fallback, no fs_read rejection)
+  // and still produced no child, because of this one line. The follow-up seam was bound by
+  // `resolveFollowupSeam`; this extraction was missed — the same defect, one function over. Bind BOTH
+  // here, and prefer a bound call over passing the raw method anywhere.
+  const startContinuable = subagents?.startContinuable === undefined
+    ? undefined
+    : (spec: ContinuableStartSpecLike) => subagents!.startContinuable!(spec)
   // ⚠ RESOLVED UNDER EITHER NAME. The host calls it `sendMessage`; probing only `followup` made
   // this whole branch dead against the live service (see `sendMessage` on SubagentsRuntimeLike).
   const followup = resolveFollowupSeam(subagents ?? undefined)
-  // A continuable loop MUST observe the child's real settlement AND hold the
-  // exact live parent Agent (the live service authorizes followup by object
-  // identity). When either is missing, fall back to one-shot (which returns the
-  // actual result) rather than fabricating authority and silently APPROVE-ing.
+  // A continuable loop MUST observe the child's real settlement AND hold the exact live parent
+  // Agent (the live service authorizes followup by object identity).
   const hasContinuableSeam = startContinuable !== undefined && followup !== undefined && input.awaitRoundResult !== undefined
   if (!hasContinuableSeam || subagents === undefined || parent === undefined) {
-    // ⚠ FU-9 — NAME WHICH CONDITION FAILED, because this branch covers THREE of them and the report did not.
-    // A live run returned `status: unavailable` with "no continuable seam or no live parent" for three rounds,
-    // making its cause UNDECIDABLE while this code knew it exactly. That is the defect class this session keeps
-    // finding - a surface describing less than the code knows - and it cost more than the bug it was hiding.
-    const fallbackReason = 'missing ' + [
-      hasContinuableSeam ? null : 'the continuable seam (startContinuable, followup, awaitRoundResult)',
+    // ⚠⚠ NO ONE-SHOT FALLBACK. THIS BRANCH USED TO DEGRADE SILENTLY, AND THAT VIOLATED THE RULE THIS
+    // FILE ALREADY STATES. T35 (runtime.ts / tests/delegation-mode.spec.ts) is explicit: "delegation is
+    // ALWAYS continuable; one-shot must be ASKED FOR" — because a one-shot child cannot be resumed
+    // (the harness rejects it with "subagent can not be resumed"), so it can never receive a repair
+    // followup. `delegateContinuable` is only ever reached when the caller did NOT ask for one-shot,
+    // so substituting a one-shot child here gives the caller the OPPOSITE of what it requested, and
+    // reports it as success.
+    //
+    // MEASURED COST, in one live run: this fallback replaced a single durable reviewer with FIVE raw
+    // `subagent` calls, lost one child mid-work ("subagent run failed; Partial output before the run
+    // ended") with its output gone, and left the review with no way to send a REVISE back to the child
+    // that did the work — the exact capability the caller delegated to obtain. Two rounds of
+    // investigation then chased the fallback's own bugs (a missing signal; a filter naming a tool that
+    // does not exist) — bugs on a path that should not have existed.
+    //
+    // The honest answer is REFUSAL that names every missing piece, and that points at the one
+    // supported way to get a fire-and-forget child: ask for it explicitly.
+    const missing = [
+      hasContinuableSeam ? null : 'the continuable seam (startContinuable + a follow-up method + awaitRoundResult)',
       subagents === undefined ? 'the subagents runtime' : null,
-      parent === undefined ? 'the exact live parent Agent' : null,
+      parent === undefined ? 'the exact live parent Agent (object identity, never a { id } copy)' : null,
     ].filter((part): part is string => part !== null).join(', ')
-    // Fall back to one-shot delegation (self-audit-safe): never silently drop.
-    try {
-      const oneShot = await delegate({
-        subagents,
-        provider,
-        request: {
-          prompt: [{ type: 'text', text: prompt }],
-          label,
-          toolFilter,
-          maxDepth,
-          parent,
-          // ⚠ THE FALLBACK ONE-SHOT PATH MUST CARRY A SIGNAL. `subagents.start` forwards this request
-          // verbatim, and the in-process driver reads `request.signal.aborted` bare
-          // (packages/subagent/subagent-in-process-driver/src/index.ts:109) — an absent signal throws
-          // `Cannot read properties of undefined (reading 'aborted')` and kills the fallback review before
-          // any child starts. Supplying one mirrors the continuable spec's signal below (:611).
-          signal: new AbortController().signal,
-        },
-      })
-      const verdict = readVerdict(oneShot)
-      return {
-        ok: true,
-        rounds: [{ text: prompt, result: oneShot }],
-        accepted: verdict === 'APPROVE' && evaluateDelegationResult(oneShot).accepted,
-        fellBackToOneShot: true,
-        reason: fallbackReason,
-        childRoute,
-        sessionModel,
-      }
-    } catch (err) {
-      return { ok: false, reason: err instanceof Error ? err.message : String(err), rounds: [], accepted: false, fellBackToOneShot: true, childRoute, sessionModel }
+    return {
+      ok: false,
+      reason: 'REFUSED — a delegated subagent must be continuable, and this service cannot provide one. Missing: '
+        + missing
+        + '. No one-shot fallback is taken, because a one-shot child cannot receive a repair followup: it would '
+        + 'silently forfeit the capability this delegation exists to obtain. Restore the missing piece, or pass '
+        + '`mode: "one-shot"` explicitly if a fire-and-forget child is genuinely what you want.',
+      rounds: [],
+      accepted: false,
+      refused: 'continuable-unavailable',
+      missing,
+      childRoute,
+      sessionModel,
     }
   }
 

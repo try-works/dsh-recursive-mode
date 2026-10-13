@@ -756,6 +756,19 @@ export class RecursiveRuntime extends Service {
     role: string
     delegationId: string
     childId: string
+    /**
+     * ⚠ T36 — THE ID TO RESUME, WHEN A CONTINUABLE CHILD ALREADY EXISTS.
+     *
+     * `childId` above is a RESERVED IDENTITY for a child about to be created. On a retry the child
+     * already exists, and passing its id as a creation id makes the host answer
+     * `subagent "<id>" already exists` — a DUPLICATE_CHILD that no retry can ever get past. MEASURED
+     * live: both a same-session retry and a later process returned that error, so a parked review
+     * could never progress.
+     *
+     * `delegateContinuable` resumes only when it receives `resumeChild`, so this field is the one
+     * that carries the distinction. Absent → create (the original behaviour, unchanged).
+     */
+    resumeChild?: string
     artifactPath: string
     upstreamArtifacts: string[]
     auditQuestions: string[]
@@ -928,6 +941,14 @@ export class RecursiveRuntime extends Service {
       outputSchema: reviewOutputSchema(),
       toolFilter: input.toolFilter ?? defaultReviewToolFilter(),
       maxDepth: remainingDepthFor(this.enforcementConfig.budgets, parentDepthOf(input.parent), input.maxDepth),
+      // ⚠ THIS REQUEST FEEDS THE EXPLICIT `mode: 'one-shot'` PATH, AND IT NEEDED A SIGNAL TOO.
+      // `subagents.start` forwards the request verbatim and the in-process driver reads
+      // `request.signal.aborted` BARE (packages/subagent/subagent-in-process-driver/src/index.ts:109),
+      // so an absent signal throws `Cannot read properties of undefined (reading 'aborted')` before
+      // any child starts. The continuable spec already carried one and the (now-removed) silent
+      // fallback was fixed for the same reason — this is the third and last place the plugin builds
+      // a start request, and T35 keeps this path alive for callers that explicitly ask for one-shot.
+      signal: new AbortController().signal,
     }
     if (input.parent !== undefined) request.parent = input.parent
 
@@ -1099,6 +1120,11 @@ export class RecursiveRuntime extends Service {
           label: input.delegationId + '/' + input.childId,
           prompt,
           childId: input.childId,
+          // ⚠ T36 — A RETRY MUST RESUME, NOT RE-CREATE. `childId` above reserves an identity for a
+          // child that does not exist yet; when the caller says a child already exists, its id must
+          // travel as `resumeChild` instead, or the host refuses with `subagent "<id>" already exists`
+          // and every retry of a parked review fails the same way.
+          ...(input.resumeChild === undefined ? {} : { resumeChild: input.resumeChild as ContinuableChildId }),
           maxDepth: remainingDepthFor(this.enforcementConfig.budgets, parentDepthOf(input.parent), input.maxDepth),
           toolFilter: input.toolFilter ?? defaultReviewToolFilter(),
           maxRounds: input.maxRounds ?? 3,
@@ -1193,10 +1219,13 @@ export class RecursiveRuntime extends Service {
           // fabricated — an unobserved round is never an approval.
           parked = true
           parkedReason = continuable.reason ?? null
-        } else if (continuable.fellBackToOneShot) {
-          // The seam has no continuable capability — keep the one-shot result.
-          result = continuable.rounds[0]?.result ?? null
-          if (!result) error = 'continuable fallback produced no result'
+        } else if (continuable.refused === 'continuable-unavailable') {
+          // ⚠ THE REFUSAL REPLACED A SILENT ONE-SHOT FALLBACK. There is no one-shot result to keep:
+          // the delegation declined to dispatch at all, because T35 requires a continuable child and
+          // a one-shot child cannot be repaired. Surfacing the refusal as the error is the honest
+          // report — the previous branch said "the seam has no continuable capability" and kept a
+          // one-shot result the caller had not asked for.
+          error = continuable.reason ?? 'the delegation refused: the continuable seam is unavailable'
         } else if (continuable.ok && continuable.rounds.length > 0) {
           result = continuable.rounds[continuable.rounds.length - 1].result ?? null
           if (!result) error = 'continuable child produced no final result'
@@ -1355,14 +1384,12 @@ export class RecursiveRuntime extends Service {
               + (result.success === false ? ' (the child itself reported success:false)' : ''),
     })
 
-    // T35: report the mode that ACTUALLY ran, not the one that was asked for. A
-    // missing continuable capability is a real loss — the review can no longer be
-    // sent back to the child that did the work — so it is NAMED rather than
-    // hidden behind a generic success. `continuable-unavailable` is the honest
-    // label for that case: the delegation still happened, the repair path did not.
+    // T35: report the mode that ACTUALLY ran, not the one that was asked for. When the continuable
+    // capability is missing the delegation now REFUSES rather than degrading, so
+    // `continuable-unavailable` means "no delegation ran at all" — not "one ran without repairs".
     const delegationMode: 'continuable' | 'one-shot' | 'continuable-unavailable' | 'none'
       = continuable !== null
-        ? (continuable.fellBackToOneShot ? 'continuable-unavailable' : 'continuable')
+        ? (continuable.refused === 'continuable-unavailable' ? 'continuable-unavailable' : 'continuable')
         : result !== null ? 'one-shot' : 'none'
 
     // T4: the durable child id is reported for the caller (a tool/closeout that
@@ -1396,7 +1423,7 @@ export class RecursiveRuntime extends Service {
        */
       parked,
       parkedReason,
-      continuable: continuable ? { rounds: continuable.rounds, childId: continuable.childId, fellBackToOneShot: continuable.fellBackToOneShot, parked: continuable.parked === true,
+      continuable: continuable ? { rounds: continuable.rounds, childId: continuable.childId, refused: continuable.refused, missing: continuable.missing, parked: continuable.parked === true,
         // ⚠ FU-9 — `ok` AND `reason` TRAVEL WITH IT. The adapter that builds the review driver's view read only
         // `rounds`, `childId`, `fellBackToOneShot` and `parked`, so every failure branch's REASON — the whole
         // point of the field — was discarded one layer above the message that needed it, and `ok: false` was

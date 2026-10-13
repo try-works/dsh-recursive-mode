@@ -11,7 +11,7 @@
  *     sections from the phase rules, so the child is told what its output will be linted against. A worker that
  *     has never seen the gate cannot meet it.
  *  3. THE CHILD IS GIVEN A WRITE-CAPABLE FILTER. `delegateReview` defaults to
- *     `{ allow: ['fs_read', 'grep', 'glob'] }` — correct for a reviewer, fatal for a worker, and SILENT either
+ *     `{ allow: ['read', 'read_image', 'grep', 'glob'] }` — correct for a reviewer, fatal for a worker, and SILENT either
  *     way: a worker with a read-only filter reports a perfectly healthy delegation while being unable to write a
  *     single file. See `WORK_TOOL_FILTER` for why the override is a deny list.
  *
@@ -35,14 +35,14 @@ import { buildWorkSlice } from './handoff.ts'
 import { advanceReview } from './review-round.ts'
 import { settlementRoundObserver } from './settlement.ts'
 import { CURRENT_WORKFLOW_PROFILE, getArtifactRequiredSections } from './phase-rules.ts'
-import type { SubagentParentHandle, SubagentsRuntimeLike } from './delegation.ts'
+import { resolveFollowupSeam, type SubagentParentHandle, type SubagentsRuntimeLike } from './delegation.ts'
 import { readReplyText, toContinuable } from './recursive_review.tool.ts'
 
 /**
  * ⚠ FU-17 — THE WORK TOOL FILTER, AND WHY IT IS A DENY LIST RATHER THAN AN ALLOW LIST.
  *
  * `delegateReview` applies `input.toolFilter ?? defaultReviewToolFilter()` and that default is
- * `{ allow: ['fs_read', 'grep', 'glob'] }`. So a work delegation that passes nothing receives a child that
+ * `{ allow: ['read', 'read_image', 'grep', 'glob'] }`. So a work delegation that passes nothing receives a child that
  * cannot write — and nothing about the outcome would say so.
  *
  * The obvious fix is an allow list of the writing tools, and it is the wrong one: it has to name EVERY tool a
@@ -177,7 +177,8 @@ export function createRecursiveDelegateTool(recursive: RecursiveRuntime, subagen
           },
           readReply: (childId) => readReplyText(root, runId, delegationId, childId),
           sendRepair: async (childId, repair) => {
-            const followup = subagents?.followup
+            // Either host name; `sendMessage` is the live one (see resolveFollowupSeam).
+            const followup = resolveFollowupSeam(subagents ?? undefined)
             if (followup === undefined) throw new Error('no continuable followup seam')
             await followup(parent, childId, [{ type: 'text', text: repair }], {
               source: { kind: 'coordinator', form: 'relay', senderSessionId: parent?.id ?? '' },

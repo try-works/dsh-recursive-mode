@@ -5,6 +5,7 @@ import {
   drainContinuableChildren,
   readVerdictFromStructured,
   readRepairFromStructured,
+  defaultReviewToolFilter,
   type SubagentResultLike,
   type SubagentsRuntimeLike,
   type ContinuableStartSpecLike,
@@ -174,6 +175,70 @@ describe('delegation.ts — T4 continuable delegation', () => {
     expect(result.fellBackToOneShot).toBe(true)
     expect(sawSignal).toBeDefined()
     expect(typeof (sawSignal as { aborted?: boolean }).aborted).toBe('boolean')
+  })
+
+  it('binds the host\'s `sendMessage` as the follow-up seam, so the repair loop is reachable', async () => {
+    // ⚠ THE DEFECT THIS CATCHES: the live host's follow-up method is `sendMessage`
+    // (packages/subagent/subagent/src/index.ts:279), NOT `followup`. While the seam probe
+    // required `followup`, `hasContinuableSeam` was false against the real service EVERY time, so
+    // delegateContinuable silently took the one-shot fallback and the T4 repair loop never ran.
+    // A service offering ONLY `sendMessage` must therefore engage the continuable path.
+    const calls: string[] = []
+    let sentOptions: { signal?: unknown } | undefined
+    const sendMessageOnly: SubagentsRuntimeLike = {
+      start: async () => { calls.push('start'); return { output: 'one-shot', stopReason: 'completed', success: true } },
+      startContinuable: async () => { calls.push('startContinuable'); return { childId: 'c1', messageId: 'm1' } },
+      // The host's real shape: (sender, targetId, content, options) with options = { signal }.
+      sendMessage: async (_sender, _targetId, _content, options) => {
+        calls.push('sendMessage')
+        sentOptions = options
+        return 'm2'
+      },
+    }
+    const rounds = [makeRoundResult({ verdict: 'REVISE' }), makeRoundResult({ verdict: 'APPROVE' })]
+    let i = 0
+    const result = await delegateContinuable({
+      subagents: sendMessageOnly,
+      provider: 'spawn',
+      label: 'rev-1',
+      prompt: 'review',
+      parent: { id: 'parent-1' },
+      awaitRoundResult: async () => rounds[Math.min(i++, rounds.length - 1)]!,
+    })
+    // The continuable path engaged: startContinuable once, sendMessage for the REVISE.
+    expect(result.fellBackToOneShot).toBeUndefined()
+    expect(calls).toContain('startContinuable')
+    expect(calls).toContain('sendMessage')
+    expect(calls).not.toContain('start')
+    // The adapter must SUPPLY a signal when the caller omits one — the host types it as required,
+    // and omitting it is the same class of defect that broke the one-shot fallback.
+    expect(sentOptions).toBeDefined()
+    expect(sentOptions!.signal).toBeDefined()
+  })
+
+  it('defaultReviewToolFilter names tools that actually exist', () => {
+    // ⚠ THE DEFECT THIS CATCHES: the filter named `fs_read`, which is not a tool in any
+    // composition. The live host rejected it — `tools.restrict() names unknown global tool
+    // "fs_read"` — killing the child before it started. The vocabulary below is the host's own
+    // "known global tools" list, captured from a headless session (2026-10-13).
+    const KNOWN_GLOBAL_TOOLS = new Set([
+      'create_goal', 'edit', 'exit_plan_mode', 'get_goal', 'glob', 'grep', 'interrupt_agent',
+      'job_kill', 'job_list', 'job_output', 'list_agents', 'pwsh', 'read', 'read_image',
+      'recursive_ask', 'recursive_closeout', 'recursive_delegate', 'recursive_init',
+      'recursive_lint', 'recursive_lock', 'recursive_phase', 'recursive_preview',
+      'recursive_review', 'recursive_scratch', 'recursive_status', 'recursive_worktree',
+      'send_message', 'skill', 'subagent', 'subagent_fork', 'todo_write', 'update_goal',
+      'web_fetch', 'web_search', 'workflow', 'write',
+    ])
+    const filter = defaultReviewToolFilter() as { allow: string[] }
+    expect(Array.isArray(filter.allow)).toBe(true)
+    for (const name of filter.allow) {
+      expect(KNOWN_GLOBAL_TOOLS.has(name), `"${name}" is not a known global tool`).toBe(true)
+    }
+    // The reviewer must be able to read; it must NOT be able to write.
+    expect(filter.allow).toContain('read')
+    expect(filter.allow).not.toContain('write')
+    expect(filter.allow).not.toContain('edit')
   })
 
   it('continuable seam WITHOUT an observer falls back to one-shot (never a fake APPROVE)', async () => {

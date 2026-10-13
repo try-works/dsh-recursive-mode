@@ -27,7 +27,7 @@ import { codeRuntimeRefusal, toolError } from './errors.ts'
 import { replyPath } from './handoff.ts'
 import { advanceReview } from './review-round.ts'
 import { settlementRoundObserver } from './settlement.ts'
-import type { ContinuableDelegationLike, SubagentParentHandle, SubagentsRuntimeLike } from './delegation.ts'
+import { resolveFollowupSeam, type ContinuableDelegationLike, type SubagentParentHandle, type SubagentsRuntimeLike } from './delegation.ts'
 
 /**
  * The reply contract, stated for the child AND relied on by the fail-closed reader:
@@ -116,7 +116,8 @@ export function createRecursiveReviewTool(recursive: RecursiveRuntime, subagents
           // The loop can stop believing a prose reply was approved; the driver
           // disagrees, so it must be able to deliver the repair itself.
           sendRepair: async (childId, instruction) => {
-            const followup = subagents?.followup
+            // Either host name; `sendMessage` is the live one (see resolveFollowupSeam).
+            const followup = resolveFollowupSeam(subagents ?? undefined)
             if (followup === undefined) throw new Error('no continuable followup seam')
             await followup(parent, childId, [{ type: 'text', text: instruction }], {
               source: { kind: 'coordinator', form: 'relay', senderSessionId: parent?.id ?? '' },

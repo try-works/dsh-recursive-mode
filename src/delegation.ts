@@ -73,6 +73,27 @@ export interface SubagentsRuntimeLike {
   startContinuable?(spec: ContinuableStartSpecLike): Promise<ContinuableStartLike>
   /** The parent MUST be the exact live Agent (object-identity authority), never a `{ id }` copy. */
   followup?(parent: SubagentParentHandle, childId: ContinuableChildId, content: readonly { type: 'text'; text: string }[], options: SubagentFollowupOptionsLike): Promise<ContinuableMessageId>
+  /**
+   * ⚠ THE HOST'S REAL FOLLOW-UP METHOD IS NAMED `sendMessage`, NOT `followup` — and that single
+   * naming mismatch made the continuable repair loop UNREACHABLE in every live run.
+   *
+   * Verified against D:\deepseek-harness: `SubagentRuntime.sendMessage(sender, targetId, content,
+   * options)` (packages/subagent/subagent/src/index.ts:279) is the only method that delivers to a
+   * durable continuable child, and it delegates straight to
+   * `SubagentContinuationManager.sendMessage` (continuation.ts:204). There is NO `followup` method
+   * on the live service anywhere in the package.
+   *
+   * Because `hasContinuableSeam` probed for `followup`, it evaluated to FALSE against the live
+   * service every single time — so `delegateContinuable` silently took its one-shot fallback in
+   * every live review, and the designed T4 repair loop (send the REVISE back to the SAME child)
+   * never ran once. A live run then spent five `subagent` calls re-hiring fresh one-shot reviewers
+   * instead, and lost one to a crash mid-work. The seam was not missing; it was MISNAMED.
+   *
+   * Options differ too: the host takes `{ signal }` only (no `source`), and types that signal as
+   * REQUIRED (types.ts:70) — so the adapter in `resolveFollowupSeam` supplies one when the caller
+   * omits it, which is the same class of omission that broke the one-shot fallback.
+   */
+  sendMessage?(sender: SubagentParentHandle, targetId: ContinuableChildId, content: readonly { type: 'text'; text: string }[], options: { signal?: AbortSignalLike }): Promise<ContinuableMessageId>
   interrupt?(targetSessionId: ContinuableChildId, authority: SubagentInterruptAuthorityLike): void
   drainContinuableChildren?(parent: SubagentParentHandle, childIds: readonly ContinuableChildId[]): Promise<void>
   drainContinuableDescendants?(parents: readonly SubagentParentHandle[]): Promise<void>
@@ -152,9 +173,25 @@ export function reviewOutputSchema(): Record<string, unknown> {
   }
 }
 
-/** Default toolFilter for a delegated reviewer (run-relevant, workspace-scoped). */
+/**
+ * Default toolFilter for a delegated reviewer (run-relevant, workspace-scoped).
+ *
+ * ⚠ `fs_read` WAS NOT A TOOL NAME, and it silently killed every fallback review. Verified against the
+ * LIVE host: `tools.restrict()` rejected the filter with
+ *   tools.restrict() names unknown global tool "fs_read"; known global tools: create_goal, edit,
+ *   exit_plan_mode, get_goal, glob, grep, interrupt_agent, job_kill, job_list, job_output,
+ *   list_agents, pwsh, **read**, read_image, recursive_*, send_message, skill, subagent,
+ *   subagent_fork, todo_write, update_goal, web_fetch, web_search, workflow, write
+ * (captured from a headless host session, 2026-10-13). The read tool is named `read`. `fs_read`
+ * existed only in this filter and in comments about it — that name was true of nothing.
+ *
+ * This is the same defect class as the rest of this file: a value the plugin KNEW (it wrote the
+ * filter) that the host rejected, reported as an opaque failure at the far end of a delegation.
+ * `read_image` is included because a reviewer asked to assess rendered output legitimately needs
+ * to look at it — the run that found this had three visual defects its own green tests missed.
+ */
 export function defaultReviewToolFilter(): unknown {
-  return { allow: ['fs_read', 'grep', 'glob'] }
+  return { allow: ['read', 'read_image', 'grep', 'glob'] }
 }
 
 /**
@@ -214,6 +251,39 @@ export interface ContinuableStartSpecLike {
 /** Minimal cancellation shape (a live AbortSignal satisfies it). */
 export interface AbortSignalLike {
   readonly throwIfAborted: () => void
+}
+
+/** The follow-up seam, normalized: always (parent, childId, content, options) → message id. */
+export type FollowupSeam = (
+  parent: SubagentParentHandle,
+  childId: ContinuableChildId,
+  content: readonly { type: 'text'; text: string }[],
+  options: SubagentFollowupOptionsLike,
+) => Promise<ContinuableMessageId>
+
+/**
+ * Resolve the follow-up seam under EITHER name the service may use, so a rename on the host side
+ * cannot silently disable the repair loop again.
+ *
+ * `followup` is preferred when present (the shape this plugin's fakes and older hosts use);
+ * otherwise the host's real `sendMessage` is adapted. The adapter drops the plugin's `source`
+ * descriptor, because the host's `SubagentSendMessageOptions` carries only `signal` — and it
+ * SUPPLIES a signal when the caller omits one, because the host types it as required. Omitting it
+ * is exactly the defect that made the one-shot fallback throw `reading 'aborted'`.
+ *
+ * Returns `undefined` when the service offers neither, so callers keep falling back to one-shot
+ * rather than fabricating authority.
+ */
+export function resolveFollowupSeam(subagents: SubagentsRuntimeLike | undefined): FollowupSeam | undefined {
+  if (subagents === undefined) return undefined
+  const direct = subagents.followup
+  if (direct !== undefined) return (parent, childId, content, options) => direct.call(subagents, parent, childId, content, options)
+  const sendMessage = subagents.sendMessage
+  if (sendMessage === undefined) return undefined
+  return (parent, childId, content, options) =>
+    sendMessage.call(subagents, parent, childId, content, {
+      signal: options.signal ?? (new AbortController().signal as unknown as AbortSignalLike),
+    })
 }
 
 /** Identities returned once a continuable child accepted its initial prompt. */
@@ -537,7 +607,9 @@ export async function delegateContinuable(input: {
   const childRoute = describeChildRoute({ requested: input.agentOptions?.model ?? null, session: sessionModel })
 
   const startContinuable = subagents?.startContinuable
-  const followup = subagents?.followup
+  // ⚠ RESOLVED UNDER EITHER NAME. The host calls it `sendMessage`; probing only `followup` made
+  // this whole branch dead against the live service (see `sendMessage` on SubagentsRuntimeLike).
+  const followup = resolveFollowupSeam(subagents ?? undefined)
   // A continuable loop MUST observe the child's real settlement AND hold the
   // exact live parent Agent (the live service authorizes followup by object
   // identity). When either is missing, fall back to one-shot (which returns the

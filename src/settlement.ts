@@ -22,7 +22,7 @@
  * — the parent-side settlement seam. There is no promise to await, which is why
  * `delegateContinuable` takes an injected observer instead of awaiting one.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { SubagentResultLike, ContinuableChildId, ContinuableMessageId } from './delegation.ts'
 
@@ -256,6 +256,71 @@ export function readSettlement(runDir: string, childId: string): SettlementNotic
 }
 
 /**
+ * ⚠ HOW MANY OF A CHILD'S SETTLEMENTS HAVE ALREADY BEEN CONSUMED — the cursor that stops a resume
+ * from re-reading a settlement the round already handled.
+ *
+ * THE MEASURED DEFECT THIS EXISTS FOR. `settlementRoundObserver` ignored its `messageId` argument and
+ * re-read the LATEST settlement every time it was called. In a live A/B (0.9.5, child answered REVISE
+ * then APPROVE), a resume fired the same in-loop repair THREE TIMES within ~25 ms and reported
+ * "max rounds reached without an APPROVE" with `rounds: 4` — while the child had already approved.
+ * Duplicate "Address the findings:" messages are visible in that child's own session, and a review
+ * that should settle in two calls took four. Fail-closed (an unobserved round is never an approval),
+ * but wasteful and misleading.
+ *
+ * WHY A COUNT RATHER THAN THE NOTICE'S `messageId`. A settlement notice carries a message id only when
+ * the delivered event had one, so keying on it would silently stop consuming for notices that lack it.
+ * The log is append-only and per-child order is what a round consumes, so "how many are consumed" is a
+ * complete, durable key that cannot miss. It is also what makes FIFO correct: a round takes the OLDEST
+ * unconsumed settlement, which is the one its followup produced — not whatever landed last.
+ *
+ * DURABLE, because the whole point is a resume on a LATER TURN, in a new process: an in-memory set
+ * would fix only the duplicate-repair-within-one-call half of the defect.
+ */
+function settlementCursorPath(runDir: string): string {
+  return join(runDir, 'subagents', 'settlements.cursor.json')
+}
+
+/** How many of this child's settlements a round has already consumed. 0 when nothing is recorded. */
+export function readSettlementCursor(runDir: string, childId: string): number {
+  try {
+    const parsed = asRecord(JSON.parse(readFileSync(settlementCursorPath(runDir), 'utf8')))
+    const value = parsed?.[childId]
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0
+  } catch {
+    return 0
+  }
+}
+
+/** Advance the cursor by one. Best-effort: a cursor write must never fail a round that already ran. */
+export function consumeSettlement(runDir: string, childId: string): void {
+  try {
+    const path = settlementCursorPath(runDir)
+    const current = (() => {
+      try { return asRecord(JSON.parse(readFileSync(path, 'utf8'))) ?? {} } catch { return {} }
+    })()
+    current[childId] = readSettlementCursor(runDir, childId) + 1
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, JSON.stringify(current), 'utf8')
+  } catch {
+    // A cursor that cannot be written leaves the old behaviour (re-read), which is safe: it wastes a
+    // round rather than approving anything.
+  }
+}
+
+/**
+ * The OLDEST settlement for this child that no round has consumed yet, or null.
+ *
+ * OLDEST, not latest: settlements are produced in round order, so the oldest unconsumed one is the
+ * settlement the current round is waiting for. Returning the latest is what let a followup's await
+ * receive an earlier round's verdict.
+ */
+export function readUnconsumedSettlement(runDir: string, childId: string): SettlementNotice | null {
+  const mine = readSettlements(runDir).filter((n) => n.childId === childId)
+  const consumed = readSettlementCursor(runDir, childId)
+  return mine.length > consumed ? mine[consumed]! : null
+}
+
+/**
  * Turn a recorded settlement into the result shape the delegation loop reads.
  *
  * `success` is deliberately NOT asserted from the summary: the notice reports how
@@ -306,8 +371,15 @@ export function settlementRoundObserver(
   return async (childId: ContinuableChildId) => {
     const deadline = Date.now() + timeoutMs
     for (;;) {
-      const notice = readSettlement(runDir, String(childId))
-      if (notice !== null) return settlementResult(notice)
+      // ⚠ THE CONSUMPTION CURSOR, AND WHY IT IS HERE RATHER THAN IN THE READER. `readSettlement` is a
+      // legitimate read primitive ("what is the latest settlement for this child") used by callers that
+      // only observe; CONSUMING is a property of a consumer, and a round is the consumer. Reading the
+      // latest one every call is what re-served a verdict the previous round had already acted on.
+      const notice = readUnconsumedSettlement(runDir, String(childId))
+      if (notice !== null) {
+        consumeSettlement(runDir, String(childId))
+        return settlementResult(notice)
+      }
       if (Date.now() >= deadline) return null
       await sleep(pollMs)
     }

@@ -17,6 +17,7 @@ import {
   recordSettlement,
   readSettlements,
   readSettlement,
+  readSettlementCursor,
   settlementResult,
   settlementRoundObserver,
   settlementLogPath,
@@ -156,16 +157,45 @@ describe('T36/FU-9 — the observer WAITS, then parks, and never fabricates appr
     }
   })
 
-  it('reports the settlement once it lands, and the child stays addressable', async () => {
+  it('serves each settlement ONCE, and the child stays addressable', async () => {
+    // ⚠ THIS TEST USED TO PIN THE DEFECT. It asserted that a SECOND await — with the FOLLOWUP's
+    // message id — returned the SAME settlement again ("the child id is stable across rounds, so a
+    // LATER followup can reach it"). That is precisely what a live run suffered from: a resume
+    // re-read an already-consumed verdict, fired the same in-loop repair three times in ~25 ms, and
+    // reported "max rounds reached without an APPROVE" with rounds: 4 although the child had already
+    // approved — a review that should settle in two calls took four.
+    //
+    // THE INTENT WAS RIGHT AND THE ASSERTION WAS WRONG. A child stays addressable through its
+    // childId/resumeChild, NOT through re-reading a settlement a round already acted on. A round
+    // consumes what landed; if nothing NEW has landed, the honest answer is null — which the loop
+    // reports as `parked`, never as an approval.
     const runDir = runRoot()
     try {
       captureSettlement(runDir, settlementEvent())
       const observe = settlementRoundObserver(runDir, { timeoutMs: 0 })
       const first = await observe(CHILD, 'm1')
       expect(first).not.toBeNull()
-      // The child id is stable across rounds, so a LATER followup can reach it.
-      const again = await observe(CHILD, 'm2')
-      expect(again).not.toBeNull()
+      // Nothing NEW has landed, so the second round is PARKED rather than handed the old verdict.
+      expect(await observe(CHILD, 'm2')).toBeNull()
+      // And the next settlement IS delivered — one consume per settlement, in order.
+      captureSettlement(runDir, { ...settlementEvent(), ...(settlementEvent().data as object) })
+      expect(await observe(CHILD, 'm2')).not.toBeNull()
+    } finally {
+      rmSync(runDir, { recursive: true, force: true })
+    }
+  })
+
+  it('the consumption cursor is DURABLE, so a resume in a new observer does not re-consume', async () => {
+    // The whole point is a resume on a LATER TURN, in a new process: an in-memory set would fix only
+    // the duplicate-repair-within-one-call half. A brand-new observer must still see the settlement as
+    // consumed.
+    const runDir = runRoot()
+    try {
+      captureSettlement(runDir, settlementEvent())
+      expect(await settlementRoundObserver(runDir, { timeoutMs: 0 })(CHILD, 'm1')).not.toBeNull()
+      // A FRESH observer — as a later turn builds — must not serve it again.
+      expect(await settlementRoundObserver(runDir, { timeoutMs: 0 })(CHILD, 'm2')).toBeNull()
+      expect(readSettlementCursor(runDir, CHILD)).toBe(1)
     } finally {
       rmSync(runDir, { recursive: true, force: true })
     }

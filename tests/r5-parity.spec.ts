@@ -111,6 +111,23 @@ describe('R5 — canonical init/lint/policy/pre-step parity', () => {
     expect(msg).toContain('TDD Compliance Log')
     expect(msg).toContain('Audit Verdict')
   })
+
+  it('the reminder for the review phase names the SECOND artifact each rule governs', () => {
+    // ⚠ ONE LINE, STILL — and on it, every bundle section is annotated with the file it governs, because
+    // `## Diff Basis` is NOT a heading of `03.5-code-review.md`. A bare name here would send a writer to add a
+    // section the phase artifact does not require.
+    const msg = phaseLintRulesMessage('03.5-code-review.md')
+    expect(msg).toContain('Entry-row sections')
+    // The line names every section the payload carries a format for, in table order, annotating the ones that
+    // belong to the SECOND file. Asserted as the ACTUAL line, so a reordering or a lost annotation bites.
+    expect(msg).toContain('## Requirement Completion Status | ## Review Bundle Path | ## Artifact Path (review-bundle)')
+    expect(msg).toContain('## Diff Basis (review-bundle) | ## Upstream Artifacts To Re-read (review-bundle)')
+    expect(msg).toContain('## Code review narrative (review-narrative) | ## Code review narrative citations (review-narrative)')
+    // The prose stays in the payload: the reminder names, it does not paste.
+    expect(msg).not.toContain('Keep the id ALONE')
+    expect(msg).not.toContain('six backticked fields')
+    expect(msg.length).toBeLessThan(2400)
+  })
 })
 
 describe('phaseRulesFor — structured single source of truth (refined LIVE BUG 6)', () => {
@@ -209,6 +226,27 @@ describe('recursive_phase payload — the section formats reach the agent throug
       // so the verdict is UNAVAILABLE with the condition named rather than an empty field.
       expect(payload?.delegatedReviewer?.available).toBe(false)
       expect(payload?.delegatedReviewer?.reason).toContain('no subagents service is mounted')
+      // ⚠ THE REVIEW PHASE'S PAYLOAD, FROM THE SAME REAL SPREAD — the defect this change fixes, pinned where it
+      // is reachable without locking six phases. `03.5-code-review.md` is the ONLY phase whose lint also checks
+      // a SECOND artifact (the review bundle), so its payload is the only one that must carry TWO files' rules.
+      // The runtime is asked for that phase's rules exactly as `recursive_phase` asks on the entry to it; what
+      // is asserted is that the spread carries BOTH tables (the artifact's status row and the bundle's rows)
+      // and that the bundle rule text is really in the JSON the agent receives — the thing a live run went
+      // grepping the shipped `lib/index.js` for.
+      const review = { ...payload, phase: '03.5-code-review.md', ...phaseRulesFor('03.5-code-review.md') }
+      expect(review.sectionFormats).toEqual(sectionFormatRulesFor('03.5-code-review.md'))
+      expect(review.sectionFormats?.length).toBe(13)
+      const reviewJson = JSON.stringify(review)
+      // ⚠ THE LITERALS ARE THE TABLE'S OWN PROSE, IN THE JSON THE AGENT RECEIVES — which is the whole claim:
+      // the rule the live run grepped the shipped bundle for is now in the payload, not in `lib/index.js`.
+      expect(reviewJson).toContain('"appliesTo":"review-bundle"')
+      expect(reviewJson).toContain('"appliesTo":"review-narrative"')
+      expect(reviewJson).toContain('one per line, in this order: `Baseline type`')
+      expect(reviewJson).toContain('ONE `- ` bullet per upstream artifact')
+      expect(reviewJson).toContain('the narrative must cite the review bundle')
+      expect(reviewJson).toContain('not read as a citation')
+      // ...and the BUNDLE rows are not attached to any other phase's payload, so the cost is paid once.
+      expect(JSON.stringify(payload)).not.toContain('appliesTo')
       await ctx.fiber.dispose()
     } finally { rmSync(repo, { recursive: true, force: true }) }
   })

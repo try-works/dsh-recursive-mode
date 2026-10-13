@@ -48,14 +48,22 @@ import { dirname, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import {
   CURRENT_WORKFLOW_PROFILE,
+  REVIEW_BUNDLE_REQUIRED_HEADER_FIELDS,
+  REVIEW_BUNDLE_REQUIRED_SECTIONS,
+  REVIEW_BUNDLE_SECTION_FORMAT_RULES,
+  REVIEW_NARRATIVE_OPTIONAL_SECTIONS,
+  REVIEW_NARRATIVE_REQUIRED_SECTIONS,
+  REVIEW_NARRATIVE_SECTIONS,
   SECTION_FORMAT_RULES,
   getArtifactRequiredSections,
   phaseLintRulesMessage,
   phaseRulesFor,
+  sectionFormatOwnerOf,
   sectionFormatRulesFor,
+  sectionFormatRulesForOwner,
   type SectionFormatRule,
 } from '../src/phase-rules.ts'
-import { lintArtifactFile, getRunDiffBasis, normalizeDiffBasis, parseRequirementIds, parseSourceRequirementInventoryEntries } from '../src/ts-lint.ts'
+import { contentSha256, expectedRowDetail, extractPathsFromText, lintArtifactFile, lintReviewBundleReference, getRunDiffBasis, normalizeDiffBasis, normalizeRepoPath, parseRequirementIds, parseSourceRequirementInventoryEntries } from '../src/ts-lint.ts'
 import { detectGitContext, laterPhaseContent, requirementsContent, worktreeContent } from '../src/init-templates.ts'
 import { getLockStatus, lockHashFromContent } from '../src/lock.ts'
 import { RecursiveRuntime } from '../src/runtime.ts'
@@ -102,8 +110,50 @@ describe('section formats — attached where a writer cannot guess the shape', (
       'Requirement Completion Status',
     ])
     // The audited phases all owe the same status rows; the unaudited/obvious ones owe nothing.
-    for (const audited of ['01.5-root-cause.md', '03-implementation-summary.md', '03.5-code-review.md', '04-test-summary.md', '06-decisions-update.md', '07-state-update.md', '08-memory-impact.md']) {
+    for (const audited of ['01.5-root-cause.md', '03-implementation-summary.md', '04-test-summary.md', '06-decisions-update.md', '07-state-update.md', '08-memory-impact.md']) {
       expect(sectionFormatRulesFor(audited).map((rule) => rule.section), audited).toEqual(['Requirement Completion Status'])
+    }
+    // ⚠ 03.5 IS THE ONE PHASE WHOSE LINT CHECKS A SECOND ARTIFACT, so it is asserted on its OWN rather than
+    // folded into the loop above: its list is the status row PLUS the review bundle's rows, and every one of
+    // those names the file it governs. The bundle rows are the whole point of this change — a live run spent
+    // eleven minutes grepping the SHIPPED BUNDLE for the rule `Code review narrative does not cite any
+    // upstream artifact from the review bundle`, because this list was where the rule was not.
+    const review = sectionFormatRulesFor('03.5-code-review.md')
+    expect(review.map((rule) => rule.section)).toEqual([
+      'Requirement Completion Status',
+      'Review Bundle Path',
+      'Artifact Path',
+      'Artifact Content Hash',
+      'Changed Files Reviewed',
+      'Targeted Code References',
+      'Diff Basis',
+      'Upstream Artifacts To Re-read',
+      'Relevant Addenda',
+      'Prior Recursive Evidence',
+      'Audit Questions',
+      'Code review narrative',
+      'Code review narrative citations',
+    ])
+    // The owner of each row, so a bundle rule can never be read as a heading of the phase artifact. The bundle
+    // owes TWO KINDS of check — eight `##` headings and the two header fields read with `getMdFieldValue` — so
+    // the rows are pinned against the union, and the exemption is named rather than left implicit.
+    //
+    // ⚠ THE ARTIFACT'S OWN ROWS COME FIRST AND THE BUNDLE'S FOLLOW, which is the order a reader needs: the file
+    // the phase names first, then the file it points at. The assertion is a set comparison so a reordering
+    // inside either table is still caught as a difference rather than silently accepted.
+    expect([...sectionFormatRulesForOwner('03.5-code-review.md', 'review-bundle').map((rule) => rule.section)].sort())
+      .toEqual([
+        ...REVIEW_BUNDLE_REQUIRED_HEADER_FIELDS,
+        ...[...REVIEW_BUNDLE_REQUIRED_SECTIONS].filter((section) => section !== 'Required Output'),
+      ].sort())
+    expect(sectionFormatRulesForOwner('03.5-code-review.md', 'review-narrative').map((rule) => rule.section))
+      .toEqual(['Code review narrative', 'Code review narrative citations'])
+    // ...and the bundle rows are attached to THAT phase and to no other: `lintReviewBundleReference` runs for
+    // `03.5-code-review.md` alone.
+    for (const other of Object.keys(SECTION_FORMAT_RULES)) {
+      if (other === '03.5-code-review.md') continue
+      expect(sectionFormatRulesFor(other).map((rule) => rule.section), other).not.toContain('Code review narrative')
+      expect(sectionFormatRulesFor(other).map((rule) => rule.section), other).not.toContain('Diff Basis')
     }
     // ⚠ PHASE 0 IS NO LONGER IN THIS LIST, and that is the whole change: it used to be asserted as "obvious".
     expect(sectionFormatRulesFor('00-requirements.md').map((rule) => rule.section)).toEqual([
@@ -155,19 +205,51 @@ describe('section formats — attached where a writer cannot guess the shape', (
     // section has to end with (a gate verdict). The per-shape regexes are the assertion: a loose
     // "it is some string" would let `Coverage: PASS` regress into `- Coverage: PASS`, which `hasGateLine`
     // does not read, and it would let a row lose its id.
+    //
+    // ⚠ AND THE REVIEW PHASE ADDED FOUR SHAPES, EACH PINNED TO THE ARTIFACT THAT OWNS IT rather than widened
+    // into the existing ones: a bundle HEADER field (`Artifact Path: \`...\``), a bulleted path
+    // (`- \`src/guard.ts\``), a bulleted question, and a NARRATIVE LINE — the last of which is prose with
+    // citations in it, which is exactly what the linter reads out of those six headings. Widening
+    // `entry row` or `diff-basis field line` to cover them would have made the assertion unable to tell a
+    // bundle header from a phase-artifact field, which is the one distinction the bundle rules exist for.
     const SHAPES: [string, RegExp][] = [
       ['entry row', /^- (R\d+|SRC-\d{3}) \| /],
       ['gate verdict line', /^(Coverage|Approval): (PASS|FAIL)$/],
       ['requirement heading', /^### `(R\d+|SRC-\d{3})` \S/],
       ['out-of-scope bullet', /^- `OOS\d+`: \S/],
       ['traceability bullet', /^- `(R\d+|SRC-\d{3})` -> \S/],
-      ['diff-basis field line', /^- [A-Z][A-Za-z ]+: `\S.*`$/],
+      // ⚠ THE FIELD NAME MAY NOT CONTAIN A SPACE, and that is the whole discriminator: with `[A-Za-z ]+` this
+      // shape ALSO matched the phase-0 `- Diff basis notes: \`...\`` example below, so one example matched two
+      // shapes. The spec caught it; the regex is the fix, not a relaxed assertion.
+      ['diff-basis field line', /^- [A-Za-z]+: `\S.*`$/],
+      // A bundle HEADER field: `Field: \`value\`` with no bullet, which is where the builder writes
+      // `Artifact Path` and `Artifact Content Hash` (above the first `##`), and how `getMdFieldValue` reads them.
+      ['bundle header field', /^[A-Z][A-Za-z ]+: `[^`\n]+`$/],
+      // A bulleted path and nothing else: how every path list in the bundle is written and read.
+      ['bulleted path', /^- `[^`\n]+`$/],
+      // A bulleted question: `## Audit Questions`, whose only requirement is that it is not a placeholder.
+      ['audit question', /^- [A-Z][^`\n]*\?$/],
+      // A narrative line: prose carrying citations in code spans, which is the form the linter's path
+      // extractor reads out of the review narrative headings.
+      ['review narrative line', /^- \S.*`[^`\n]+`.*$/],
     ]
+    const shapeCounts = new Map<string, number>()
     for (const [fileName, rules] of Object.entries(SECTION_FORMAT_RULES)) {
       for (const rule of rules) {
         const matched = SHAPES.filter(([, pattern]) => pattern.test(rule.example)).map(([name]) => name)
         expect(matched, fileName + '/' + rule.section + ' example matched no known shape: ' + rule.example).toHaveLength(1)
+        shapeCounts.set(matched[0], (shapeCounts.get(matched[0]) ?? 0) + 1)
       }
+    }
+    // ...and the review bundle's rows are all accounted for by the shapes ADDED for them, so the new regexes
+    // are load-bearing rather than dead entries a later edit could quietly stop exercising.
+    for (const rule of REVIEW_BUNDLE_SECTION_FORMAT_RULES) {
+      const matched = SHAPES.filter(([, pattern]) => pattern.test(rule.example)).map(([name]) => name)
+      expect(matched, rule.section + ' example matched no known shape: ' + rule.example).toHaveLength(1)
+      shapeCounts.set(matched[0], (shapeCounts.get(matched[0]) ?? 0) + 1)
+    }
+    for (const added of ['bundle header field', 'bulleted path', 'audit question', 'review narrative line']) {
+      expect(shapeCounts.get(added), added + ' is matched by no example — a shape nothing uses').toBeGreaterThan(0)
     }
     expect(sectionFormatRulesFor('01-as-is.md')[0]?.example).toContain('Disposition: in-scope')
   })
@@ -177,6 +259,12 @@ describe('section formats — attached where a writer cannot guess the shape', (
     // `tests/phase-rules.parity.spec.ts` pins all twelve lists. A format rule may only ever DESCRIBE a
     // section the list already requires: a rule for an unreachable heading would be guidance nobody can act
     // on. This is also the assertion that fails if a section were ever added to that list to carry a hint.
+    //
+    // ⚠ AND IT IS SCOPED TO `SECTION_FORMAT_RULES`, NOT TO `sectionFormatRulesFor`'s OUTPUT, because the
+    // review BUNDLE's rows describe a different file: `## Diff Basis` and `## Upstream Artifacts To Re-read`
+    // are required in NO phase artifact, so folding them into this loop would either fail here or force a
+    // parity pin to move. They live in their own table for exactly this reason, and the assertion that covers
+    // THEM is the next one — the same contract, checked against the list the LINTER requires of the bundle.
     for (const [fileName, rules] of Object.entries(SECTION_FORMAT_RULES)) {
       const required = getArtifactRequiredSections(fileName, PROFILE)
       expect(required, fileName + ' must be a canonical artifact').toContain('TODO')
@@ -184,6 +272,60 @@ describe('section formats — attached where a writer cannot guess the shape', (
         expect(required, fileName + ' requires ## ' + rule.section).toContain(rule.section)
       }
     }
+  })
+
+  it('the review bundle table describes the sections the LINTER requires of the bundle, and only those', () => {
+    // ⚠ THE SECOND HALF OF THE CONTRACT, ASSERTED AGAINST `lintReviewBundleReference`'s OWN LIST rather than
+    // against a copy of it: every heading the linter requires of the bundle must have a format rule (or be a
+    // pure existence check, named below), and every rule in the table must name a heading the linter requires.
+    // A bundle rule for a heading nothing checks would be a fifth surface; a checked heading with no rule is
+    // the defect this change exists to fix.
+    //
+    // ⚠ `## Required Output` IS THE ONE EXEMPTION, and it is deliberate rather than convenient: the linter
+    // requires the section to EXIST and validates no shape inside it (`getHeadingBody(bundleContent,
+    // 'Required Output')` is read for presence only), and its content is the reviewer's own reply contract,
+    // written by `recursive_review`. A format rule there would describe a check that does not run.
+    const EXEMPT = ['Required Output']
+    const described = REVIEW_BUNDLE_SECTION_FORMAT_RULES.filter((rule) => rule.appliesTo === 'review-bundle').map((rule) => rule.section)
+    for (const heading of REVIEW_BUNDLE_REQUIRED_SECTIONS) {
+      if (EXEMPT.includes(heading)) {
+        expect(described, heading + ' is exempt, so it must NOT carry a shape the linter never checks').not.toContain(heading)
+        continue
+      }
+      expect(described, 'the linter requires ## ' + heading + ' of the review bundle, so it must carry a format').toContain(heading)
+    }
+    // ⚠ AND THE HEADER FIELDS ARE COVERED TOO, which is the gap this test would otherwise leave: `Artifact Path`
+    // and `Artifact Content Hash` are read with `getMdFieldValue` (they live ABOVE the first `##`), so they are
+    // required of the bundle WITHOUT being sections. Both enumerations are exhaustive and disjoint by
+    // assertion, so "every bundle check carries a format" is a claim about a closed set rather than a sample.
+    for (const field of REVIEW_BUNDLE_REQUIRED_HEADER_FIELDS) {
+      expect(described, 'the linter requires the ' + field + ' header field, so it must carry a format').toContain(field)
+      expect([...REVIEW_BUNDLE_REQUIRED_SECTIONS], field + ' is a header field, so it must not also be a section').not.toContain(field)
+    }
+    expect(described.length, 'every bundle row is either a header field or a required section')
+      .toBe(REVIEW_BUNDLE_REQUIRED_HEADER_FIELDS.length + REVIEW_BUNDLE_REQUIRED_SECTIONS.length - EXEMPT.length)
+    for (const section of described) {
+      const known: string[] = [...REVIEW_BUNDLE_REQUIRED_HEADER_FIELDS, ...REVIEW_BUNDLE_REQUIRED_SECTIONS]
+      expect(known, 'review bundle rule names an unchecked field or heading: ' + section).toContain(section)
+    }
+    // The two narrative rows are the phase artifact's own requirement, and they are the ONLY rows that are:
+    // they must not name a bundle heading, or they would send a writer to the wrong file.
+    const narrative = REVIEW_BUNDLE_SECTION_FORMAT_RULES.filter((rule) => rule.appliesTo === 'review-narrative').map((rule) => rule.section)
+    expect(narrative).toEqual(['Code review narrative', 'Code review narrative citations'])
+    for (const section of narrative) expect([...REVIEW_BUNDLE_REQUIRED_SECTIONS]).not.toContain(section)
+    // ...and the enumerated narrative region really is the region the linter reads: five of the six names are
+    // canonical REQUIRED sections of `03.5-code-review.md` — so a writer is told to put the citation in a
+    // heading the artifact is already checked for — and the sixth is the OPTIONAL heading the linter
+    // concatenates when it is present. Both halves are asserted, so a renamed heading cannot pass as a region.
+    const reviewSections = getArtifactRequiredSections('03.5-code-review.md', PROFILE)
+    for (const heading of REVIEW_NARRATIVE_REQUIRED_SECTIONS) {
+      expect(reviewSections, '## ' + heading + ' must be a required section of the phase artifact').toContain(heading)
+    }
+    for (const heading of REVIEW_NARRATIVE_OPTIONAL_SECTIONS) {
+      expect(reviewSections, '## ' + heading + ' is read only when present, so it must NOT be required').not.toContain(heading)
+    }
+    expect([...REVIEW_NARRATIVE_REQUIRED_SECTIONS, ...REVIEW_NARRATIVE_OPTIONAL_SECTIONS].sort())
+      .toEqual([...REVIEW_NARRATIVE_SECTIONS].sort())
   })
 
   it('is scoped to the current profile, like the lint it describes', () => {
@@ -244,6 +386,18 @@ describe('every phase with a machine-checked section carries a non-empty section
     expect(plan).toContain('## Requirement Completion Status')
     // The reminder points at the payload for the paragraphs, so the example lives in exactly one place.
     expect(plan).toContain('sectionFormats')
+    // ⚠ AND THE REVIEW PHASE'S LINE NAMES THE FILE EACH RULE GOVERNS. `## Diff Basis` is NOT a heading of
+    // `03.5-code-review.md` — it is a heading of the review bundle — so a reminder that listed it bare would
+    // send a writer to add a section the phase artifact does not require, which is the failure mode the
+    // two-table split exists to prevent. The one line carries the annotation; the payload carries the prose.
+    const review = phaseLintRulesMessage('03.5-code-review.md')
+    expect(review).toContain('## Diff Basis (review-bundle)')
+    expect(review).toContain('## Upstream Artifacts To Re-read (review-bundle)')
+    expect(review).toContain('## Code review narrative (review-narrative)')
+    // The phase-artifact rows stay unannotated, here and in every other phase: the common case is unchanged.
+    expect(review).toContain('## Requirement Completion Status |')
+    expect(review).not.toContain('## Requirement Completion Status (')
+    expect(phaseLintRulesMessage('01-as-is.md')).not.toContain('(review-bundle)')
     // ⚠ AND NEITHER the payload nor the reminder repeats the phase-0 prose: the reminder's own lines are the
     // ones it already carried for every phase, and the paragraphs live in the payload's `sectionFormats`.
     // One description per section, and no second copy of the rule text anywhere.
@@ -258,6 +412,9 @@ describe('every phase with a machine-checked section carries a non-empty section
     expect(requirements).toContain('## Requirements | ## Out of Scope | ## Coverage Gate')
     // ...while a phase whose sections are all obvious still carries NO such line — scoped, not noise.
     expect(phaseLintRulesMessage('05-manual-qa.md')).not.toContain('Entry-row sections')
+    // ...and the review BUNDLE's prose stays in the payload: the reminder names the sections, it does not
+    // paste the rules, so the one expensive paragraph per rule exists once.
+    expect(review).not.toContain('the same six backticked fields')
   })
 })
 
@@ -345,15 +502,36 @@ function tickTodo(doc: string): string {
  */
 function artifactFromExamples(fileName: string, scaffold: string): string {
   let doc = scaffold
+  const sections = getArtifactRequiredSections(fileName, PROFILE)
   for (const rule of sectionFormatRulesFor(fileName)) {
+    // ⚠ ONLY THE ROWS DESCRIBING A SECTION OF THIS FILE. `03.5-code-review.md` also carries the review BUNDLE's
+    // rows — which name headings the phase artifact does not require — and its own `Review Bundle Path`, which
+    // is a FIELD INSIDE `## Review Metadata` rather than a heading. Substituting either would fail on a heading
+    // no scaffold has, which is precisely the misdescription `appliesTo` on the table and this membership test
+    // here exist to prevent. The table side is asserted (every row is either a required section or a declared
+    // field); this is the one place the distinction has to be APPLIED.
+    if (sectionFormatOwnerOf(rule) !== 'phase-artifact') continue
+    if (!sections.includes(rule.section)) continue
     if (rule.section === 'Coverage Gate') continue
     doc = substituteLastBodyLine(doc, rule.section, rule.example)
   }
+  // ⚠ ONE PHASE-ARTIFACT ROW IS A FIELD RATHER THAN A HEADING, SO IT IS DELIBERATELY *NOT* SUBSTITUTED HERE.
+  // `Review Bundle Path` names no section — it is a value inside `## Review Metadata` — and the value is
+  // per-run (`.recursive/run/<runId>/...`), so a generic harness cannot write it: only a caller that knows the
+  // run's bundle path can. `bundlePathRuleFromTable()` below is that caller, and `artifactFromTable` uses it.
+  // The table side is asserted: the row is not a required section of any artifact, and it is not a section key
+  // of `SECTION_FORMAT_RULES` either.
   // The two gate verdicts come from the ONE rule that describes both (`Approval Gate likewise`), so the
   // approval body is built from the coverage example rather than tabled a second time.
+  //
+  // ⚠ AND WHEN THE ARTIFACT HAS NO GATE RULE THE SCAFFOLD'S OWN VERDICT LINES STAND, because what this harness
+  // builds is "the artifact a writer following the TABLE writes" — a table with nothing to say about the gate
+  // cannot be made to contradict the scaffold, and `03.5-code-review.md` is the artifact in that position (its
+  // gate lines are read by `hasGateLine`, which the scaffold already satisfies). Inventing a verdict here would
+  // be the fifth copy of a rule this change exists to keep single-sourced.
   const verdict = sectionFormatRulesFor(fileName).find((rule) => rule.section === 'Coverage Gate')?.example ?? ''
-  expect(verdict, 'the gate verdict rule must exist for ' + fileName).not.toBe('')
   for (const gate of ['Coverage', 'Approval']) {
+    if (verdict === '') break
     doc = substituteLastBodyLine(doc, gate + ' Gate', substituteGateVerdict(verdict, gate))
   }
   return tickTodo(doc)
@@ -739,5 +917,426 @@ describe('the phase-0 rules live in exactly one table', () => {
     // Asserted by value: the detail carries the table\'s own example for that artifact and section.
     const example = sectionFormatRulesFor('01-as-is.md').find((rule) => rule.section === 'Source Requirement Inventory')?.example ?? ''
     expect(example.length).toBeGreaterThan(0)
+  })
+
+  it('counts the review bundle rows in the same duplication gate', () => {
+    // The gate above walks `SECTION_FORMAT_RULES`; the bundle table is a SECOND table, so it is walked here
+    // rather than left outside the gate it would otherwise escape.
+    const seen = new Map<string, string>()
+    for (const [fileName, rules] of Object.entries(SECTION_FORMAT_RULES)) {
+      for (const rule of rules) seen.set(rule.rule, rule.section)
+    }
+    for (const rule of REVIEW_BUNDLE_SECTION_FORMAT_RULES) {
+      const previous = seen.get(rule.rule)
+      if (previous !== undefined && previous !== rule.section) {
+        throw new Error('rule text shared by ' + previous + ' and ' + rule.section + ': ' + rule.rule)
+      }
+      expect(previous, 'the bundle table has two entries for ' + rule.section).toBeUndefined()
+      seen.set(rule.rule, rule.section)
+    }
+    // ...and every one of them states its owner, so no bundle row can be read as a phase-artifact heading.
+    for (const rule of REVIEW_BUNDLE_SECTION_FORMAT_RULES) {
+      expect(rule.appliesTo, rule.section + ' must declare which file it governs').toBeDefined()
+    }
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* 8 — THE REVIEW BUNDLE'S OWN RULES, DRIVEN THROUGH THE REAL LINTER           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * ⚠ WHY THIS SECTION EXISTS, FROM THE LIVE RUN'S OWN TRANSCRIPT. At `03.5-code-review.md` the linter returned
+ * ten failures; the run fixed nine and was left fighting the tenth, having spent calls `grep`-ing the SHIPPED
+ * BUNDLE (`node_modules/@try-works/dsh-recursive-mode/lib/index.js`) for the sentence
+ * *"Code review narrative does not cite any upstream"* and then reading the compiled artifact at an offset.
+ * The rules were not secret — they were simply not WRITTEN DOWN anywhere the agent reads while writing, which
+ * is the same defect phase 0 had.
+ *
+ * ⚠ AND THE PROOF IS THE SAME SHAPE AS PHASE 0'S: a bundle and an artifact are built FROM THE TABLE, and the
+ * real `lintReviewBundleReference` — the entry point `recursive_lint` reaches for this phase and no other — is
+ * driven over them. Each example therefore has to be a line the parser actually accepts, or this section fails.
+ *
+ * ⚠ THE UNSUBSTITUTED CASE IS ASSERTED FIRST, ON PURPOSE. "The table says X, and linting X gives no error"
+ * would pass vacuously if the check stopped running altogether — the vacuity this project keeps finding. So
+ * the SCAFFOLD and the EMPTY BUNDLE are linted first and the exact failure sentences are asserted, and only
+ * then is the same pair linted with the examples substituted into it.
+ */
+describe('the review-bundle rules are ACCEPTED by the real linter, and bite before they are applied', () => {
+  const RUN = 'r1'
+  const REVIEW_ARTIFACT = '03.5-code-review.md'
+  /** The phase label `recursive_review` builds the bundle for; the slug comes from THIS, not from the file name. */
+  const REVIEW_PHASE_LABEL = '03.5 Code Review'
+
+  /** The one example the table holds for a section, asserted to exist so a missing row is a failure not a skip. */
+  function exampleOf(section: string): string {
+    return ruleFor(section).example
+  }
+
+  /** The one RULE TEXT the table holds for a section — the field the prose assertions read. */
+  function ruleTextOf(section: string): string {
+    return ruleFor(section).rule
+  }
+
+  function ruleFor(section: string): SectionFormatRule {
+    const rule = REVIEW_BUNDLE_SECTION_FORMAT_RULES.find((candidate) => candidate.section === section)
+    expect(rule, 'the table must carry a rule for ' + section).toBeDefined()
+    expect(rule?.example.trim(), section + ' must have an example').not.toBe('')
+    expect(rule?.rule.trim(), section + ' must have a rule').not.toBe('')
+    return rule as SectionFormatRule
+  }
+
+  /** Every one of the six fields the `## Diff Basis` rule names, read back off the rule's own TEXT. */
+  function diffBasisLines(): string[] {
+    const rule = ruleTextOf('Diff Basis')
+    const fields = ['Baseline type', 'Baseline reference', 'Comparison reference', 'Normalized baseline', 'Normalized comparison', 'Normalized diff command']
+    return fields.map((field) => {
+      expect(rule, 'the Diff Basis rule must name ' + field).toContain(field)
+      if (field === 'Baseline type') return exampleOf('Diff Basis')
+      // The remaining five carry the same shape with a concrete value: the check reads PRESENCE only, so a
+      // written-out value is what makes the line honest rather than another placeholder.
+      return '- ' + field + ': `' + (field === 'Normalized diff command' ? 'git diff --name-only ' + 'a'.repeat(40) : 'working-tree') + '`'
+    })
+  }
+
+  /** Every path the citation examples leave in the narrative: the linter's own extractor, not a regex of mine. */
+  function citedPaths(text: string): Set<string> {
+    return new Set([...extractPathsFromText(text)].map(normalizeRepoPath))
+  }
+
+  /**
+   * A repo whose files ARE the ones the examples name, so the linter's existence checks have something real to
+   * resolve — and a run dir with the reviewed artifact the bundle pins by hash.
+   *
+   * ⚠ EVERY PATH IS READ OUT OF THE TABLE, not typed a second time: the reviewed artifact IS the one the
+   * `Artifact Path` example names, so an example that renamed it would fail here rather than pass against a
+   * path this harness quietly made up.
+   */
+  function reviewRepo(): { repo: string; runDir: string; bundleRel: string; bundleAbs: string; reviewedRel: string } {
+    const repo = phase0Repo()
+    const runDir = join(repo, '.recursive', 'run', RUN)
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, '00-requirements.md'), requirementsContent(RUN), 'utf8')
+    const reviewedRel = exampleOf('Artifact Path').replace(/^Artifact Path: `/, '').replace(/`$/, '')
+    const paths = [
+      reviewedRel,
+      'src/guard.ts',
+      '.recursive/run/' + RUN + '/02-to-be-plan.md',
+      '.recursive/run/' + RUN + '/addenda/02-to-be-plan.addendum-1.md',
+      '.recursive/run/r0/03-implementation-summary.md',
+    ]
+    writeFileSync(join(repo, reviewedRel), '# implementation summary\n\nStatus: `DRAFT`\n', 'utf8')
+    for (const path of paths) {
+      mkdirSync(dirname(join(repo, path)), { recursive: true })
+      writeFileSync(join(repo, path), 'fixture: ' + path + '\n', 'utf8')
+    }
+    const bundleRel = '.recursive/run/' + RUN + '/evidence/review-bundles/' + reviewBundleFileName()
+    const bundleAbs = join(repo, bundleRel)
+    mkdirSync(dirname(bundleAbs), { recursive: true })
+    return { repo, runDir, bundleRel, bundleAbs, reviewedRel }
+  }
+
+  /**
+   * The bundle FILE NAME, derived the way `buildReviewBundle` derives it — `phase.trim().toLowerCase()` with
+   * every run of non-`[a-z0-9.]` collapsed to one dash, plus `-bundle.md`.
+   *
+   * ⚠ IT IS DERIVED RATHER THAN TYPED, WHICH IS A MUTATION FIX AND NOT A STYLE CHOICE. The `Review Bundle Path`
+   * example carries a literal file name, and writing the harness's bundle under a HARDCODED `...-bundle.md`
+   * would make the two agree no matter what the example said: renaming the example's file passed every
+   * assertion in this file (measured — that mutation was the one miss in the matrix). The name is therefore
+   * computed from the same input the builder is given, and `REVIEW_PHASE_LABEL` is what `recursive_review`
+   * passes when it builds the 03.5 bundle.
+   */
+  function reviewBundleFileName(phaseLabel: string = REVIEW_PHASE_LABEL): string {
+    const slug = phaseLabel.trim().toLowerCase().replace(/[^a-z0-9.]+/g, '-').replace(/^-+|-+$/g, '')
+    return (slug || 'review') + '-bundle.md'
+  }
+
+  /** The bundle an author following the table writes, with the impossible-per-artifact hash supplied live. */
+  function bundleFromTable(repo: string, bundleRel: string, reviewedRel: string): string {
+    const hash = contentSha256(readFileSync(join(repo, reviewedRel), 'utf8'))
+    const bundleHeader = /^[A-Z][A-Za-z ]+: `[^`\n]+`$/
+    const header = REVIEW_BUNDLE_SECTION_FORMAT_RULES
+      .filter((rule) => rule.appliesTo === 'review-bundle' && bundleHeader.test(rule.example))
+      .map((rule) => rule.section === 'Artifact Content Hash'
+        ? 'Artifact Content Hash: `' + hash + '`'
+        : rule.example)
+    const sections = REVIEW_BUNDLE_REQUIRED_SECTIONS.map((section) => {
+      // ⚠ `## Required Output` IS THE ONE SECTION THE TABLE DOES NOT DESCRIBE, because the linter checks only
+      // that it EXISTS (see the exemption assertion above), so the harness supplies the prose `recursive_review`
+      // writes rather than asking the table for an example it deliberately does not have.
+      if (section === 'Required Output') {
+        return '## ' + section + '\n\n' + 'Verdict, per-requirement reconciliation, issues found, and the review bundle path that resolves.'
+      }
+      const body = section === 'Diff Basis' ? diffBasisLines().join('\n') : exampleOf(section)
+      return '## ' + section + '\n\n' + body
+    })
+    expect(bundleRel, 'precondition: the bundle path is the one the artifact records').not.toBe('')
+    return [...header, '', ...sections, ''].join('\n')
+  }
+
+  /** The artifact an author following the table writes: the shipped scaffold with each example substituted in. */
+  function artifactFromTable(runDir: string, bundleRel: string): string {
+    let doc = artifactFromExamples(REVIEW_ARTIFACT, laterPhaseContent(RUN, REVIEW_ARTIFACT))
+    doc = substituteLastBodyLine(doc, 'Review Metadata', bundlePathRuleFromTable(RUN, bundleRel))
+    const citations = citedPaths(exampleOf('Code review narrative citations'))
+    // ⚠ THE NARRATIVE MUST CITATE ONE PATH FROM EACH NON-EMPTY LIST, AND THERE ARE FOUR OF THEM. The example is
+    // the line for `## Review Scope`; the other three lists are satisfied by lines built the same way, so the
+    // SUBSTITUTED case reaches zero failures rather than three.
+    const scope = [
+      exampleOf('Code review narrative'),
+      exampleOf('Code review narrative citations'),
+      ...REVIEW_BUNDLE_REQUIRED_SECTIONS
+        .filter((section) => ['Upstream Artifacts To Re-read', 'Relevant Addenda', 'Prior Recursive Evidence'].includes(section))
+        .flatMap((section) => [...citedPaths(exampleOf(section))])
+        .filter((path) => !citations.has(path))
+        .map((path) => '- Re-read `' + path + '` before recording this verdict.'),
+    ]
+    doc = substituteLastBodyLine(doc, 'Review Scope', scope.join('\n'))
+    expect(runDir, 'precondition: the run dir exists').toBeTruthy()
+    return doc
+  }
+
+  /** The artifact above, written where the linter reads it — the pair every "it lints clean" case drives. */
+  function artifactOnDisk(repo: string, runDir: string, bundleRel: string): string {
+    const doc = artifactFromTable(runDir, bundleRel)
+    writeFileSync(join(runDir, REVIEW_ARTIFACT), doc, 'utf8')
+    expect(repo, 'precondition: the repo exists').toBeTruthy()
+    return doc
+  }
+
+  /**
+   * The phase-artifact row that is a FIELD rather than a heading, re-instantiated for a real run.
+   *
+   * ⚠ IT IS THE TABLE'S OWN EXAMPLE WITH THE RUN ID SUBSTITUTED, not a second copy of the sentence: the example
+   * is written against `r1` because an example must be one copy-pasteable line, and the run id is the only part
+   * of it that is per-run. A drift between this and the table would show up as the assertion below failing.
+   */
+  function bundlePathRuleFromTable(runId: string, bundleRel: string): string {
+    const example = exampleOf('Review Bundle Path')
+    expect(example, 'the example must carry the placeholder run id').toContain('/r1/')
+    expect(example, 'the example must carry the bundle directory').toContain('/evidence/review-bundles/')
+    // ⚠ AND THE FILE NAME IN IT MUST BE THE ONE THE BUILDER WRITES, because that is the name `recursive_review`
+    // will report and a writer copies. Without this line a renamed example passed every assertion here — the
+    // harness wrote its bundle under whatever name it was told, so the two agreed by construction. Measured:
+    // that was the ONE mutation the matrix did not catch, and this is the assertion that catches it.
+    expect(example, 'the example must name the bundle the builder writes')
+      .toContain('/' + reviewBundleFileName() + '`')
+    return example.replace('/r1/', '/' + runId + '/').replace(/`[^`]*`$/, '`' + bundleRel + '`')
+  }
+
+  it('the rules are what the LINTER requires of the bundle — not a copy of it', () => {
+    // The table is pinned against `REVIEW_BUNDLE_REQUIRED_SECTIONS`, which `lintReviewBundleReference` iterates;
+    // this asserts the list is the same list the linter fails on, by driving the real function over a bundle that
+    // exists, carries a hash and is EMPTY of sections — the state that reaches the section check.
+    const { repo, runDir, bundleRel, bundleAbs, reviewedRel } = reviewRepo()
+    writeFileSync(bundleAbs, 'Artifact Path: `' + reviewedRel + '`\n'
+      + 'Artifact Content Hash: `' + contentSha256(readFileSync(join(repo, reviewedRel), 'utf8')) + '`\n', 'utf8')
+    const issues = lintReviewBundleReference(artifactFromTable(runDir, bundleRel), runDir, repo)
+    expect(issues.join('\n')).toContain('Review bundle is missing required section(s): ' + REVIEW_BUNDLE_REQUIRED_SECTIONS.join(', '))
+    // ⚠ AND THE TWO LISTS REALLY ARE THE LINTER'S, INCLUDING THE HEADER FIELD NAMES: the same run with the two
+    // header fields renamed fails on THOSE names, so a rename in `REVIEW_BUNDLE_REQUIRED_HEADER_FIELDS` is caught
+    // here rather than silently diverging from the literals the linter destructures them into.
+    writeFileSync(bundleAbs, 'Artifact Location: `' + reviewedRel + '`\n'
+      + 'Artifact Digest: `' + contentSha256(readFileSync(join(repo, reviewedRel), 'utf8')) + '`\n', 'utf8')
+    const renamed = lintReviewBundleReference(artifactOnDisk(repo, runDir, bundleRel), runDir, repo).join('\n')
+    expect(renamed).toContain('Review bundle is missing ' + REVIEW_BUNDLE_REQUIRED_HEADER_FIELDS[0])
+    expect(renamed).toContain('Review bundle is missing ' + REVIEW_BUNDLE_REQUIRED_HEADER_FIELDS[1])
+  })
+
+  it('FAILS the unsubstituted scaffold and the empty bundle — before any example is applied', () => {
+    const { repo, runDir, bundleAbs } = reviewRepo()
+    // The scaffold's `## Review Metadata` carries no bundle path yet, and the bundle is only the 8 headings.
+    const scaffold = laterPhaseContent(RUN, REVIEW_ARTIFACT)
+    writeFileSync(bundleAbs, REVIEW_BUNDLE_REQUIRED_SECTIONS.map((section) => '## ' + section + '\n').join('\n'), 'utf8')
+    const before = lintReviewBundleReference(scaffold, runDir, repo)
+    // ⚠ THESE ARE THE EXACT SENTENCES THE LIVE RUN FOUGHT, so a solution that satisfied them by removing the
+    // check would fail HERE rather than passing quietly. The detail the table appends is asserted separately,
+    // so the canonical sentence is matched by PREFIX — the canonical message is not replaced, only extended.
+    expect(before.filter((issue) => issue.startsWith('Review Metadata is missing Review Bundle Path'))).toHaveLength(1)
+    // ⚠ AND IT CARRIES THE SHAPE, because this is the FIRST failure a review meets: nothing else in the artifact
+    // can be checked until the bundle resolves, so the path line is the one thing worth teaching here. The
+    // canonical sentence is still the prefix — the detail is appended, never substituted.
+    const missingPath = before.find((issue) => issue.startsWith('Review Metadata is missing Review Bundle Path')) ?? ''
+    expect(missingPath).toContain('(expected row: - Review Bundle Path: `.recursive/run/r1/evidence/review-bundles/')
+    // ...and the trap the `Review Bundle Path` rule names, measured with the same function: an ABSOLUTE path
+    // normalizes to `E:/...`, which does not start with the required repo-relative prefix and is refused with
+    // its own sentence rather than a generic one.
+    const absolute = scaffold.replace('Scope note:', '- Review Bundle Path: `E:/Temp/eryery/.recursive/run/' + RUN + '/evidence/review-bundles/03.5-code-review-bundle.md`\nScope note:')
+    expect(lintReviewBundleReference(absolute, runDir, repo).join('\n')).toContain(
+      'Review Bundle Path must live under `/.recursive/run/' + RUN + '/evidence/review-bundles/`')
+  })
+
+  it('ACCEPTS every example once applied — bundle and narrative both lint clean', () => {
+    const { repo, runDir, bundleRel, bundleAbs, reviewedRel } = reviewRepo()
+    writeFileSync(bundleAbs, bundleFromTable(repo, bundleRel, reviewedRel), 'utf8')
+    const artifact = artifactFromTable(runDir, bundleRel)
+    // The linter's own precondition: the bundle path must be recorded where it is read from.
+    expect(artifact).toContain('## Review Metadata')
+    expect(artifact).toContain('- Review Bundle Path: `' + bundleRel + '`')
+    // ⚠ AND THE EXAMPLE FOR THAT FIELD IS NOT A HEADING OF THE PHASE ARTIFACT — it is a line INSIDE
+    // `## Review Metadata`, which is why the table cannot simply say "the section `## Review Bundle Path`". The
+    // distinction is asserted rather than assumed: the section does not exist, the field line does.
+    expect(artifact).not.toContain('## Review Bundle Path')
+    expect(getArtifactRequiredSections(REVIEW_ARTIFACT, PROFILE)).not.toContain('Review Bundle Path')
+    // ⚠ NO WINDOW FILTER, AND THAT IS THE STRONGEST FORM OF THE CLAIM: zero issues means the bundle's six
+    // `## Diff Basis` fields, all five path lists, the audit questions, the hash, the narrative's four
+    // citations and the bundle-path citation were ALL accepted by the function that checks them.
+    expect(lintReviewBundleReference(artifact, runDir, repo)).toEqual([])
+  })
+
+  it('the citations example is a CITATION, measured with the linter\'s own path extractor', () => {
+    // ⚠ `extractPathsFromText` IS THE PARSER THIS CHECK DEPENDS ON, and it has a trap the rule names: a path
+    // written WITHOUT code spans is not a citation at all, because the extractor reads backticked spans only.
+    // That is what makes "cite `src/guard.ts`" different from "cite src/guard.ts", and it is measured rather
+    // than described.
+    const cited = citedPaths(exampleOf('Code review narrative citations'))
+    // ⚠ THE FULL REPO-RELATIVE PATH, NOT THE BASENAME, and the linter is why: it compares NORMALIZED paths for
+    // exact equality, and the bundle's own upstream list carries `.recursive/run/<runId>/...`. Citing
+    // `02-to-be-plan.md` reads as a citation to the EXTRACTOR but matches nothing the bundle lists, which is
+    // the trap the citation rule states.
+    expect([...cited].sort()).toEqual(['.recursive/run/r1/02-to-be-plan.md', 'src/guard.ts'])
+    expect([...citedPaths('- The change landed on src/guard.ts, as planned.')]).toEqual([])
+    // ...and the same extractor reads the bundle path out of the narrative example, which is what satisfies the
+    // `Review Bundle Path` citation check rather than the metadata field.
+    expect([...citedPaths(exampleOf('Code review narrative'))].sort()).toEqual([
+      '.recursive/run/r1/evidence/review-bundles/03.5-code-review-bundle.md',
+      '03-implementation-summary.md',
+    ])
+    // ⚠ AND THE TWO NARRATIVE RULES DO NOT CARRY THE SAME TEXT. They are two different sentences the linter
+    // emits (`...upstream artifact from the review bundle` and `...must cite the Review Bundle Path...`), so a
+    // duplicate-prose gate that only compared `rule` would not notice them collapsing into one entry — this is
+    // the assertion that would.
+    expect(exampleOf('Code review narrative')).not.toBe(exampleOf('Code review narrative citations'))
+    const narratives = REVIEW_BUNDLE_SECTION_FORMAT_RULES.filter((rule) => rule.section.startsWith('Code review narrative'))
+    expect(narratives).toHaveLength(2)
+    expect(narratives[0]?.rule).not.toBe(narratives[1]?.rule)
+  })
+
+  it('the failure detail carries the table\'s own line — the shape the live run went into the bundle to find', () => {
+    // ⚠ THIS IS THE COST, PINNED. The run grepped the shipped `lib/index.js` for the failure SENTENCE; what it
+    // needed was the shape that satisfies it. The detail is appended from `expectedRowDetail`, so it is the
+    // table's own example and cannot drift from the payload the same table feeds.
+    const { repo, runDir, bundleRel, bundleAbs, reviewedRel } = reviewRepo()
+    // A bundle WITH an upstream list and a changed-file list — so both citation checks are live — and an
+    // artifact that carries `## Review Metadata` (without which the linter returns early and proves nothing).
+    //
+    // ⚠ EVERY OTHER BUNDLE CHECK IS SATISFIED HERE ON PURPOSE. A bundle that also fails its addenda, hash or
+    // code-reference checks would make this test measure the wrong thing: the citation sentences are reached
+    // only after those, and an earlier failure that returns early would leave this asserting a message that was
+    // never produced. So the shape is built to pass everything it is not testing.
+    writeFileSync(bundleAbs, [
+      'Artifact Path: `' + reviewedRel + '`',
+      'Artifact Content Hash: `' + contentSha256(readFileSync(join(repo, reviewedRel), 'utf8')) + '`',
+      '',
+      ...REVIEW_BUNDLE_REQUIRED_SECTIONS.map((section) => '## ' + section + '\n\n'
+        + (section === 'Diff Basis' ? diffBasisLines().join('\n')
+          : section === 'Upstream Artifacts To Re-read' ? '- `.recursive/run/' + RUN + '/02-to-be-plan.md`'
+            : section === 'Changed Files Reviewed' ? '- `src/guard.ts`'
+              : section === 'Targeted Code References' ? '- `src/guard.ts`'
+                : section === 'Relevant Addenda' ? '- `.recursive/run/' + RUN + '/addenda/02-to-be-plan.addendum-1.md`'
+                  : section === 'Audit Questions' ? '- Does the guard hold?'
+                    : '- `.recursive/run/r0/03-implementation-summary.md`'),
+      ),
+    ].join('\n'), 'utf8')
+    const silent = [
+      '## Review Metadata',
+      '',
+      '- Review Bundle Path: `' + bundleRel + '`',
+      '',
+      '## Review Scope',
+      '',
+      'The change is reviewed and approved.',
+      '',
+      ...REVIEW_NARRATIVE_SECTIONS.slice(1).map((section) => '## ' + section + '\n\n- nothing cited here\n'),
+    ].join('\n')
+    const issues = lintReviewBundleReference(silent, runDir, repo).join('\n')
+    // ⚠ THE BUNDLE ITSELF PASSES EVERYTHING ELSE, so the sentences below can only have come from the checks
+    // under test — which is what makes the "the detail carries the example" assertion below mean something.
+    expect(issues).not.toContain('Review bundle Diff Basis is missing')
+    expect(issues).not.toContain('Review bundle is missing ')
+    expect(issues).not.toContain('Review bundle Targeted Code References cannot be empty')
+    expect(issues).not.toContain('Review bundle Changed Files Reviewed cannot be empty')
+    // ⚠ THE BUNDLE-PATH SENTENCE IS NOT ASSERTED HERE, AND THAT IS DELIBERATE: the fixture records that path in
+    // `## Review Metadata`, and the linter reads citations from the WHOLE artifact — so it is already cited and
+    // the check passes, which is precisely the behaviour that makes the sentence hard to provoke. It is provoked
+    // below, by the artifact that passes everything, which is the only way to reach it with every other check
+    // silent.
+    expect(issues).not.toContain('Code review must cite the Review Bundle Path')
+    expect(issues).toContain('Code review narrative does not cite any upstream artifact from the review bundle')
+    expect(issues).toContain('Code review narrative does not cite any relevant addendum from the review bundle')
+    expect(issues).toContain('Code review narrative does not cite any prior recursive evidence from the review bundle')
+    expect(issues).toContain('Code review narrative does not cite any changed file or code reference from the review bundle')
+    // The sentence is still FIRST — the canonical message is not replaced, only extended.
+    expect(issues).toContain('Code review narrative does not cite any upstream artifact from the review bundle'
+      + ' (expected row: ' + exampleOf('Code review narrative citations') + '.')
+    // ...and the whole sentence is EXACTLY the canonical one plus the detail, so the detail really is appended
+    // rather than the message having been rewritten around it.
+    const upstreamLine = issues.split('\n').find((line) => line.startsWith('Code review narrative does not cite any upstream artifact')) ?? ''
+    expect(upstreamLine.startsWith('Code review narrative does not cite any upstream artifact from the review bundle')).toBe(true)
+    expect(upstreamLine).toContain('expected row: ' + exampleOf('Code review narrative citations'))
+
+    // ⚠ AND THE BUNDLE-PATH SENTENCE IS EFFECTIVELY UNREACHABLE ONCE A VALID BUNDLE IS RECORDED — a MEASURED
+    // finding, stated rather than papered over. `citedPaths` is built from `extractPathsFromText(content)` over
+    // the WHOLE artifact, and the check only runs after the recorded path has been proved to satisfy the prefix
+    // AND to exist. So the recorded path is necessarily ITSELF an extractable citation, and the sentence can only
+    // fire on an artifact whose recorded path and extraction disagree — which was probed (a `./`-prefixed value,
+    // an absolute one, a backslashed one, a doubled prefix, a trailing space) and is not reachable, because the
+    // same normalization feeds both sides. The check is DEFENSIVE, not dead: `getMdFieldValue` and
+    // `extractPathsFromText` are different parsers, and a change to either could part them. What is asserted
+    // instead is that its failure detail is wired from the same table, so that if it ever does fire it teaches
+    // the shape rather than the sentence.
+    expect(expectedRowDetail(REVIEW_ARTIFACT, 'Code review narrative', PROFILE))
+      .toBe(' (expected row: ' + exampleOf('Code review narrative')
+        + '. Each id needs its own bullet with the id ALONE as the first | field; a row that is backtick-wrapped is skipped silently.)')
+    expect(expectedRowDetail(REVIEW_ARTIFACT, 'Code review narrative citations', PROFILE))
+      .toBe(' (expected row: ' + exampleOf('Code review narrative citations')
+        + '. Each id needs its own bullet with the id ALONE as the first | field; a row that is backtick-wrapped is skipped silently.)')
+    // ...and the detail is produced for the BUNDLE rows too, because the assembly point is the merged
+    // `sectionFormatRulesFor` — a bundle failure teaches its own shape without a second accessor.
+    expect(expectedRowDetail(REVIEW_ARTIFACT, 'Changed Files Reviewed', PROFILE)).toBe(
+      ' (expected row: ' + exampleOf('Changed Files Reviewed')
+      + '. Each id needs its own bullet with the id ALONE as the first | field; a row that is backtick-wrapped is skipped silently.)')
+    // ⚠ AND THE TWO TABLES ARE NOT INTERCHANGEABLE: the phase-0 diff basis and the bundle diff basis are
+    // DIFFERENT rules with different examples, so the lookup keyed by `(artifact, section)` cannot resolve one
+    // to the other. A collapse of the two tables would show up here as equal text.
+    expect(expectedRowDetail('00-worktree.md', 'Diff Basis For Later Audits', PROFILE))
+      .not.toBe(expectedRowDetail(REVIEW_ARTIFACT, 'Diff Basis', PROFILE))
+    expect(expectedRowDetail('00-worktree.md', 'Diff Basis For Later Audits', PROFILE)).toContain('- Diff basis notes:')
+    // ...and the two NARRATIVE details are DIFFERENT sentences, which is what makes the split worth having: the
+    // bundle-path failure teaches the bundle-path citation, the list failure teaches the citation line.
+    expect(exampleOf('Code review narrative')).not.toBe(exampleOf('Code review narrative citations'))
+    expect(upstreamLine).not.toContain(exampleOf('Code review narrative') + '.')
+  })
+
+  it('the artifact the table builds passes the WHOLE per-artifact lint for its own citation rules', () => {
+    // ⚠ THE OTHER HALF OF THE REAL ENTRY POINT. `lintArtifactFile` is what `recursive_lint` calls, and it is
+    // what reaches `lintReviewBundleReference` for this phase. The scaffold's other sections are not authored
+    // here (that is phase 2/3 work, measured in `tests/compliant-artifact.ts`), so what is asserted is that
+    // EVERY failure the run is about — the CITATION ones — is absent from a full pass, while at least one
+    // unrelated failure remains, which is what proves the pass actually ran.
+    const { repo, runDir, bundleRel, bundleAbs, reviewedRel } = reviewRepo()
+    writeFileSync(bundleAbs, bundleFromTable(repo, bundleRel, reviewedRel), 'utf8')
+    artifactOnDisk(repo, runDir, bundleRel)
+    const printed: string[] = []
+    const original = console.log
+    console.log = (...args: unknown[]) => { printed.push(args.map(String).join(' ')) }
+    try {
+      lintArtifactFile(
+        join(runDir, REVIEW_ARTIFACT), runDir, repo, PROFILE,
+        parseRequirementIds(readFileSync(join(runDir, '00-requirements.md'), 'utf8')), null, null,
+      )
+    } finally { console.log = original }
+    const errors = printed.filter((line) => line.startsWith('[FAIL]'))
+    expect(errors.length, 'the full lint must actually have run').toBeGreaterThan(0)
+    for (const sentence of [
+      'Code review narrative does not cite any upstream artifact from the review bundle',
+      'Code review must cite the Review Bundle Path in its written review artifact',
+      'Review bundle is missing required section(s)',
+      'Review bundle is missing Artifact Content Hash',
+      'Review Metadata is missing Review Bundle Path',
+    ]) {
+      expect(errors.filter((line) => line.includes(sentence)), sentence).toEqual([])
+    }
   })
 })

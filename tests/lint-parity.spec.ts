@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { lintRun, lintRequirementCompletionStatus, lintSourceRequirementInventory } from '../src/ts-lint.ts'
+import { expectedRowDetail, lintRun, lintRequirementCompletionStatus, lintSourceRequirementInventory } from '../src/ts-lint.ts'
 import { CURRENT_WORKFLOW_PROFILE } from '../src/phase-rules.ts'
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/lint-golden', import.meta.url))
@@ -186,5 +186,40 @@ describe('R4 — a missing entry id fails WITH the expected row in the message',
     ).join('\n')
     expect(v1Plan).toContain('Requirement Completion Status is missing in-scope requirements: R2')
     expect(v1Plan).not.toContain('expected row:')
+  })
+
+  /**
+   * ⚠ THE REVIEW PHASE'S COPY OF THE SAME CONTRACT, and the reason it is asserted HERE rather than only in
+   * `section-format-guidance.spec.ts`: this file is where the FAILURE DETAIL is pinned, and the review citation
+   * failures are the ones a live run went into the shipped bundle to decode.
+   *
+   * The projection is asserted for BOTH narrative checks (the two sentences the linter emits), for the bundle
+   * rows the same accessor now serves, and — the boundary — for the checks that deliberately carry NO row.
+   */
+  it('the REVIEW rows project the table\'s own line into the citation failures, and only where a shape is needed', () => {
+    // The two narrative checks: the sentences the live run fought, each taught its own example.
+    expect(expectedRowDetail('03.5-code-review.md', 'Code review narrative citations', CURRENT_WORKFLOW_PROFILE))
+      .toContain('expected row: - The change landed on `src/guard.ts`')
+    expect(expectedRowDetail('03.5-code-review.md', 'Code review narrative', CURRENT_WORKFLOW_PROFILE))
+      .toContain('expected row: - Reviewed against `03-implementation-summary.md`')
+    // ⚠ THE TWO ARE DIFFERENT ROWS, which is what the two table entries buy: a single shared row would make one
+    // of the two sentences teach a shape that does not satisfy it.
+    expect(expectedRowDetail('03.5-code-review.md', 'Code review narrative', CURRENT_WORKFLOW_PROFILE))
+      .not.toBe(expectedRowDetail('03.5-code-review.md', 'Code review narrative citations', CURRENT_WORKFLOW_PROFILE))
+    // The BUNDLE rows are served by the same accessor, so a bundle failure teaches its own shape.
+    expect(expectedRowDetail('03.5-code-review.md', 'Diff Basis', CURRENT_WORKFLOW_PROFILE))
+      .toContain('expected row: - Baseline type: `local commit`')
+    expect(expectedRowDetail('03.5-code-review.md', 'Changed Files Reviewed', CURRENT_WORKFLOW_PROFILE))
+      .toContain('expected row: - `src/guard.ts`')    // ⚠ AND THE PATH FAILURES CARRY THE ROW TOO, with the live run as the reason: its ten failures BEGAN with
+    // these three, because nothing else in the artifact can be checked until the bundle resolves. The example
+    // teaches the form, which is exactly what a missing or prefixed-wrong path needs.
+    expect(expectedRowDetail('03.5-code-review.md', 'Review Bundle Path', CURRENT_WORKFLOW_PROFILE))
+      .toBe(' (expected row: - Review Bundle Path: `.recursive/run/r1/evidence/review-bundles/03.5-code-review-bundle.md`'
+        + '. Each id needs its own bullet with the id ALONE as the first | field; a row that is backtick-wrapped is skipped silently.)')
+    // ...the detail is scoped to the profile whose lint is running, like every other projection here...
+    expect(expectedRowDetail('03.5-code-review.md', 'Review Bundle Path', 'recursive-mode-audit-v1')).toBe('')
+    // ...and a section the table does not describe projects NOTHING, which is the boundary: `## Review Scope`
+    // is machine-read (its citations are) but has no SHAPE, so its failures carry no row to teach.
+    expect(expectedRowDetail('03.5-code-review.md', 'Review Scope', CURRENT_WORKFLOW_PROFILE)).toBe('')
   })
 })

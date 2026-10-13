@@ -23,6 +23,12 @@ import {
   TRACEABILITY_REQUIRED_FILES,
   AUDIT_REQUIRED_HEADINGS,
   DIFF_BASIS_FIELDS,
+  // ⚠ BOTH THE LIST AND THE PHASE KEY COME FROM `phase-rules.ts`, so the review bundle's required sections
+  // exist in ONE place: the linter reads them here and the format table is pinned against them.
+  REVIEW_BUNDLE_PHASE_FILE,
+  REVIEW_BUNDLE_REQUIRED_HEADER_FIELDS,
+  REVIEW_BUNDLE_REQUIRED_SECTIONS,
+  REVIEW_NARRATIVE_SECTIONS,
   getArtifactRequiredSections,
   sectionFormatRulesFor,
 } from './phase-rules.ts'
@@ -1564,22 +1570,32 @@ export function lintReviewBundleReference(content: string, runDir: string, repoR
   const reviewMetadata = getHeadingBody(content, 'Review Metadata')
   const bundlePath = (getMdFieldValue(reviewMetadata, 'Review Bundle Path') ?? getMdFieldValue(content, 'Review Bundle Path') ?? '').trim()
   const expectedPrefix = `.recursive/run/${basename(runDir)}/evidence/review-bundles/`
+  // ⚠ THE THREE PATH FAILURES CARRY THE SHAPE TOO, and they are the FIRST thing a review meets: a live run's
+  // ten failures began with these, because nothing else in the artifact can be checked until the bundle
+  // resolves. The detail is the table's own example — the same row the payload carries — so a writer who
+  // follows it cannot re-meet any of the three.
+  const pathDetail = expectedRowDetail(REVIEW_BUNDLE_PHASE_FILE, 'Review Bundle Path')
   if (!bundlePath) {
-    issues.push('Review Metadata is missing Review Bundle Path')
+    issues.push('Review Metadata is missing Review Bundle Path' + pathDetail)
     return issues
   }
   const normalizedBundlePath = normalizeRepoPath(bundlePath)
   if (!normalizedBundlePath.startsWith(expectedPrefix)) {
-    issues.push(`Review Bundle Path must live under \`/${expectedPrefix}\``)
+    issues.push(`Review Bundle Path must live under \`/${expectedPrefix}\`` + pathDetail)
     return issues
   }
   if (!existsSync(join(repoRoot, normalizedBundlePath))) {
-    issues.push(`Review Bundle Path does not exist: ${normalizedBundlePath}`)
+    issues.push(`Review Bundle Path does not exist: ${normalizedBundlePath}` + pathDetail)
     return issues
   }
   const bundleContent = readFileSync(join(repoRoot, normalizedBundlePath), 'utf8')
-  const artifactPath = normalizeRepoPath(getMdFieldValue(bundleContent, 'Artifact Path') ?? '')
-  const artifactHash = trimMdValue(getMdFieldValue(bundleContent, 'Artifact Content Hash') ?? '')
+  // ⚠ THE FIELD NAMES COME FROM `REVIEW_BUNDLE_REQUIRED_HEADER_FIELDS` (destructured), so the list the format
+  // table is checked against IS the list read here. The branches stay explicit because each one has its own
+  // failure sentence — a missing path, a path that does not resolve, and a hash that no longer matches are
+  // three different repairs.
+  const [ARTIFACT_PATH_FIELD, ARTIFACT_HASH_FIELD] = REVIEW_BUNDLE_REQUIRED_HEADER_FIELDS
+  const artifactPath = normalizeRepoPath(getMdFieldValue(bundleContent, ARTIFACT_PATH_FIELD) ?? '')
+  const artifactHash = trimMdValue(getMdFieldValue(bundleContent, ARTIFACT_HASH_FIELD) ?? '')
   if (!artifactPath) {
     issues.push('Review bundle is missing Artifact Path')
   } else if (!existsSync(join(repoRoot, artifactPath))) {
@@ -1591,11 +1607,11 @@ export function lintReviewBundleReference(content: string, runDir: string, repoR
   }
   if (!artifactHash) issues.push('Review bundle is missing Artifact Content Hash')
   const missingHeadings: string[] = []
-  for (const heading of ['Diff Basis', 'Changed Files Reviewed', 'Upstream Artifacts To Re-read', 'Relevant Addenda', 'Prior Recursive Evidence', 'Targeted Code References', 'Audit Questions', 'Required Output']) {
+  for (const heading of REVIEW_BUNDLE_REQUIRED_SECTIONS) {
     if (!getHeadingBody(bundleContent, heading)) missingHeadings.push(heading)
   }
   if (missingHeadings.length > 0) issues.push(`Review bundle is missing required section(s): ${missingHeadings.join(', ')}`)
-  const reviewNarrative = [getHeadingBody(content, 'Review Scope'), getHeadingBody(content, 'Requirement And Plan Reconciliation'), getHeadingBody(content, 'Plan Alignment Assessment'), getHeadingBody(content, 'Code Quality Assessment'), getHeadingBody(content, 'Issues Found'), getHeadingBody(content, 'Verdict')].join('\n')
+  const reviewNarrative = REVIEW_NARRATIVE_SECTIONS.map(heading => getHeadingBody(content, heading)).join('\n')
   const citedPaths = new Set([...extractPathsFromText(content)].map(normalizeRepoPath))
   const citedReviewPaths = new Set([...extractPathsFromText(reviewNarrative)].map(normalizeRepoPath))
   const upstreamPaths = new Set([...extractPathsFromText(getHeadingBody(bundleContent, 'Upstream Artifacts To Re-read'))].map(normalizeRepoPath))
@@ -1625,14 +1641,23 @@ export function lintReviewBundleReference(content: string, runDir: string, repoR
       issues.push('Review bundle Targeted Code References do not overlap the changed-file scope')
     }
   }
-  const expectedAddenda = new Set(getExpectedEffectiveInputAddendaPaths(runDir, '03.5-code-review.md'))
+  const expectedAddenda = new Set(getExpectedEffectiveInputAddendaPaths(runDir, REVIEW_BUNDLE_PHASE_FILE))
   const missingBundleAddenda = [...expectedAddenda].filter(p => !addendaPaths.has(p)).sort()
   if (missingBundleAddenda.length > 0) issues.push(`Review bundle is missing effective-input addenda: ${missingBundleAddenda.slice(0, 5).join(', ')}`)
-  if (upstreamPaths.size > 0 && ![...upstreamPaths].some(p => citedReviewPaths.has(p))) issues.push('Code review narrative does not cite any upstream artifact from the review bundle')
-  if (addendaPaths.size > 0 && ![...addendaPaths].some(p => citedReviewPaths.has(p))) issues.push('Code review narrative does not cite any relevant addendum from the review bundle')
-  if (priorPaths.size > 0 && ![...priorPaths].some(p => citedReviewPaths.has(p))) issues.push('Code review narrative does not cite any prior recursive evidence from the review bundle')
-  if ((changedPaths.size > 0 || codeRefPaths.size > 0) && ![...new Set([...changedPaths, ...codeRefPaths])].some(p => citedReviewPaths.has(p))) issues.push('Code review narrative does not cite any changed file or code reference from the review bundle')
-  if (!citedPaths.has(normalizedBundlePath)) issues.push('Code review must cite the Review Bundle Path in its written review artifact')
+  // ⚠ EVERY CITATION FAILURE BELOW CARRIES THE SHAPE THAT SATISFIES IT, from the SAME table the payload and the
+  // pre-step reminder are built from. A live run's transcript records the cost of the alternative: it grepped
+  // the SHIPPED BUNDLE for one of these exact sentences (`grep ... lib/index.js "Code review narrative does not
+  // cite any upstream"`), then read the compiled artifact at an offset, because the message named the missing
+  // fact and never the accepted form. The failure is the moment the writer needs the format, so this is where
+  // it is worth repeating a line the payload already carries — one source (`SECTION_FORMAT_RULES`), several
+  // presentations, which is the same relationship `expectedRowDetail` already has with the entry-row sections.
+  const narrativeDetail = expectedRowDetail(REVIEW_BUNDLE_PHASE_FILE, 'Code review narrative')
+  const citationsDetail = expectedRowDetail(REVIEW_BUNDLE_PHASE_FILE, 'Code review narrative citations')
+  if (upstreamPaths.size > 0 && ![...upstreamPaths].some(p => citedReviewPaths.has(p))) issues.push('Code review narrative does not cite any upstream artifact from the review bundle' + citationsDetail)
+  if (addendaPaths.size > 0 && ![...addendaPaths].some(p => citedReviewPaths.has(p))) issues.push('Code review narrative does not cite any relevant addendum from the review bundle' + citationsDetail)
+  if (priorPaths.size > 0 && ![...priorPaths].some(p => citedReviewPaths.has(p))) issues.push('Code review narrative does not cite any prior recursive evidence from the review bundle' + citationsDetail)
+  if ((changedPaths.size > 0 || codeRefPaths.size > 0) && ![...new Set([...changedPaths, ...codeRefPaths])].some(p => citedReviewPaths.has(p))) issues.push('Code review narrative does not cite any changed file or code reference from the review bundle' + citationsDetail)
+  if (!citedPaths.has(normalizedBundlePath)) issues.push('Code review must cite the Review Bundle Path in its written review artifact' + narrativeDetail)
   const verdictBody = getHeadingBody(content, 'Verdict')
   if (!verdictBody || isPlaceholderOnly(verdictBody)) issues.push('Verdict section must contain a concrete review verdict grounded in the review bundle')
   return issues
@@ -1768,7 +1793,7 @@ export function lintPhaseSpecificRules(
       }
     }
   }
-  if (fileName === '03.5-code-review.md') issues.push(...lintReviewBundleReference(content, runDir, repoRoot))
+  if (fileName === REVIEW_BUNDLE_PHASE_FILE) issues.push(...lintReviewBundleReference(content, runDir, repoRoot))
   if (fileName === '08-memory-impact.md') issues.push(...lintPhase8SkillUsageCapture(content))
   return [...new Set(issues)].sort()
 }

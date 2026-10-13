@@ -49,6 +49,79 @@ export const DIFF_AUDITED_FILES = new Set([
   '08-memory-impact.md',
 ])
 
+/**
+ * ⚠ THE ONE PHASE WHOSE LINT CHECKS A SECOND ARTIFACT. `lintArtifactFile` calls `lintReviewBundleReference` for
+ * this file and no other, so it is the single key for the review bundle's own rules — in the format table
+ * (`sectionFormatRulesFor`) and in the linter. A second literal for it would be a second place to forget.
+ */
+export const REVIEW_BUNDLE_PHASE_FILE = '03.5-code-review.md'
+
+/**
+ * The review bundle's own required sections, in the order the bundle builder writes them.
+ *
+ * ⚠ THIS LIST IS THE LINTER'S, EXTRACTED SO THE GUIDANCE CAN BE PINNED AGAINST IT. It was a literal inside
+ * `lintReviewBundleReference`; `tests/section-format-guidance.spec.ts` now asserts that EVERY heading here has
+ * a format rule and that every format rule names a heading here, so the two cannot drift — an assertion that
+ * was impossible while the list existed only inside the function body.
+ *
+ * ⚠ AND `## Relevant Memory References` / `## Prior-run memory` ARE NOT IN IT, deliberately: the builder writes
+ * them, the linter requires neither, and listing them here would claim a check that never runs.
+ */
+export const REVIEW_BUNDLE_REQUIRED_SECTIONS = [
+  'Diff Basis',
+  'Changed Files Reviewed',
+  'Upstream Artifacts To Re-read',
+  'Relevant Addenda',
+  'Prior Recursive Evidence',
+  'Targeted Code References',
+  'Audit Questions',
+  'Required Output',
+] as const
+
+/**
+ * The review bundle's own required HEADER fields — the checks that live ABOVE the first `##` heading.
+ *
+ * ⚠ SEPARATE FROM THE SECTION LIST BECAUSE `getMdFieldValue` READS THE WHOLE DOCUMENT and `getHeadingBody`
+ * reads only a section: these two are read as flat fields, so a rule for them must NOT be written as a
+ * section heading. Enumerating them here is what lets the spec assert that every check the bundle owes is
+ * covered by exactly one of the two lists rather than by a gap between them.
+ */
+export const REVIEW_BUNDLE_REQUIRED_HEADER_FIELDS = ['Artifact Path', 'Artifact Content Hash'] as const
+
+/**
+ * The phase artifact's own regions the review-bundle citation checks are read OUT OF, in the linter's order.
+ *
+ * ⚠ IT IS NOT A SECTION LIST: these are `##` headings of `03.5-code-review.md` that `lintReviewBundleReference`
+ * CONCATENATES and searches for citations. A path cited anywhere else in the artifact is not a citation, which
+ * is why the narrative rules say so rather than saying "in the artifact".
+ *
+ * ⚠ AND THE LIST IS THE UNION OF TWO KINDS OF HEADING, which is why {@link REVIEW_NARRATIVE_REQUIRED_SECTIONS}
+ * splits them: five are canonical required sections of the artifact, and `## Requirement And Plan
+ * Reconciliation` is an OPTIONAL heading (`getPhaseExpectedInputArtifactNames` elects it, because the plan is
+ * one of this phase's expected inputs). `getHeadingBody` returns `''` for an absent heading, so the optional one
+ * contributes an empty region — and a spec can assert the split rather than assuming every name is scaffolded.
+ */
+export const REVIEW_NARRATIVE_SECTIONS = [
+  'Review Scope',
+  'Plan Alignment Assessment',
+  'Code Quality Assessment',
+  'Issues Found',
+  'Verdict',
+  'Requirement And Plan Reconciliation',
+] as const
+
+/** The narrative headings that are ALSO canonical required sections of `03.5-code-review.md`. */
+export const REVIEW_NARRATIVE_REQUIRED_SECTIONS = [
+  'Review Scope',
+  'Plan Alignment Assessment',
+  'Code Quality Assessment',
+  'Issues Found',
+  'Verdict',
+] as const
+
+/** The one narrative heading the scaffold does not require: read when present, empty region when not. */
+export const REVIEW_NARRATIVE_OPTIONAL_SECTIONS = ['Requirement And Plan Reconciliation'] as const
+
 export const TRACEABILITY_REQUIRED_FILES = new Set([
   '01-as-is.md',
   '01.5-root-cause.md',
@@ -402,7 +475,30 @@ export interface SectionFormatRule {
   rule: string
   /** ONE passing line, copy-pasteable, in the shape the linter accepts. */
   example: string
+  /**
+   * WHICH FILE THIS RULE GOVERNS, when the phase has more than one artifact under lint.
+   *
+   * ⚠ THE REVIEW PHASE IS THE REASON THIS FIELD EXISTS: `03.5-code-review.md` is linted TOGETHER WITH a
+   * SECOND artifact — the review bundle under `evidence/review-bundles/` — whose rules are checked by the
+   * same `recursive_lint` pass (`lintReviewBundleReference`) but apply to a DIFFERENT FILE with a different
+   * section list. Put on one row, a bundle rule would name a heading the phase artifact does not require and
+   * the reader would go and write `## Diff Basis` into `03.5-code-review.md`. Absent means `'phase-artifact'`
+   * — the file the phase names — so every pre-existing entry is unchanged and the common case costs nothing.
+   */
+  appliesTo?: SectionFormatOwner
 }
+
+/**
+ * The artifact a {@link SectionFormatRule} governs: the phase's own artifact, the review BUNDLE that artifact
+ * points at, or the review narrative the bundle's citations are read out of.
+ *
+ * ⚠ `'review-narrative'` IS AN ENUMERATED REGION, NOT A HEADING. The linter does not read a `## Narrative`
+ * section — it concatenates six of the phase artifact's own headings (`## Review Scope`,
+ * `## Plan Alignment Assessment`, `## Code Quality Assessment`, `## Issues Found`, `## Verdict`, and
+ * `## Requirement And Plan Reconciliation` when present) and tests the citations inside THAT text. A citation
+ * anywhere else in the artifact does not count, so naming the phase artifact alone would be false.
+ */
+export type SectionFormatOwner = 'phase-artifact' | 'review-bundle' | 'review-narrative'
 
 /** The trailing half of every entry-row rule: the shape that must NOT be used, and why it is said here. */
 const ROW_SHAPE_WARNING = ' Keep the row a PLAIN bullet: a row wrapped in backticks is dropped silently when any field value contains a backtick.'
@@ -546,16 +642,185 @@ export const SECTION_FORMAT_RULES: Record<string, readonly SectionFormatRule[]> 
   '08-memory-impact.md': [REQUIREMENT_STATUS_FORMAT],
 }
 
+/* -------------------------------------------------------------------------- */
+/* THE REVIEW BUNDLE — A SECOND ARTIFACT THE 03.5 LINT CHECKS, IN ITS OWN TABLE  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * ⚠ WHY THIS IS A SECOND TABLE AND NOT MORE ROWS IN THE ONE ABOVE — the question this change had to answer
+ * before it could write a line, and the answer is structural rather than stylistic:
+ *
+ *   1. `SECTION_FORMAT_RULES` is keyed by the PHASE ARTIFACT and its rows name sections that artifact
+ *      REQUIRES. The review bundle is a DIFFERENT FILE at a different path with a DIFFERENT section list —
+ *      eight headings (`REVIEW_BUNDLE_REQUIRED_SECTIONS`), of which `## Diff Basis`,
+ *      `## Upstream Artifacts To Re-read` and the rest are required in NO phase artifact. A bundle row added
+ *      under `'03.5-code-review.md'` would name a heading the phase artifact does not have, and both the
+ *      reader and `tests/phase-rules.parity.spec.ts` would be told the wrong file. (The pinned canonical
+ *      section lists are the other half of the proof: the parity spec asserts every row's section is one the
+ *      artifact already requires, so a bundle row in that table could only be added by MOVING a parity pin —
+ *      which is exactly the "guidance that forced a pin to move" that spec exists to refuse.)
+ *   2. The bundle is not a peer of the twelve artifacts: it exists only for `03.5-code-review.md`, it is
+ *      authored by the run rather than by the phase template, and it is validated by its own lint entry point
+ *      (`lintReviewBundleReference`) rather than by `getArtifactRequiredSections`. Two lifetimes, two tables.
+ *
+ * ⚠ AND THE TWO TABLES REACH THE AGENT AS ONE LIST, so this is not a fifth surface: `sectionFormatRulesFor`
+ * concatenates them and tags every row with `appliesTo`, which is the field a reader needs to know WHICH file
+ * to edit. The bundle rules below are named under the SAME `section` key the linter reports them by (see
+ * `expectedRowDetail`'s call sites in `lintReviewBundleReference`), so the failure text and the guidance are
+ * keyed identically and cannot drift.
+ *
+ * ⚠ AND EVERY EXAMPLE HERE IS DRIVEN THROUGH THE REAL LINTER (`tests/section-format-guidance.spec.ts`): a
+ * bundle is built from the shipped builder with each example substituted into the section its rule names,
+ * `03.5-code-review.md` is built from the shipped scaffold, and both are linted. An example that is not
+ * linted is an example that rots.
+ */
+export const REVIEW_BUNDLE_SECTION_FORMAT_RULES: readonly SectionFormatRule[] = [
+  {
+    section: 'Review Bundle Path',
+    appliesTo: 'phase-artifact',
+    rule: 'a `## Review Metadata` field whose value is ONE repo-relative backticked path under'
+      + ' `.recursive/run/<runId>/evidence/review-bundles/`: the linter normalizes the value (backslashes to'
+      + ' slashes, leading slashes stripped) and then requires that exact prefix and that the file EXISTS.'
+      + ' `recursive_review` writes the bundle itself, so read the path it reports rather than choosing one,'
+      + ' and keep an ABSOLUTE path (`E:/...`) out of the field: it normalizes to `E:/...`, which fails the'
+      + ' prefix check.',
+    example: '- Review Bundle Path: `.recursive/run/r1/evidence/review-bundles/03.5-code-review-bundle.md`',
+  },
+  {
+    section: 'Artifact Path',
+    appliesTo: 'review-bundle',
+    rule: 'a `Artifact Path: ` line in the bundle HEADER (above the first `##`), naming the reviewed artifact'
+      + ' as ONE repo-relative backticked path that EXISTS — the linter reads it as a header field, not from a'
+      + ' section. `recursive_review` fills it; a bundle hand-written from a template must point at the artifact'
+      + ' the phase actually produced.',
+    example: 'Artifact Path: `.recursive/run/r1/03-implementation-summary.md`',
+  },
+  {
+    section: 'Artifact Content Hash',
+    appliesTo: 'review-bundle',
+    rule: 'a `Artifact Content Hash: ` line in the bundle HEADER carrying the LF-normalized sha256 of the'
+      + ' reviewed artifact\'s CURRENT bytes — the bundle is refused as STALE the moment that file changes, so'
+      + ' the hash must be written (or re-written) AFTER the last edit to the artifact it pins, never before.',
+    example: 'Artifact Content Hash: `0f2b7c1e5a9d4b6f8c0e2a4d6b8f0c2e4a6d8b0f2c4e6a8d0b2f4c6e8a0d2b4f`',
+  },
+  {
+    section: 'Changed Files Reviewed',
+    appliesTo: 'review-bundle',
+    rule: 'ONE `- ` bullet per reviewed path, each a backticked repo-relative path that EXISTS: the section is'
+      + ' read for paths, so prose (including `- none`) parses as an EMPTY section and fails, and every path'
+      + ' that is not resolvable on disk is reported by name.',
+    example: '- `src/guard.ts`',
+  },
+  {
+    section: 'Targeted Code References',
+    appliesTo: 'review-bundle',
+    rule: 'ONE `- ` bullet per code path, each a backticked repo-relative path that EXISTS, and AT LEAST ONE of'
+      + ' them must ALSO be listed under `## Changed Files Reviewed`: the linter refuses an empty section, a'
+      + ' path that does not resolve, and a set that does not overlap the changed-file scope.',
+    example: '- `src/guard.ts`',
+  },
+  {
+    section: 'Diff Basis',
+    appliesTo: 'review-bundle',
+    rule: 'six backticked fields, one per line, in this order: `Baseline type` (local commit | local branch |'
+      + ' remote ref | merge-base derived), `Baseline reference`, `Comparison reference` (working-tree for the'
+      + ' tree against the baseline), `Normalized baseline`, `Normalized comparison`, and'
+      + ' `Normalized diff command` — the same six `00-worktree.md` records. ⚠ IN THE BUNDLE THE VALUES ARE NOT'
+      + ' RESOLVED AGAINST GIT: only the presence of each field is checked here, so a bundle that copies a'
+      + ' stale commit still passes, while the run\'s own `## Diff Basis For Later Audits` does not.',
+    example: '- Baseline type: `local commit`',
+  },
+  {
+    section: 'Upstream Artifacts To Re-read',
+    appliesTo: 'review-bundle',
+    rule: 'ONE `- ` bullet per upstream artifact, each a backticked repo-relative path that EXISTS, and the'
+      + ' review artifact\'s NARRATIVE — the six headings `## Review Scope`, `## Requirement And Plan'
+      + ' Reconciliation`, `## Plan Alignment Assessment`, `## Code Quality Assessment`, `## Issues Found` and'
+      + ' `## Verdict` — must cite at least one of these exact paths in a code span. A bundle that lists none'
+      + ' makes the check vacuous; a narrative that cites a path not listed here does not satisfy it.',
+    example: '- `.recursive/run/r1/02-to-be-plan.md`',
+  },
+  {
+    section: 'Relevant Addenda',
+    appliesTo: 'review-bundle',
+    rule: 'ONE `- ` bullet per addendum under `.recursive/run/<runId>/addenda/`, each a backticked repo-relative'
+      + ' path that EXISTS, and every effective-input addendum the run expects for this phase must be listed'
+      + ' (`getExpectedEffectiveInputAddendaPaths`) — then the narrative must cite one of them. With no'
+      + ' addendum in the run, write plain prose saying so rather than a bullet: a bullet that is not a path'
+      + ' parses as no path at all, and the section then reads as empty.',
+    example: '- `.recursive/run/r1/addenda/02-to-be-plan.addendum-1.md`',
+  },
+  {
+    section: 'Prior Recursive Evidence',
+    appliesTo: 'review-bundle',
+    rule: 'ONE `- ` bullet per earlier artifact or evidence path that EXISTS, each backticked and repo-relative,'
+      + ' and the narrative must cite one of them. The requirement is conditional on this section being'
+      + ' NON-EMPTY: a section of prose that parses as no path at all makes the check vacuous rather than'
+      + ' failing it, so state "none" as a sentence, not as a bullet.',
+    example: '- `.recursive/run/r0/03-implementation-summary.md`',
+  },
+  {
+    section: 'Audit Questions',
+    appliesTo: 'review-bundle',
+    rule: 'the concrete questions the reviewer must answer, at least one of them, with real content: the linter'
+      + ' refuses a section that is empty or placeholder-only (`...`, `<content>`, `[...]`, `[same structure]`).',
+    example: '- Does the guard refuse a lock while an earlier phase is still DRAFT?',
+  },
+  {
+    section: 'Code review narrative',
+    appliesTo: 'review-narrative',
+    rule: 'the narrative must cite the review bundle\'s OWN path, exactly as `## Review Metadata` records it,'
+      + ' somewhere in the six headings above (`## Review Scope` is where the shipped fixture puts it). The'
+      + ' match is on the normalized path, so the code span must carry the path itself — a bare filename, a'
+      + ' section heading or the words "the review bundle" are not read as a citation.',
+    example: '- Reviewed against `03-implementation-summary.md` through the bundle at `.recursive/run/r1/evidence/review-bundles/03.5-code-review-bundle.md`.',
+  },
+  {
+    section: 'Code review narrative citations',
+    appliesTo: 'review-narrative',
+    rule: 'the narrative must cite AT LEAST ONE path from EACH NON-EMPTY list in the bundle —'
+      + ' `## Upstream Artifacts To Re-read`, `## Relevant Addenda`, `## Prior Recursive Evidence`, and the union'
+      + ' of `## Changed Files Reviewed` and `## Targeted Code References` — as a backticked repo-relative path'
+      + ' in one of the six narrative headings. Each list is checked independently, so citing three of the four'
+      + ' leaves the fourth failing, and a path pasted without backticks is not a citation at all.',
+    example: '- The change landed on `src/guard.ts`, exactly the scope `.recursive/run/r1/02-to-be-plan.md` planned.',
+  },
+]
+
 /**
  * The format rules for an artifact, or `[]` when every section's format is obvious.
  *
  * ⚠ SCOPED TO THE CURRENT PROFILE FOR THE SAME REASON THE LINT IS: `lintSourceRequirementInventory` and
  * `lintRequirementMapping` return `[]` unless the run declares `recursive-mode-audit-v2`, so telling a
  * legacy run's author about v2 row shapes would describe a check that is not running.
+ *
+ * ⚠ AND IT IS THE ONE ASSEMBLY POINT FOR BOTH TABLES. The review phase carries a second artifact under the
+ * same lint pass, so its rows are appended here rather than in a second accessor: one list reaches the
+ * `recursive_phase` payload, the pre-step reminder, the scaffold comment and the failure detail, and every
+ * row's `appliesTo` says which file it governs. A caller that must separate them filters on that field
+ * ({@link sectionFormatRulesForOwner}) instead of holding a second copy.
  */
 export function sectionFormatRulesFor(fileName: string, workflowProfile: string = CURRENT_WORKFLOW_PROFILE): SectionFormatRule[] {
   if (workflowProfile !== CURRENT_WORKFLOW_PROFILE) return []
-  return [...(SECTION_FORMAT_RULES[fileName] ?? [])]
+  // ⚠ THE BUNDLE ROWS BELONG TO THE PHASE WHOSE LINT CHECKS THE BUNDLE, and to no other: `lintReviewBundleReference`
+  // is called for `03.5-code-review.md` alone (`PHASE_REVIEW_BUNDLE_FILE`), so attaching them anywhere else
+  // would describe a check the phase does not run and charge every other phase for prose it cannot use.
+  const bundle = fileName === REVIEW_BUNDLE_PHASE_FILE ? REVIEW_BUNDLE_SECTION_FORMAT_RULES : []
+  return [...(SECTION_FORMAT_RULES[fileName] ?? []), ...bundle]
+}
+
+/** The rule's owner, with the field's own default (`'phase-artifact'`) applied. */
+export function sectionFormatOwnerOf(rule: SectionFormatRule): SectionFormatOwner {
+  return rule.appliesTo ?? 'phase-artifact'
+}
+
+/** The subset of {@link sectionFormatRulesFor} that governs ONE file. */
+export function sectionFormatRulesForOwner(
+  fileName: string,
+  owner: SectionFormatOwner,
+  workflowProfile: string = CURRENT_WORKFLOW_PROFILE,
+): SectionFormatRule[] {
+  return sectionFormatRulesFor(fileName, workflowProfile).filter((rule) => sectionFormatOwnerOf(rule) === owner)
 }
 
 /**
@@ -835,7 +1100,16 @@ export function phaseLintRulesMessage(
     'QA (phase 5): declare QA Execution Mode: human|agent-operated|hybrid; human/hybrid need user sign-off.',
     ...(formats.length === 0 ? [] : ['Entry-row sections (one `- ` bullet per requirement id, the id ALONE in the first `|` field; exact '
       + 'format + a passing example for each are in the recursive_phase payload under `sectionFormats`): '
-      + formats.map((format) => '## ' + format.section).join(' | ')]),
+      // ⚠ AND EACH NAME CARRIES THE FILE ITS RULE GOVERNS WHEN THAT IS NOT THE PHASE ARTIFACT. Phase 03.5 is
+      // linted together with the review BUNDLE, which is a different file with a different section list; a bare
+      // `## Diff Basis` in this line would send a writer to add a heading `03.5-code-review.md` does not require.
+      // The annotation is a suffix on the same name, not a second list, so the line stays one line.
+      + formats.map((format) => {
+        const owner = sectionFormatOwnerOf(format)
+        return owner === 'phase-artifact'
+          ? '## ' + format.section
+          : '## ' + format.section + ' (' + format.appliesTo + ')'
+      }).join(' | ')]),
     // T40 — the phase-8 memory write is named HERE, once, where every other phase gate is named.
     // Additive on purpose: the message is only ever asserted with `toContain` (r5-parity.spec.ts),
     // so a new phase's obligation cannot be mistaken for a regression in an existing one.

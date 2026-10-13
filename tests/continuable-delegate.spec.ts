@@ -147,6 +147,35 @@ describe('delegation.ts — T4 continuable delegation', () => {
     expect(result.accepted).toBe(false)
   })
 
+  it('one-shot fallback carries a signal, because providers read request.signal.aborted bare', async () => {
+    // REPRODUCES THE LIVE FAILURE: the fallback at delegation.ts (the `else` branch when the
+    // continuable seam is absent) used to build a request with NO signal. The host forwards it
+    // verbatim, and subagent-in-process-driver reads `request.signal.aborted` bare
+    // (packages/subagent/subagent-in-process-driver/src/index.ts:109), throwing
+    // "Cannot read properties of undefined (reading 'aborted')" before any child starts.
+    // This fake reproduces that exact provider read; without the fix the delegate call throws.
+    let sawSignal: unknown
+    const providerRead: SubagentsRuntimeLike = {
+      start: async (_provider: string, request) => {
+        sawSignal = request.signal
+        // The exact bare read the driver performs. Throws TypeError when signal is undefined.
+        if ((request.signal as { aborted?: boolean }).aborted) throw new Error('aborted')
+        return { output: 'one-shot', stopReason: 'completed', success: true }
+      },
+    }
+    const result = await delegateContinuable({
+      subagents: providerRead,
+      provider: 'spawn',
+      label: 'rev-1',
+      prompt: 'review',
+      // no parent / no continuable seam → the fallback branch runs
+    })
+    expect(result.ok).toBe(true)
+    expect(result.fellBackToOneShot).toBe(true)
+    expect(sawSignal).toBeDefined()
+    expect(typeof (sawSignal as { aborted?: boolean }).aborted).toBe('boolean')
+  })
+
   it('continuable seam WITHOUT an observer falls back to one-shot (never a fake APPROVE)', async () => {
     let startContinuableCalled = false
     const seamOnly: SubagentsRuntimeLike = {

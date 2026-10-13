@@ -564,6 +564,12 @@ export async function delegateContinuable(input: {
           toolFilter,
           maxDepth,
           parent,
+          // ⚠ THE FALLBACK ONE-SHOT PATH MUST CARRY A SIGNAL. `subagents.start` forwards this request
+          // verbatim, and the in-process driver reads `request.signal.aborted` bare
+          // (packages/subagent/subagent-in-process-driver/src/index.ts:109) — an absent signal throws
+          // `Cannot read properties of undefined (reading 'aborted')` and kills the fallback review before
+          // any child starts. Supplying one mirrors the continuable spec's signal below (:611).
+          signal: new AbortController().signal,
         },
       })
       const verdict = readVerdict(oneShot)
@@ -600,14 +606,19 @@ export async function delegateContinuable(input: {
     provider,
     label,
     request,
-    // ⚠ FU-9 — A SIGNAL IS MANDATORY IN PRACTICE, NOT DECORATION. The host reads `signal.aborted` WITHOUT
-    // optional chaining in `packages/subagent/subagent/src/control.ts:106`, while its own sibling
-    // `list-children.ts:130` guards it with `signal?.aborted`. So a continuable start carrying no signal throws
-    // `Cannot read properties of undefined (reading 'aborted')` — the delegation's catch records that as its
-    // reason, the driver reports "no continuable repair path", and THE CHILD NEVER STARTS. That one chain
-    // produced every artifact this investigation chased: no child session, no reply, no settlement, and four
-    // brief-only child directories. The host should guard its own read (reported as a DSH limitation); supplying
-    // a signal on the SPEC — the request type excludes it deliberately — is this plugin's side of the contract.
+    // ⚠ FU-9 — THE SPEC CARRIES A SIGNAL BECAUSE THE HOST TYPE REQUIRES ONE (`ContinuableStartSpec.signal`
+    // is non-optional in packages/subagent/subagent/src/types.ts), and because both of the harness's own
+    // callers supply one (tool-subagent passes `exec.signal`; agent-team's roster passes its own). NOT because
+    // this is where `reading 'aborted'` came from — an earlier version of this comment said that and it was
+    // wrong, which cost two investigation rounds. Verified against the host:
+    //   • `startContinuable` reads the signal ONLY via `spec.signal.throwIfAborted()`
+    //     (continuation.ts:143), so an absent signal there throws `reading 'throwIfAborted'`, never 'aborted'.
+    //   • The host's one bare `signal.aborted` read (control.ts:106, `isCancellation`) is reachable only from
+    //     the `@Remote('prompt')` catch at subagent/src/index.ts:464 — NOT from startContinuable.
+    // The actual `reading 'aborted'` throw was on the ONE-SHOT FALLBACK's request below (see the signal on it),
+    // where the in-process driver reads `request.signal.aborted` bare. Supplying a signal here is still correct
+    // and contract-conformant; it is simply not the fix for that error, and saying it was sent this
+    // investigation after a symptom that had a different cause.
     signal: new AbortController().signal,
   }
   if (input.childId !== undefined) spec.childId = input.childId

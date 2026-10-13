@@ -784,7 +784,7 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
                 // LIVE BUG 6 (0.2.1): inject the lint-rules reminder AT MOST ONCE PER PHASE.
                 // The scaffold repair above is deduped via repairedRoots; the reminder itself was
                 // not, so every pre-step while DRAFT re-injected it.
-                const reminder = phaseLintRulesMessage(phase)
+                const reminder = phaseLintRulesMessage(phase, undefined, recursive.delegatedReviewerCapability(root, phasePath))
         return {
           kind: 'enter',
           messages: [...messages, createUserMessage({ content: [{ type: 'text', text: reminder }], source: { ...REMINDER_SOURCE, form: 'notice', summary: 'phase ' + phase + ' lint rules' } })],

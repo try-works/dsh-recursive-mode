@@ -28,7 +28,7 @@ import { recordJobRun } from './job-log.ts'
 import { toolError } from './errors.ts'
 import { readGuardDecisions, type GuardDecisionRecord } from './guard-log.ts'
 import { resolveControlPlaneRoot, type WorkspaceRegistryLike } from './workspace.ts'
-import { phaseRulesFor, type PhaseRules } from './phase-rules.ts'
+import { phaseRulesFor, delegatedReviewerCapability, type PhaseRules } from './phase-rules.ts'
 import { closeoutReport, writeCloseoutReceipt } from './closeout-report.ts'
 import { readScratch, writeScratch, appendScratch, type ScratchTarget } from './scratch.ts'
 import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
@@ -1424,6 +1424,25 @@ export class RecursiveRuntime extends Service {
   }
 
   /**
+   * FU — the same delegated-reviewer verdict `phaseRules` puts in its payload, for a caller that needs it
+   * WITHOUT the payload.
+   *
+   * ⚠ WHY IT IS A METHOD AND NOT A SECOND COMPUTATION. The pre-step reminder is built in `index.ts` from the
+   * artifact name alone, so the capability statement could not reach it — and a rule that is only ever
+   * emitted on a branch no caller can reach is a dead rule, which is the defect class this whole change is
+   * about. Exposing the ONE resolution keeps the reminder's line derived from the same facts as the payload's
+   * field, instead of a second copy of the policy read that could drift from it.
+   */
+  delegatedReviewerCapability(root: string, artifactPath: string, role?: string) {
+    return delegatedReviewerCapability({
+      ...(role === undefined ? {} : { role }),
+      seam: this.subagentsSeam,
+      resolveRoute: (resolvedRole) => resolveRole(resolvedRole, loadRouterPolicy(routerPolicyPath(root), this._routerOverrides), this.providerMapFromSeam()),
+      artifactExists: existsSync(artifactPath),
+    })
+  }
+
+  /**
    * B3: per-call workspace root resolution. The control-plane root is the
    * session's cwd (or registry-canonicalized), NEVER process.cwd() — the host
    * checkout is not the run's workspace. Reads resolve under that root only.
@@ -1580,6 +1599,18 @@ export class RecursiveRuntime extends Service {
       // a non-null `gitDir` (so `git rev-parse --git-dir` succeeds) and a null `headSha`, and that state
       // used to pass silently. All three unusable-baseline states now fire, each with its own sentence.
       gitRequired: gitBaselineProblem(gitFacts(root)),
+      // FU — WHETHER A DELEGATED REVIEWER IS REACHABLE FOR THIS PHASE, AND IF NOT, WHICH CONDITION STOPS ONE.
+      //
+      // ⚠ THE CONDITIONS ARE READ FROM THE PATH `recursive_review` ITSELF TAKES, not from a hopeful probe:
+      // the SAME seam field `delegateReview` falls back to, the SAME provider map built from it, and the
+      // SAME workspace router policy file — so the statement and the call cannot disagree about the seam.
+      // The artifact check mirrors the tool's own `NO_PHASE` refusal, and its `row.exists` lookup.
+      //
+      // ⚠ AND IT IS STATED, NOT FIXED. The host defect that actually broke the profiled run — a continuable
+      // start whose spec carries no signal reaching a host read of `signal.aborted` — is invisible from here
+      // and stays reported; see `delegatedReviewerCapability`'s own note for the other two refusals
+      // (`T19` repeat, `T28` children budget) that this statement deliberately does not claim to cover.
+      delegatedReviewer: this.delegatedReviewerCapability(root, join(resolved.runDir, phase)),
       // ⚠ `'phase'` IS PASSED BECAUSE THIS IS NOT A REVIEW BUNDLE. The renderer's wording used to be the
       // reviewer's (*"relevant to this REVIEW"*) and this payload inherited it, so the sentence named a
       // reader this text never reaches. The context is the ONE thing that differs between the two callers

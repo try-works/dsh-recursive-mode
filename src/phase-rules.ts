@@ -407,6 +407,84 @@ export interface SectionFormatRule {
 /** The trailing half of every entry-row rule: the shape that must NOT be used, and why it is said here. */
 const ROW_SHAPE_WARNING = ' Keep the row a PLAIN bullet: a row wrapped in backticks is dropped silently when any field value contains a backtick.'
 
+/* -------------------------------------------------------------------------- */
+/* PHASE 0 — THE UPSTREAM CONTRACT, WHICH USED TO DECLARE NOTHING               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * ⚠ WHY PHASE 0 NOW CARRIES FORMATS, MEASURED FROM A LIVE RUN'S OWN TRANSCRIPT. `sectionFormats` was
+ * populated only for phase 1 and later, and only for the four entry-row sections — so `00-requirements.md`
+ * and `00-worktree.md`, the two phases that DEFINE the ids every later phase's completion table is
+ * lint-checked against and the diff basis every later lock resolves, returned `sectionFormats: []`. The
+ * payload said, in effect, "nothing here has a shape"; the linter said otherwise five and two rounds later.
+ * A phase whose sections the linter machine-checks must never present an empty contract.
+ *
+ * ⚠ AND EVERY EXAMPLE BELOW IS DRIVEN THROUGH THE REAL LINTER, not read off the template: a rule that is
+ * not linted is a rule that rots, and `tests/section-format-guidance.spec.ts` lints an artifact built from
+ * each one. Where a shape is only as true as the parser's own edge, the edge is named in the rule rather
+ * than dressed up as intent (`REQUIREMENT_ID_RE` in `ts-lint.ts`).
+ */
+const REQUIREMENTS_FORMAT: SectionFormatRule = {
+  section: 'Requirements',
+  rule: 'one `### ` heading per requirement id — `` ### `R1` <short title> `` — then `Description:` and an'
+    + ' `Acceptance criteria:` block listing the observable conditions. Keep the id ALONE inside its own code'
+    + ' span: the id is matched as a WORD here (`parseRequirementIds`, `R` + digits) and every later phase\'s'
+    + ' completion-table row is then validated against that exact string (`REQUIREMENT_ID_RE`, which also'
+    + ' accepts `SRC-` + EXACTLY three digits) — so a heading id with anything WORD-LIKE after the digits'
+    + ' (`R1a`) is parsed as no id at all, and a non-zero-padded `SRC-1` is never a row id.',
+  example: '### `R1` the lock must refuse an out-of-order artifact',
+}
+
+/** `## Out of Scope` — phase 0: the `OOS<n>` handles the traceability section is checked for. */
+const OUT_OF_SCOPE_FORMAT: SectionFormatRule = {
+  section: 'Out of Scope',
+  rule: 'one `- ` bullet per excluded item: the `OOS<n>` handle in a code span, then a colon and the item —'
+    + ' the shape the template scaffolds. Write the source `R<n>` on the same line when the item narrows one,'
+    + ' because Traceability is checked for the requirement ids and this section is where an excluded id is'
+    + ' otherwise lost.',
+  example: '- `OOS1`: editing the artifact in the browser',
+}
+
+/** `## Traceability` — every phase that requires it: the ids the linter scans this section for. */
+const TRACEABILITY_FORMAT: SectionFormatRule = {
+  section: 'Traceability',
+  rule: 'one `- ` bullet per requirement id, naming the id itself: every id the run defines must be present'
+    + ' in this section, and at least one `R<n>` must appear, so write the ids rather than a sentence about them.',
+  example: '- `R1` -> this artifact records the Phase 0 context that makes the requirement checkable',
+}
+
+/** `## Coverage Gate` / `## Approval Gate` — the verdict line, which is a line and not a bullet value. */
+const GATE_VERDICT_FORMAT: SectionFormatRule = {
+  section: 'Coverage Gate',
+  rule: 'end the section with a verdict line at the start of the line and NOTHING else on it: `Coverage: PASS`'
+    + ' or `Coverage: FAIL` (Approval Gate likewise). Indented, bulleted, or backtick-wrapped verdicts are not'
+    + ' read, and a FAIL that is never changed to PASS is what keeps the artifact un-lockable. On a locked'
+    + ' artifact an audited phase adds `Audit: PASS` above it, and Coverage: PASS is invalid without it.',
+  example: 'Coverage: PASS',
+}
+
+/**
+ * `## Diff Basis For Later Audits` — phase 0: the six fields every later audited phase's diff audit reads.
+ *
+ * ⚠ THE VALUES ARE GIT FACTS, NOT DECORATION, and they are checked against live git at every lock: the
+ * normalized baseline must resolve to the same commit `git rev-parse --verify <baseline reference>^{commit}`
+ * returns, and the normalized diff command must equal the command derived from the baseline/comparison pair
+ * (`git diff --name-only <baseline>`, or `...<baseline>..<comparison>` when the comparison is a commit).
+ * A recorded basis that no longer matches live git refuses the lock. The literal below cannot carry a real
+ * commit — it is per-checkout — so the shape is what is stated; `recursive_init` prefills all six fields
+ * from the current HEAD.
+ */
+const DIFF_BASIS_FORMAT: SectionFormatRule = {
+  section: 'Diff Basis For Later Audits',
+  rule: 'six backticked fields, one per line, in this order: `Baseline type` (local commit | local branch |'
+    + ' remote ref | merge-base derived), `Baseline reference`, `Comparison reference` (working-tree for the'
+    + ' tree against the baseline), `Normalized baseline` (the resolved commit sha), `Normalized comparison`,'
+    + ' and `Normalized diff command` — the command that must be executable as written, e.g.'
+    + ' `git diff --name-only <normalized baseline>`. All six are read by every later audited phase, and the'
+    + ' last three are verified against live git before any lock.',
+  example: '- Diff basis notes: `the six fields above resolve against this run\'s baseline and are re-verified before every lock`',
+}
+
 /** `## Source Requirement Inventory` — phase 1, current profile only. */
 const INVENTORY_FORMAT: SectionFormatRule = {
   section: 'Source Requirement Inventory',
@@ -451,6 +529,12 @@ const REQUIREMENT_STATUS_FORMAT: SectionFormatRule = {
  * the sections whose row shape a writer cannot guess from the heading.
  */
 export const SECTION_FORMAT_RULES: Record<string, readonly SectionFormatRule[]> = {
+  // ⚠ PHASE 0 FIRST, BECAUSE IT IS THE UPSTREAM CONTRACT: the id class this artifact defines is what every
+  // later phase's `## Requirement Completion Status` is lint-checked against, and the diff basis this one
+  // records is what every later audited phase's `## Worktree Diff Audit` resolves. Declaring their shape
+  // only at phase 1 — which is what the payload used to do — is declaring it after the expensive discovery.
+  '00-requirements.md': [REQUIREMENTS_FORMAT, OUT_OF_SCOPE_FORMAT, GATE_VERDICT_FORMAT],
+  '00-worktree.md': [DIFF_BASIS_FORMAT, TRACEABILITY_FORMAT, GATE_VERDICT_FORMAT],
   '01-as-is.md': [INVENTORY_FORMAT, REQUIREMENT_STATUS_FORMAT],
   '01.5-root-cause.md': [REQUIREMENT_STATUS_FORMAT],
   '02-to-be-plan.md': [MAPPING_FORMAT, REQUIREMENT_STATUS_PLAN_FORMAT],
@@ -541,6 +625,102 @@ export const GIT_DETACHED_HEAD_NOTICE = 'This checkout is on a DETACHED HEAD, an
   + ' authoring phase 0.'
 
 /**
+ * FU — THE DELEGATED-REVIEWER CAPABILITY, STATED AT PHASE ENTRY INSTEAD OF DISCOVERED BY FAILURE.
+ *
+ * ⚠ WHY THIS EXISTS, MEASURED FROM A LIVE RUN. That run spent three calls working out whether subagents
+ * could be used at all, then `recursive_review` failed twice with
+ * `Cannot read properties of undefined (reading 'aborted')` — a host-side defect this change deliberately
+ * does NOT fix — and the run then recorded `self-audit` as a *"deliberate, recorded deviation"* in its audit
+ * context. A broken delegation path and a chosen self-audit produce the same artifact vocabulary, so the
+ * record could not be told apart from a decision. The phase payload now says which of the two it is, and
+ * names the condition, so an agent neither spends calls probing nor writes a broken path down as a choice.
+ *
+ * ⚠ THE STRUCTURE IS DECLARED HERE AND FILLED ELSEWHERE, exactly as `gitRequired` is: this module is a pure
+ * rules table and `router.ts` imports FROM it, so resolving a role here would be a cycle. `runtime.phaseRules`
+ * computes it from the live seam and the workspace's router policy on every phase entry, and `null` means
+ * NOT MEASURED — the reading a bare `phaseRulesFor` caller has always had.
+ */
+export interface DelegatedReviewerCapability {
+  /** The reviewer role `recursive_review` routes by default. */
+  role: string
+  /** True when `recursive_review` can reach a child session for THIS phase right now. */
+  available: boolean
+  /** The provider the router resolved, when it resolved one. */
+  provider?: string
+  /** The router's tier for that role — `native`/`external-cli` create a child; the other two do not. */
+  tier: string
+  /**
+   * One sentence naming the CONDITION, on both branches: why a child can be created, or the single
+   * condition that stops one. This is the field a record should quote instead of "self-audit (deviation)".
+   */
+  reason: string
+  /** The router's own sentence for the role, so a reader can tell a policy refusal from a missing seam. */
+  routeReason: string
+}
+
+/**
+ * The capability statement for one phase, from the facts `delegateReview` itself resolves.
+ *
+ * ⚠ THE PROBE MIRRORS THE CALL, DELIBERATELY AND IN THE SAME ORDER, because an availability claim that is
+ * not derived from the path the tool takes is the failure this field exists to prevent. `recursive_review`
+ * first refuses a phase whose artifact does not exist (`NO_PHASE`), then resolves the reviewer role through
+ * the router with the SAME provider map and the SAME policy file `delegateReview` uses, and finally refuses
+ * a tier that creates no child. Both refusals are conditions here, stated as conditions.
+ *
+ * ⚠ WHAT IT DOES NOT COVER, said rather than hidden: `delegateReview` additionally refuses a repeat of an
+ * already-accepted operation against an unchanged artifact (`T19`) and a phase that has spent its
+ * `maxChildrenPerPhase` budget (`T28`). Both are computed from live state this pure function does not hold,
+ * so `available: true` means "a child can be started for this phase", not "this exact call will be
+ * accepted". The host defect that actually broke the profiled run — a continuable start whose spec carries
+ * no signal reaching a host read of `signal.aborted` — is likewise NOT detected here; nothing in this
+ * function can see it, which is why it is reported rather than papered over.
+ *
+ * ⚠ AND THE PHASE IS NOT PASSED TO THE ROUTER, deliberately. `delegateReview` resolves the role WITHOUT a
+ * phase context, and the phase only reaches `resolveSubagentTarget`'s MODEL ladder (the `target` it composes),
+ * never the tier or the provider — which is the entire content of this verdict. So the statement matches the
+ * call on the axis it describes, and a `phase_routes` model cannot make the two disagree.
+ */
+export function delegatedReviewerCapability(input: {
+  role?: string
+  /** The mounted subagents service, or null/undefined. A `false` is reported as a missing seam, not ignored. */
+  seam: unknown
+  /** The role resolver (`resolveRole`), injected so this module keeps no import of the router. */
+  resolveRoute: (role: string) => { tier: string; provider?: string; reason: string }
+  /** True when this phase's artifact is already on disk; `recursive_review` refuses a phase without one. */
+  artifactExists: boolean
+}): DelegatedReviewerCapability {
+  const role = input.role ?? 'code-reviewer'
+  const decision = input.resolveRoute(role)
+  const routeReason = decision.reason
+  // ⚠ NO SEAM IS THE ONE CONDITION THE ROUTER CANNOT SEE: `resolveRole` answers from the provider map, and
+  // `delegateReview` then reports "no ctx.subagents runtime available (self-audit fallback)" with
+  // `decision.tier === 'native'` — i.e. the router says a child can exist while nothing can create one. The
+  // seam is therefore the FIRST condition here, and the tier second, in the order the delegation reaches them.
+  if (input.seam === null || input.seam === undefined || input.seam === false) {
+    return {
+      role, available: false, tier: decision.tier, routeReason,
+      reason: 'no subagents service is mounted in this composition, so no child session can be started and the review would be the authoring agent\'s own — a self-audit, not a delegated review.',
+    }
+  }
+  if (decision.tier !== 'native' && decision.tier !== 'external-cli') {
+    return {
+      role, available: false, tier: decision.tier, routeReason,
+      reason: 'the router resolves role ' + role + ' to tier ' + decision.tier + ', which creates no child session, so the review would be the authoring agent\'s own — a self-audit, not a delegated review.',
+    }
+  }
+  if (!input.artifactExists) {
+    return {
+      role, available: false, tier: decision.tier, routeReason, ...(decision.provider === undefined ? {} : { provider: decision.provider }),
+      reason: 'this phase has no artifact on disk yet, and recursive_review refuses a phase with nothing to review (NO_PHASE); write the artifact, then delegate the review.',
+    }
+  }
+  return {
+    role, available: true, tier: decision.tier, routeReason, ...(decision.provider === undefined ? {} : { provider: decision.provider }),
+    reason: 'a delegated reviewer IS available for this phase: the subagents service is mounted and the router resolves ' + role + ' to provider ' + (decision.provider ?? decision.tier) + ' at tier ' + decision.tier + '. Delegate the review rather than recording a self-audit.',
+  }
+}
+
+/**
  * Structured, single-source-of-truth rules for one phase (refined LIVE BUG 6
  * design): consumed by BOTH the recursive_phase tool and the once-per-phase
  * pre-step reminder. Derived from the canonical artifact-template sections.
@@ -571,6 +751,19 @@ export interface PhaseRules {
    */
   gitRequired: string | null
   /**
+   * FU — whether a DELEGATED reviewer is reachable for THIS phase, and if not, which condition stops one.
+   *
+   * ⚠ SET BY `runtime.phaseRules` FROM LIVE FACTS, for the same reason `gitRequired` is: the seam and the
+   * workspace's router policy are facts about the composition and the checkout, not properties of the phase.
+   * `null` means "not measured" — and, unlike `gitRequired`, that is a legitimate reading for a bare
+   * `phaseRulesFor` caller, who has no root to resolve a policy from.
+   *
+   * ⚠ OPTIONAL IN THE TYPE ONLY BECAUSE HAND-BUILT `PhaseRules` FIXTURES EXIST — `tests/skill-registration.spec.ts`
+   * builds the object by hand and is outside this change's ownership, exactly the limitation `sectionFormats`
+   * records. `phaseRulesFor` always sets it (to `null`), so no payload is ever missing the key.
+   */
+  delegatedReviewer?: DelegatedReviewerCapability | null
+  /**
    * The NON-OBVIOUS section formats for this artifact: one rule plus one passing example per section whose
    * row shape cannot be guessed from its heading (see {@link SectionFormatRule}). `[]` when every section's
    * format is obvious, or when the profile is not `recursive-mode-audit-v2`.
@@ -600,6 +793,8 @@ export function phaseRulesFor(fileName: string, workflowProfile: string = CURREN
     memoryWrite: phase8MemoryWriteRuleFor(fileName),
     // Not knowable here (see the field's note): the runtime fills it from the checkout's own facts.
     gitRequired: null,
+    // Same split as `gitRequired` — knowable only from the mounted seam and the workspace router policy.
+    delegatedReviewer: null,
     sectionFormats: sectionFormatRulesFor(fileName, workflowProfile),
   }
 }
@@ -610,7 +805,15 @@ export function phaseRulesFor(fileName: string, workflowProfile: string = CURREN
  * (single source of truth with the recursive_phase tool). Output is unchanged
  * from the prior inline build so r5-parity.spec.ts stays green.
  */
-export function phaseLintRulesMessage(fileName: string, workflowProfile: string = CURRENT_WORKFLOW_PROFILE): string {
+export function phaseLintRulesMessage(
+  fileName: string,
+  workflowProfile: string = CURRENT_WORKFLOW_PROFILE,
+  /**
+   * The live capability statement, when the caller has one. OPTIONAL and THIRD so the two callers that build
+   * this message from rules alone are unchanged; `runtime` passes the same value it puts in the payload.
+   */
+  delegatedReviewer: DelegatedReviewerCapability | null = null,
+): string {
   const rules = phaseRulesFor(fileName, workflowProfile)
   // ⚠ THE REMINDER NAMES THE ENTRY-ROW SECTIONS AND THE ONE THING THAT DECIDES THEIR PARSE, and does not
   // repeat the full format: the paragraphs and the passing example live in the `recursive_phase` payload
@@ -619,6 +822,9 @@ export function phaseLintRulesMessage(fileName: string, workflowProfile: string 
   // two depths, no second copy of the prose. Both surfaces exist because the reminder is injected
   // AUTOMATICALLY at phase entry while the payload answers the agent that asks.
   const formats = rules.sectionFormats ?? []
+  // The live verdict wins over the pure function's `null`, because the caller that has one is the call site
+  // that can actually measure it (see the field's note).
+  const reviewer = delegatedReviewer ?? rules.delegatedReviewer ?? null
   const lines = [
     '<system-reminder>',
     'Recursive-mode phase lint rules for THIS phase (' + fileName + '):',
@@ -634,6 +840,15 @@ export function phaseLintRulesMessage(fileName: string, workflowProfile: string 
     // Additive on purpose: the message is only ever asserted with `toContain` (r5-parity.spec.ts),
     // so a new phase's obligation cannot be mistaken for a regression in an existing one.
     ...(rules.memoryWrite === null ? [] : ['Memory write (phase 8, HARD): ' + rules.memoryWrite.summary]),
+    // ⚠ ONE LINE, AND ONLY WHEN DELEGATION IS NOT REACHABLE — the case the reminder has to carry, because
+    // the alternative is what a live run did: spend calls probing, then record the broken path as a
+    // "deliberate, recorded deviation". The sentence is short by construction and the full statement (role,
+    // tier, provider, the router's own reason) stays in the payload under `delegatedReviewer`: one rule,
+    // two depths, no second copy of the prose. The caller's live verdict WINS over the rules object's `null`,
+    // because that is the surface `runtime` fills and this one cannot read.
+    ...(reviewer === null || reviewer.available
+      ? []
+      : ['Delegated reviewer UNAVAILABLE for this phase (do NOT record self-audit as a deviation): ' + reviewer.reason]),
     '</system-reminder>',
   ]
   return lines.join('\n')

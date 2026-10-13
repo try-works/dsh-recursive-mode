@@ -185,5 +185,32 @@ describe('recursive_phase payload — the section formats reach the agent throug
       await ctx.fiber.dispose()
     } finally { rmSync(repo, { recursive: true, force: true }) }
   })
+
+  /**
+   * ⚠ PHASE 0'S OWN PAYLOAD, WHICH USED TO CARRY `sectionFormats: []`. The requirement-id shape and the
+   * diff-basis contract are declared by the phase that DEFINES them, so this asserts the real payload at the
+   * run's FIRST phase entry — before any lock, which is when the guidance is worth anything. The old spec
+   * advanced the run deliberately "because a phase-0 payload carries no format rules"; that sentence was the
+   * defect, not the design.
+   */
+  it('carries the PHASE 0 formats, and the delegated-reviewer verdict, in the payload the agent reads first', async () => {
+    const repo = freshGitRepo('payload0')
+    try {
+      const ctx = await setup(repo)
+      await ctx.recursive.initRun('r5-payload0', { session: { header: { cwd: repo } } })
+      const payload = await ctx.recursive.phaseRules('r5-payload0', { session: { header: { cwd: repo } } })
+      expect(payload?.phase).toBe('00-requirements.md')
+      expect(payload?.sectionFormats).toEqual(sectionFormatRulesFor('00-requirements.md'))
+      expect(payload?.sectionFormats?.length).toBe(3)
+      // The two literals an agent copies at phase 0, asserted on the PAYLOAD's own JSON.
+      expect(JSON.stringify(payload)).toContain('### `R1` the lock must refuse an out-of-order artifact')
+      expect(JSON.stringify(payload)).toContain('Keep the id ALONE inside its own code span')
+      // FU: the capability statement rides the same payload, and this composition mounts NO subagents service,
+      // so the verdict is UNAVAILABLE with the condition named rather than an empty field.
+      expect(payload?.delegatedReviewer?.available).toBe(false)
+      expect(payload?.delegatedReviewer?.reason).toContain('no subagents service is mounted')
+      await ctx.fiber.dispose()
+    } finally { rmSync(repo, { recursive: true, force: true }) }
+  })
 })
 

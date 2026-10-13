@@ -466,7 +466,12 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
       // continuable; one-shot must be ASKED for) and is now a refusal, so NO review happens. Saying
       // "ran without" would report a review that does not exist.
       expect(payload).toContain('DID NOT RUN')
-      expect(payload).toContain('must be continuable')
+      // ⚠ AND THE HEADLINE NO LONGER NAMES A CAUSE IT DID NOT ESTABLISH. It used to require
+      // "must be continuable" — the seam-only wording — which the D3 test caught being printed for a
+      // review that had actually refused because the ROUTER resolved the role to self-audit. The
+      // message now states the fact and quotes the delegation's own reason; this mount's reason is the
+      // router one, so that is what must appear.
+      expect(payload).toContain('no continuable reviewer was dispatched')
       // (3) And it did NOT take the one-shot lifecycle — the rule this item is about.
       expect(observed, 'lifecycles: [' + observed.join(', ') + ']').not.toContain('start(one-shot)')
       // The seam probe is REPORTED either way: whether the service was found is a fact about the

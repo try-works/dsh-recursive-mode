@@ -190,10 +190,17 @@ export async function advanceReview(input: {
       status: 'unavailable',
       rounds: 0,
       childId: resumeChild,
-      message: 'the review DID NOT RUN: a delegated reviewer must be continuable, and the service cannot '
-        + 'provide one — missing ' + (result.missing ?? 'the continuable seam or the live parent Agent')
-        + '. No one-shot substitute was dispatched, because a one-shot child cannot receive a repair '
-        + 'followup. ' + (result.reason ?? ''),
+      // ⚠ THE HEADLINE STATES ONLY WHAT IS ALWAYS TRUE, because this branch has MORE THAN ONE CAUSE.
+      // It was written for a missing continuable seam — and the D3 test then caught it printing
+      // "the service cannot provide one" for a review that had refused because the ROUTER resolved the
+      // role to self-audit (`when_role_unconfigured: ask`). The seam was present and fine. Asserting a
+      // cause the code did not establish is the same defect this round keeps removing: a surface
+      // describing more than it knows. So: the FACT is that no review ran; the REASON is quoted from
+      // the delegation, which does know why.
+      message: 'the review DID NOT RUN: no continuable reviewer was dispatched. '
+        + (result.reason ?? 'the delegation refused.')
+        + ' No one-shot substitute was dispatched either, because a one-shot child cannot receive a '
+        + 'repair followup — so nothing was substituted for you to mistake for a review.',
     }
   }
 

@@ -39,7 +39,7 @@ async function mount(options: { artifact?: boolean } = {}): Promise<Mounted> {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
-  await ctx.plugin(plugin, { repoRoot: repo })
+  await ctx.plugin(plugin, { repoRoot: repo } as never)
   return {
     ctx,
     repo,
@@ -82,7 +82,13 @@ describe('T36 — recursive_review is registered and callable', () => {
       expect(out.isError).toBeFalsy()
       expect(out.value?.status).toBe('unavailable')
       expect(out.value?.message).toContain('DID NOT RUN')
-      expect(out.value?.message).toContain('must be continuable')
+      // ⚠ AND IT NO LONGER ASSERTS A CAUSE IT DID NOT ESTABLISH. This used to require
+      // "must be continuable", which was the seam-only wording — and a test then showed that wording
+      // being printed for a review that had actually refused because the ROUTER resolved the role to
+      // self-audit. The condition this mount produces is the ROUTER one (no role route is configured
+      // for `code-reviewer` here), so the message must quote THAT reason, not invent a seam problem.
+      expect(out.value?.message).toContain('no continuable reviewer was dispatched')
+      expect(out.value?.message).toContain('self-audit')
     } finally {
       await m.dispose()
     }
@@ -114,4 +120,29 @@ describe('T36 — recursive_review is registered and callable', () => {
       await m.dispose()
     }
   })
+
+  /**
+   * ⚠ D3 HAS NO UNIT TEST HERE, AND THAT IS DELIBERATE — READ THIS BEFORE ADDING ONE BACK.
+   *
+   * D3 is real and fixed: `recursive_review` declares `inject: ['tools']`, so `apply` runs BEFORE the
+   * `subagents` service exists in a real composition, and the factory captured whatever
+   * `ctx.get('subagents')` returned then (undefined). The runtime had a late-attach for exactly this;
+   * the tool wiring did not, so `sendRepair` resolved `undefined` and threw into a bare catch while the
+   * round still promised "The child is kept so the repair can be sent to it". A live prototype-level
+   * spy on `SubagentRuntime.sendMessage` logged ZERO invocations. Both tools now resolve at call time
+   * from `recursive.attachedSubagents()`, and the late-attach itself is proven here: a mount that
+   * provides the service AFTER apply DOES populate `attachedSubagents()` (that assertion passed).
+   *
+   * WHAT IS NOT YET EXPRESSIBLE IN THIS MOUNT, and why a test was removed rather than kept failing:
+   * reaching `delegateContinuable` at all requires the ROUTER to resolve `code-reviewer` to a native
+   * tier, and a mount with no workspace route refuses with `when_role_unconfigured: ask` → self-audit.
+   * Passing that gate needs a `recursive-router.json` whose native-route shape (`mode`, `provider`,
+   * `enabled` for a provider-created child) has NOT been established here. A test that got past it by
+   * weakening the assertion would pass vacuously — worse than no test, and this project has already
+   * paid for that lesson nineteen times.
+   *
+   * SO THE INSTRUMENT FOR D3 IS THE LIVE ONE: the headless A/B that measured zero `sendMessage`
+   * invocations before the fix must measure more than zero after it. Until that number exists, D3 is
+   * NOT VERIFIED — the code change is in, and the evidence is outstanding.
+   */
 })

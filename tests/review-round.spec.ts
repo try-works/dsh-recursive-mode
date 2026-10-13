@@ -256,7 +256,12 @@ describe('T36 — the degraded and broken paths are NAMED', () => {
       const outcome = await drive(runDir, [loopResult({ refused: 'continuable-unavailable', missing: 'the exact live parent Agent', reason: 'REFUSED — a delegated subagent must be continuable' })], '').advance()
       expect(outcome.status).toBe('unavailable')
       expect(outcome.message).toContain('DID NOT RUN')
-      expect(outcome.message).toContain('the exact live parent Agent')
+      // ⚠ THE HEADLINE NO LONGER ASSERTS A CAUSE. It used to say "the service cannot provide one",
+      // which the D3 test caught being printed for a review that had actually refused because the
+      // ROUTER resolved the role to self-audit — a different failure entirely. The message now states
+      // only the fact (no review ran) and QUOTES the delegation's own reason, which does know why.
+      expect(outcome.message).toContain('no continuable reviewer was dispatched')
+      expect(outcome.message).toContain('REFUSED — a delegated subagent must be continuable')
       // Nothing is recorded: there is no child to resume.
       expect(readReviewState(runDir, DELEGATION)).toBeNull()
     } finally {

@@ -1569,23 +1569,32 @@ export function lintSubagentDelegationProvenance(actionRecordPaths: string[], ru
   const operations = readOperationsOrNull(runDir)
   if (operations === null) return []
   const dispatched = operations.filter((record) => record.act === 'delegate-review')
-  // ⚠ A RUN THAT PREDATES THIS CHECK IS NOT REFUSED, and without this line it would be.
+  // ⚠ A LEGACY LOG CANNOT NAME A DELEGATION, so the branch that asks it to is skipped — and ONLY that branch.
   //
-  // `OperationRecord.delegationId` was ADDED by this very change, so every `delegate-review` record written
-  // by an earlier version carries none. A run started under 0.9.x and locked under this build would
-  // therefore resolve a citation's delegation from its path, find no record naming it, and FAIL — refusing
-  // a phase whose review THIS PLUGIN ITSELF DISPATCHED. That is a false refusal, and by this project's own
-  // rule a refusal must be TRUE.
+  // THE CASE THIS PROTECTS. `OperationRecord.delegationId` was ADDED by this very change, so every
+  // `delegate-review` record written by an earlier build carries none. A run started under an earlier version
+  // and locked under this one would otherwise resolve a citation's delegation from its path, find no record
+  // naming it, and FAIL — refusing a phase whose review THIS PLUGIN ITSELF DISPATCHED. That is a false refusal,
+  // and by this project's own rule a refusal must be TRUE.
+  //
+  // ⚠ WHY IT IS SCOPED AND NOT A WHOLE-CHECK EXEMPTION, which is the difference between a gate and a no-op.
+  // The report below for a record that names NO delegation needs nothing from the log: a flat
+  // `subagents/<stamp>-<slug>-action.md` with no `Delegation:` field is a document that identifies no
+  // operation, and that is decidable in every run that has a log at all. MEASURED on the run this gate was
+  // built from (`01-threejs-scientific-calculator`): its log holds TWO `delegate-review` records, both legacy
+  // and both phase 01, so exempting the whole check reported 0 of its six hand-written verdicts — the exact
+  // defect, invisible again. Scoped this way the same run reports all six, while the false refusal stays
+  // prevented: this exemption's own case (a legacy log citing a delegation the run really dispatched) is
+  // untouched, because THAT citation resolves its delegation from the path and is skipped here.
   //
   // The condition is deliberately narrow: the field is treated as NOT IN USE only when the log holds
   // delegate-review records and NONE of them names a delegation. If even one does, the field is in use and
   // a citation that matches nothing is the real gap this gate exists for — including a forger who has
-  // learned to write the field elsewhere. A log with NO delegate-review records at all is not exempt:
-  // delegation recording long predates this change, so a cited review with no dispatch of any kind is
-  // exactly the shape the finished run's six hand-written verdicts had.
-  if (dispatched.length > 0 && !dispatched.some((record) => typeof record.delegationId === 'string' && record.delegationId !== '')) {
-    return []
-  }
+  // learned to write the field elsewhere. A log with NO delegate-review records at all is NOT exempt: there
+  // is then no dispatch for a cited review to belong to, which is a finding this check can state, and stating
+  // it is the whole point of asking the log rather than the citation.
+  const legacyLog = dispatched.length > 0
+    && !dispatched.some((record) => typeof record.delegationId === 'string' && record.delegationId !== '')
   const issues: string[] = []
   for (const actionRecordPath of [...new Set(actionRecordPaths)].sort()) {
     // A citation that points at nothing is reported by the existence rule, with its own sentence.
@@ -1597,6 +1606,8 @@ export function lintSubagentDelegationProvenance(actionRecordPaths: string[], ru
     }
     const matching = dispatched.filter((record) => record.delegationId === delegationId)
     if (matching.length === 0) {
+      // On a legacy log the absence proves nothing: NO record in it could have named a delegation.
+      if (legacyLog) continue
       issues.push(`Subagent Contribution Verification cites delegation '${delegationId}', which operations.jsonl records no delegate-review for: ${actionRecordPath}`)
       continue
     }

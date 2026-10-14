@@ -66,17 +66,20 @@ The gate (`lintSubagentDelegationProvenance`, called from `lintSubagentContribut
 
 The first two are the ones the real run would have met (its forged records name no delegation at all). All
 three are `FAIL` findings, so they refuse a lock by the existing standard gate — the plugin's own dispatch path
-now writes both fields, so the only citations it can refuse are ones this plugin did not write, **or ones an
-EARLIER version of this plugin wrote**: a record filed before this change carries no `Delegation:` line, and an
-in-flight run that spans the upgrade will be refused until its next dispatch. That consequence is accepted
-rather than hidden, and it is the price of the fail-closed choice argued below — the alternative is a gate that
-cannot refuse anything a fabrication needs it to accept.
+now writes both fields, so a citation this plugin wrote is reconciled rather than refused.
+
+One case is exempt, and it is scoped rather than blanket: **a log that predates these fields** (it holds
+`delegate-review` records and NONE of them names a delegation). Such a log cannot answer "did this run dispatch
+delegation X" for any citation, so the branch that asks it that question is skipped — otherwise a run started
+under an earlier build would have a phase refused for a review this plugin itself dispatched, and by this
+project's own rule a refusal must be true. The exemption does NOT cover the message above about a record that
+names no delegation: that branch reads no log at all, so it stays in force in every run.
 
 ## The fail-open / fail-closed question, argued
 
 `FAIL` (blocking) rather than `WARN`, because a warning would leave the defect exactly where it was: the run
 would still lock with verdicts no operation produced, and the report would be a line nobody has to answer. The
-aggression is bounded on both sides:
+aggression is bounded on three sides:
 
 - **No log, or an unreadable log, degrades to the old behaviour.** The check runs only when
   `operations/operations.jsonl` can actually be read (`readOperationsOrNull`); if it is absent or unreadable the
@@ -86,6 +89,15 @@ aggression is bounded on both sides:
   asks whether the plugin dispatched this delegation, not whether the dispatch succeeded. A failed review that
   a human or a raw subagent then completed is still a dispatch, and the record it produced is still a record of
   work this run did.
+- **A legacy log is exempt from the branch it cannot answer, and only that branch.** This one is recorded
+  because the first version of it was WRONG in a way worth keeping: exempting the WHOLE check whenever the log
+  predated the fields made the gate inert on the very run it was built from. MEASURED on
+  `01-threejs-scientific-calculator`: its log holds TWO `delegate-review` records, both legacy and both phase
+  01, so the whole-check exemption reported 0 of the six hand-written verdicts — the defect, invisible again.
+  Scoped to the unanswerable branch, the same run reports all six, and the false refusal stays prevented
+  because a citation whose delegation comes from its path is skipped in legacy mode. The suite pins both
+  halves: one case for the false refusal, one for the scoped exemption (which fails if the exemption is ever
+  widened back to a no-op).
 
 ## Alternatives rejected
 

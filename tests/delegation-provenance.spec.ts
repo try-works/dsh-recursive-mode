@@ -175,6 +175,25 @@ function provenanceFindings(root: string, runDir: string, content: string): stri
   ).filter((issue) => issue.includes('operations.jsonl'))
 }
 
+/**
+ * Rewrite the run's operation log exactly as a build BEFORE this change wrote it: the same records, with the
+ * delegation fields absent. Used by the legacy-log cases, which is where the version guard is decided.
+ */
+function stripDelegationFields(runDir: string): void {
+  const logPath = join(runDir, 'operations', 'operations.jsonl')
+  const legacy = readFileSync(logPath, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => {
+      const entry = JSON.parse(line) as Record<string, unknown>
+      delete entry.delegationId
+      delete entry.childId
+      return JSON.stringify(entry)
+    })
+    .join('\n') + '\n'
+  writeFileSync(logPath, legacy, 'utf8')
+}
+
 describe('the delegation gate reads provenance from the run operation log', () => {
   it('(b) a review DISPATCHED by the plugin satisfies it — record and log agree, and nothing is reported', async () => {
     const { root, runDir, recordRel } = await dispatchReview()
@@ -281,18 +300,7 @@ describe('the delegation gate reads provenance from the run operation log', () =
     const { root, runDir } = await dispatchReview()
     try {
       // Rewrite the log exactly as a pre-change build wrote it: the same records, minus the new fields.
-      const logPath = join(runDir, 'operations', 'operations.jsonl')
-      const legacy = readFileSync(logPath, 'utf8')
-        .split('\n')
-        .filter((line) => line.trim() !== '')
-        .map((line) => {
-          const entry = JSON.parse(line) as Record<string, unknown>
-          delete entry.delegationId
-          delete entry.childId
-          return JSON.stringify(entry)
-        })
-        .join('\n') + '\n'
-      writeFileSync(logPath, legacy, 'utf8')
+      stripDelegationFields(runDir)
 
       // The SAME nested citation the case above reports as a forgery — indistinguishable from it by path
       // alone, which is exactly why the version guard has to exist.
@@ -318,6 +326,26 @@ describe('the delegation gate reads provenance from the run operation log', () =
       const cited = SUBAGENTS_REL + DELEGATION + '/child-forged/reply.md'
       expect(provenanceFindings(root, runDir, artifactCiting([cited]))).toEqual([
         "Subagent Contribution Verification cites child 'forged' of delegation '01-review', which operations.jsonl records no dispatch of: " + cited,
+      ])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('the version guard is SCOPED, not a no-op: a legacy log still reports a record that names NO delegation', async () => {
+    // ⚠ THE MEASURED CASE, and the reason this case exists at all. A version of this guard that exempted the
+    // WHOLE check on a log predating `delegationId` passed every test in this file while making the gate inert
+    // on the run it was built from: `01-threejs-scientific-calculator`'s log holds TWO `delegate-review`
+    // records, BOTH legacy — so a whole-check exemption reported 0 of that run's six hand-written verdicts,
+    // which is the defect itself. The exemption may cover only the branch a legacy log genuinely cannot
+    // answer (a delegation no record in it could have named). A record that identifies NO delegation is
+    // decidable in every run that has a log, and must stay reported.
+    const { root, runDir } = await dispatchReview()
+    try {
+      stripDelegationFields(runDir)
+      const forged = writeHandWrittenRecord(runDir, '1791849000000-independent-review-action.md', [])
+      expect(provenanceFindings(root, runDir, artifactCiting([forged]))).toEqual([
+        'Subagent Contribution Verification cites a record that names no delegation, so its provenance cannot be checked against operations.jsonl: ' + forged,
       ])
     } finally {
       rmSync(root, { recursive: true, force: true })

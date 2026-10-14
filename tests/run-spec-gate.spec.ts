@@ -131,7 +131,7 @@ describe('recursive_ask gate=run-start refuses while the spec is a scaffold', ()
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(plugin as never, { repoRoot: repo } as never)
+    await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: repo } as never)
     await ctx.tools.execute({
       signal: new AbortController().signal,
       callId: ToolCallId('sg-init'),

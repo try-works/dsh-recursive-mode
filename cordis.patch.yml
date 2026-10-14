@@ -5,13 +5,23 @@
 # Client discovery requires an ENABLED bare-name entry (entry.fiber !== undefined &&
 # !entry.disabled); preset-mounted subtrees are absent from ctx.loader.entries().
 #
-# The row's apply() is a NO-OP under config.shellOnly=true (see src/index.ts):
-# it contributes the client bundle and registers NOTHING on the server root —
-# no tools, no /recursive command, no recursive:policy, no projection. The full
+# The row's apply() registers NOTHING on the server root: no tools, no /recursive
+# command, no recursive:policy, no projection. TWO independent statements of that
+# intent: config.shellOnly=true is the explicit "do nothing", and the ABSENT
+# config.serverSurface is the default-inert state (absence = inert, see
+# src/config.ts for the measured global leak this polarity fixes). The full
 # server surface is mounted ONLY by the `recursive` agent preset's isolated
-# recursive-realm (preset/recursive/agent.cordis.yml).
+# recursive-realm (preset/recursive/agent.cordis.yml), whose row opts in with
+# `serverSurface: true`.
+#
+# ⚠ THE ROW ID IS `recursive-shell`, NOT `recursive`, AND THAT IS LOAD-BEARING.
+# The Loader addresses rows BY ID and the settings service edits a Loader entry's
+# config, so a config write addressed to `recursive` used to be able to hit BOTH
+# this host shell row and the preset's server row — the two rows that must never
+# be confused. Distinct ids make that impossible.
 - insert:
-    - id: recursive
+    - id: recursive-shell
       name: '@try-works/dsh-recursive-mode'
       config:
         shellOnly: true
+        serverSurface: false

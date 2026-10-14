@@ -76,7 +76,7 @@ async function mount(files: Record<string, string>): Promise<Mounted> {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
-  await ctx.plugin(plugin, { repoRoot: repo })
+  await ctx.plugin(plugin, { serverSurface: true, repoRoot: repo })
   return {
     ctx,
     repo,
@@ -534,7 +534,7 @@ async function mountTwoRuns(options: { otherLocked?: boolean } = {}): Promise<Tw
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
-  await ctx.plugin(plugin, { repoRoot: repo })
+  await ctx.plugin(plugin, { serverSurface: true, repoRoot: repo })
   return {
     ctx,
     repo,

@@ -100,7 +100,7 @@ async function mount(options: { artifact?: boolean; route?: boolean } = {}): Pro
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
-  await ctx.plugin(plugin, { repoRoot: repo } as never)
+  await ctx.plugin(plugin, { serverSurface: true, repoRoot: repo } as never)
   return {
     ctx,
     repo,

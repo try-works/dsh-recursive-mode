@@ -324,7 +324,7 @@ describe('T27 — a sibling hook vetoes a real tool call, and changes nothing wh
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(plugin, { repoRoot: repo })
+    await ctx.plugin(plugin, { serverSurface: true, repoRoot: repo })
     return {
       ctx,
       repo,
@@ -401,7 +401,7 @@ describe('T38 — the built-in tool guard runs on the chain', () => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(plugin, { repoRoot: repo })
+    await ctx.plugin(plugin, { serverSurface: true, repoRoot: repo })
     await ctx.recursive.initRun('t38-run')
     const runDir = join(repo, '.recursive', 'run', 't38-run')
     return {

@@ -759,8 +759,8 @@ The plugin ships **two halves that mount in different planes**, and knowing whic
 flowchart TB
     subgraph profilePlane["PROFILE plane (installed once)"]
         PKG["@try-works/dsh-recursive-mode<br/>profiles/&lt;profile&gt;/node_modules/…/lib/index.js"]
-        SHELL["cordis.patch.yml<br/>insert: id recursive<br/>config: shellOnly: true"]
-        NOOP["apply() is a NO-OP on the server root:<br/>no tools, no command, no projection"]
+        SHELL["cordis.patch.yml<br/>insert: id recursive-shell<br/>config: shellOnly + no serverSurface"]
+        NOOP["apply() is a NO-OP on the server root:<br/>the surface requires an explicit serverSurface: true,<br/>so no tools, no command, no projection"]
         CLIENT["client discovery:<br/>/plugins/&lt;id&gt;/client.js"]
         PKG --> SHELL --> NOOP
         SHELL --> CLIENT
@@ -864,6 +864,21 @@ that legitimately owns them.
 on the server — it exists so the UI half can be discovered. The **full** server surface belongs to the preset,
 where it is isolated per session: installing the plugin does not impose the workflow on every agent in the
 profile, and opting in does not require editing the host profile by hand.
+
+> **⚠ THE SURFACE IS DEFAULT-INERT, AND THAT POLARITY IS A FIX RATHER THAN A STYLE.**
+> `apply()` registers nothing unless the config carries an explicit **`serverSurface: true`**
+> (`src/config.ts`, `src/index.ts`); the host shell row carries `shellOnly: true` **and** no opt-in, and the
+> preset row inside `recursive-realm` carries the opt-in. Decoding all 496 DSH session logs found the exact
+> failure this prevents: the 13 tools and the 13 skills appeared **inside sessions running a different preset**
+> ("Creator mode"), because both registries are layered by the **caller's** scope and the preset scopes are
+> **siblings** — so a registration from an unscoped context lands in the **global** layer. It got there because
+> `shellOnly` was the *only* thing standing in the way, and a guard that fires on the **presence** of a key is
+> lost the moment that key is lost: the Loader addresses rows **by id**, the settings service edits a Loader
+> entry's config, and the Loader **re-applies** the plugin. Two independent changes make that unreachable — the
+> polarity (absence now means inert) and distinct row ids (**`recursive-shell`** for the host row, so an
+> id-addressed config write can no longer hit the shell row and the server row at once).
+> `tests/server-surface-optin.spec.ts` is the regression: a mount with `{ repoRoot }` alone must register no
+> `recursive_*` tool and no skill provider, and the explicit opt-in must register all thirteen.
 
 **Optionality everywhere.** `ctx.get('goals')`, `ctx.get('jobs')`, `ctx.get('subagents')`, `ctx.get('workflow')`
 are all resolved at composition and may be `undefined`. Two lessons are encoded in that:

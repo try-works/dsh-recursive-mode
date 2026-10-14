@@ -142,7 +142,7 @@ async function mountPlugin(root: string): Promise<Context> {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
-  await ctx.plugin(plugin as never, { repoRoot: root } as never)
+  await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
   return ctx
 }
 
@@ -256,7 +256,7 @@ describe('FIX 1: the agentTeams seam registers the audit-team tool LATE', () => 
     expect(providerApplied, 'the control depends on the service being there first').toBe(true)
     expect(ctx.get('agentTeams')).toBe(team.service)
 
-    await ctx.plugin(plugin as never, { repoRoot: root } as never)
+    await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
     pluginApplied = true
     await settle()
 
@@ -340,7 +340,7 @@ describe('THE JOBS SEAM: a registry mounted after apply still reaches the runtim
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       pluginApplied = true
 
       // (1) THE STATE THAT USED TO BE TERMINAL: applied, registry absent, runtime holding null.

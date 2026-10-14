@@ -79,7 +79,7 @@ async function mountNonGit(withToolRuntime: boolean): Promise<Mounted & { refusa
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
   }
-  await ctx.plugin(plugin, { repoRoot: repo })
+  await ctx.plugin(plugin, { serverSurface: true, repoRoot: repo })
   if (!withToolRuntime) return { ctx, repo, runDir: join(repo, '.recursive', 'run', RUN), dispose: async () => { await ctx.fiber.dispose(); rmSync(repo, { recursive: true, force: true }) }, refusal: '', warnings: [] }
 
   const warnings: string[] = []

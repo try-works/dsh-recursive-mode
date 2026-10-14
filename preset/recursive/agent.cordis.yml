@@ -34,11 +34,14 @@
 # the recursive_* tools + the /recursive command + the policy prompt section.
 # isolate.recursive keeps `provide('recursive')` from colliding across sessions.
 #
-# R2 (02-to-be-plan.addendum-r4-r2-mount-resolution.md): the server-surface row
-# is a PLACEHOLDER here; scripts/install-preset.js replaces it with an ABSOLUTE
-# file URL into the profile-installed package so its own @deepseek-ai/* imports
-# resolve through the profile flat-fallback junctions (Service identity intact).
-# commands.ts is bundled INTO lib/index.js, so a single row is sufficient.
+# ⚠ `serverSurface: true` IS THIS ROW'S EXPLICIT OPT-IN, and it is REQUIRED: the
+# plugin is DEFAULT-INERT, so absence of the flag registers nothing (src/config.ts
+# records the measured global leak that polarity fixes). This row is the ONLY
+# place the real surface is mounted — and `scripts/install-preset.js`, which this
+# comment used to name as the materializer of the placeholder below, no longer
+# exists (it was retired: a preset is declared by a plugin row and needs no
+# post-install step). The flag therefore has to survive in the ROW itself, which
+# it does in both places: here and in preset/recursive.patch.yml.
 - id: recursive-realm
   name: cordis:group
   group: true
@@ -47,6 +50,8 @@
   config:
     - id: recursive
       name: '@@RECURSIVE_SERVER_ENTRY@@'
+      config:
+        serverSurface: true
 
 # The recursive:policy prompt section is registered in code (Stage A,
 # src/index.ts via ctx.systemPrompt.section) — see plan-mode's pattern.

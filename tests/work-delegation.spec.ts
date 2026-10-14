@@ -98,7 +98,7 @@ describe('FU-17 acceptance: the main agent delegates the work, judges it, and th
     const seam = fakeSeam(captured, childId)
     ctx.provide('subagents', seam as never)
     ;(ctx as unknown as { set: (k: string, v: unknown) => void }).set('subagents', seam)
-    await ctx.plugin(plugin as never, { repoRoot: root } as never)
+    await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
     let n = 0
     return async (name, args) => {
       const value = await (ctx as unknown as { tools: { execute: (c: unknown) => Promise<unknown> } }).tools.execute({
@@ -263,7 +263,10 @@ describe('FU-20 — a model configured in the SETTINGS reaches the delegated chi
     await ctx.plugin(ToolRuntime)
     ctx.provide('subagents', seam as never)
     ;(ctx as unknown as { set: (k: string, v: unknown) => void }).set('subagents', seam)
-    await ctx.plugin(plugin as never, { repoRoot: root, ...config } as never)
+    // ⚠ `serverSurface: true` COMES AFTER THE SPREAD, so a caller-supplied config cannot clear it:
+    // this helper's callers are all real server-surface cases (a delegation only exists when the
+    // tools are registered), and the flag must not depend on key order to survive.
+    await ctx.plugin(plugin as never, { repoRoot: root, ...config, serverSurface: true } as never)
     try {
       return await (ctx as unknown as { tools: { execute: (c: unknown) => Promise<unknown> } }).tools.execute({
         signal: new AbortController().signal,

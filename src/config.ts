@@ -67,6 +67,13 @@ export interface RecursiveModeEnforcement {
 }
 
 export interface RecursiveModeConfig {
+  /**
+   * DEFAULT-INERT opt-in for the server surface: `true` registers the `RecursiveRuntime` service,
+   * the thirteen `recursive_*` tools, the skills and the route; ABSENT registers NOTHING.
+   *
+   * ⚠ ABSENCE MEANS INERT, AND THAT IS THE WHOLE POINT — see the measured leak on `Config` below.
+   */
+  serverSurface?: boolean
   /** R4 shell split: expose ONLY the client bundle, registering nothing server-side. */
   shellOnly?: boolean
   repoRoot?: string
@@ -81,6 +88,45 @@ export interface RecursiveModeConfig {
  * text, so they are written for the person toggling them, not for the reader of this file.
  */
 export const Config = z.object({
+  /**
+   * ⚠ DEFAULT-INERT — THE SERVER SURFACE REQUIRES AN EXPLICIT OPT-IN, AND THIS IS THE FIX FOR A
+   * MEASURED GLOBAL LEAK. Read the whole note before changing the default: it is `false` because
+   * the alternative was observed to put this plugin's ENTIRE surface into a session that never
+   * asked for it.
+   *
+   * WHAT WAS MEASURED. Decoding all 496 DSH session logs found the recursive-mode surface (13
+   * `recursive_*` tools plus the `recursive-mode` and twelve `recursive-phase-*` skills) appearing
+   * INSIDE sessions running the `cordis` agent preset — the one the GUI calls "Creator mode".
+   * Session `3c7e83b4`'s `request/header` went from 49 tools (0 recursive) at 06:09:48 to 62 tools
+   * (13 recursive) at 06:25:05 with NO preset switch (a session cannot switch preset after its
+   * first turn), the changed skill catalogue was injected at that same second, the agent loop
+   * emitted 13 `tool-addition` entries, and the model's own reasoning recorded the change. The
+   * surface was withdrawn fifteen minutes later.
+   *
+   * WHY A ROW'S OWN CONFIG CANNOT BE ITS ONLY GUARD. Both registries are layered by the CALLER's
+   * scope, and `register`/`registerProvider` bind `this.ctx` to the caller. The `recursive` and
+   * `cordis` preset scopes are SIBLINGS, so a registration made inside a preset group cannot reach
+   * another preset's agent — which means those registrations landed in the GLOBAL layer, from an
+   * unscoped context: the HOST row, applied with `shellOnly` falsy. And here is the reason this
+   * field exists rather than a better check on `shellOnly`: this bundle ships TWO rows whose id was
+   * the SAME WORD (`recursive`) — the host shell row carrying `shellOnly: true`, and the preset row
+   * inside `recursive-realm` carrying NO config at all, deliberately, so the guard would not fire.
+   * The Loader addresses rows BY ID, and the settings service edits a Loader entry's config and the
+   * Loader RE-APPLIES the plugin — so a guard that fires on the PRESENCE of a key is lost the
+   * moment that key is lost. Under `shellOnly`, a rewrite that dropped or cleared the flag
+   * registered the full surface globally. Under this field, the identical rewrite makes the plugin
+   * do NOTHING: absence is inert, and only an explicit `true` registers anything.
+   *
+   * HOW IT IS CARRIED. All three places that mount the real surface opt in explicitly:
+   * `preset/recursive.patch.yml` (the row inside `recursive-realm`),
+   * `preset/recursive/agent.cordis.yml` (its `@@RECURSIVE_SERVER_ENTRY@@` placeholder row), and
+   * therefore whatever materializes either of them, because the flag rides the row itself.
+   */
+  serverSurface: z.boolean().default(false).description(
+    'Set true to mount the server surface (the RecursiveRuntime service, the recursive_* tools and the ' +
+    'packaged skills). Leave false — the default — and this row registers NOTHING on the server: losing or ' +
+    'clearing this flag makes the plugin inert instead of registering globally.',
+  ),
   shellOnly: z.boolean().default(false).description(
     'Client-shell only: registers nothing on the server (no tools, no command, no projection).',
   ),

@@ -125,7 +125,7 @@ describe('T23 — the tool is registered and both branches work end to end', () 
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(plugin as never, { repoRoot: repo } as never)
+    await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: repo } as never)
     await ctx.recursive.initRun('r1')
     return {
       ctx,

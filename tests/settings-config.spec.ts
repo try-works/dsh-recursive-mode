@@ -91,7 +91,7 @@ describe('T7 — a settings edit changes enforcement LIVE (the acceptance)', () 
     // would fail on an undefined service rather than on the thing under test.
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(plugin, { repoRoot: repo, ...config } as never)
+    await ctx.plugin(plugin, { repoRoot: repo, ...config, serverSurface: true } as never)
     return {
       ctx,
       repo,
@@ -240,6 +240,7 @@ describe('T7 — the router overrides, one path and not two', () => {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
       await ctx.plugin(plugin, {
+        serverSurface: true,
         repoRoot: repo,
         router: { defaults: { probe_timeout_ms: 4242 } },
       } as never)

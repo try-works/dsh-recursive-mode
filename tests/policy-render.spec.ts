@@ -58,7 +58,7 @@ async function setupWithRun(repoRoot: string, runId: string) {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
-  await ctx.plugin(plugin, { repoRoot });
+  await ctx.plugin(plugin, { serverSurface: true, repoRoot });
   return { ctx, runDir }
 }
 
@@ -86,7 +86,7 @@ describe('R5 — recursive:policy renders from filesystem (zero-emission)', () =
       const ctx = new Context()
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin, { repoRoot: repo })
+      await ctx.plugin(plugin, { serverSurface: true, repoRoot: repo })
       const assembly = await ctx.systemPrompt.assemble({ agent: agentLike(repo), scope: {} } as never)
       const section = assembly.sections.find(s => s.name === 'recursive:policy')
       expect(section).toBeDefined()
@@ -102,7 +102,7 @@ describe('R5 — recursive:policy renders from filesystem (zero-emission)', () =
       const ctx = new Context()
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin, { repoRoot: repo })
+      await ctx.plugin(plugin, { serverSurface: true, repoRoot: repo })
       const assembly = await ctx.systemPrompt.assemble({ scope: {} } as never)
       const section = assembly.sections.find(s => s.name === 'recursive:policy')
       expect(section).toBeDefined()

@@ -139,7 +139,7 @@ async function runWorkflow(options: {
     ctx.provide('subagents', options.subagents as never)
     ;(ctx as unknown as { set: (key: string, value: unknown) => void }).set('subagents', options.subagents)
   }
-  await ctx.plugin(plugin as never, { repoRoot: root } as never)
+  await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
 
   const calls: Call[] = []
   const call = async (tool: string, args: Record<string, unknown>): Promise<unknown> => {
@@ -439,6 +439,7 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
       // not be seen — the defect T39 found and fixed.
       ctx.provide('subagents', fakeSubagents as never)
       await ctx.plugin(plugin as never, {
+        serverSurface: true,
         repoRoot: root,
         router: {
           role_routes: { 'code-reviewer': { provider: 'spawn', mode: 'continuable' } },
@@ -582,7 +583,7 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       const call = async (tool: string, args: Record<string, unknown>) => ctx.tools.execute({
         signal: new AbortController().signal,
         callId: ToolCallId('fu4-' + tool),
@@ -699,7 +700,7 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       const call = async (tool: string, args: Record<string, unknown>) => ctx.tools.execute({
         signal: new AbortController().signal,
         callId: ToolCallId('fu7-' + tool),
@@ -776,7 +777,7 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
       // No `enforcement` section on purpose: this is the default path.
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       const call = async (tool: string, args: Record<string, unknown>) => ctx.tools.execute({
         signal: new AbortController().signal,
         callId: ToolCallId('fu7b-' + tool),
@@ -844,7 +845,7 @@ describe('FU-1 — a whole workflow driven through the tools, in a temp repo', (
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       // The mode is stated rather than inherited: this case is about the TOOL's branch, which the guard
       // only reaches when it does not refuse.
       ctx.recursive.setEnforcementConfig({ toolGuards: 'advisory' })

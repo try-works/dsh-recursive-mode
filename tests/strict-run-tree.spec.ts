@@ -844,7 +844,7 @@ describe('(e) THE MEMORY-READ GATE — no phase-0 write before the run has read 
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(plugin, { repoRoot: run.root })
+    await ctx.plugin(plugin, { serverSurface: true, repoRoot: run.root })
     try {
       ctx.tools.register(defineTool({
         name: 'write',
@@ -989,7 +989,7 @@ describe('live path — the same two verdicts through the mounted plugin', () =>
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(plugin, { repoRoot: run.root })
+    await ctx.plugin(plugin, { serverSurface: true, repoRoot: run.root })
     try {
       ctx.tools.register(stubWriteTool())
       ctx.recursive.setEnforcementConfig({ toolGuards: 'strict' })
@@ -1046,7 +1046,7 @@ describe('live path — the same two verdicts through the mounted plugin', () =>
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(plugin, { repoRoot: run.root })
+    await ctx.plugin(plugin, { serverSurface: true, repoRoot: run.root })
     try {
       ctx.tools.register(stubWriteTool())
       ctx.recursive.setEnforcementConfig({ toolGuards: 'strict' })

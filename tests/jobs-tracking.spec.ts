@@ -64,7 +64,7 @@ async function mountRuntime(root: string, jobs?: JobsRegistryLike) {
     // service observable to the plugin's injecting row rather than racy.
     await new Promise<void>((resolve) => { setTimeout(resolve, 0) })
   }
-  await ctx.plugin(plugin as never, { repoRoot: root } as never)
+  await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
   return ctx
 }
 

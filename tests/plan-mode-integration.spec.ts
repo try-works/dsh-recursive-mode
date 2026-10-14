@@ -150,7 +150,7 @@ describe('T13 — the gate runs on the live chain, and only for exit_plan_mode',
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(plugin as never, { repoRoot: repo } as never)
+    await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: repo } as never)
     await ctx.recursive.initRun('r1')
     return {
       ctx,

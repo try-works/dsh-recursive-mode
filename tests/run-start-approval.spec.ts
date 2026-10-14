@@ -172,7 +172,7 @@ describe('PHASE 0 — a scaffolded run exists without a goal', () => {
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       // The goals seam is attached AFTER the mount: the plugin's Config is the settings namespace and
       // strips keys it does not declare, so a fake passed in through Config would silently vanish.
       ctx.recursive.attachGoals(goals.service)
@@ -234,7 +234,7 @@ describe('PHASE 0 — explicit approval starts the run, and the goal works as be
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       // The goals seam is attached AFTER the mount: the plugin's Config is the settings namespace and
       // strips keys it does not declare, so a fake passed in through Config would silently vanish.
       ctx.recursive.attachGoals(goals.service)
@@ -299,7 +299,7 @@ describe('PHASE 0 — explicit approval starts the run, and the goal works as be
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       // The goals seam is attached AFTER the mount: the plugin's Config is the settings namespace and
       // strips keys it does not declare, so a fake passed in through Config would silently vanish.
       ctx.recursive.attachGoals(goals.service)
@@ -342,7 +342,7 @@ describe('PHASE 0 — explicit approval starts the run, and the goal works as be
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       // The goals seam is attached AFTER the mount: the plugin's Config is the settings namespace and
       // strips keys it does not declare, so a fake passed in through Config would silently vanish.
       ctx.recursive.attachGoals(goals.service)
@@ -383,7 +383,7 @@ describe('PHASE 0 — the blocking channel decides when it can answer', () => {
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       // The goals seam is attached AFTER the mount: the plugin's Config is the settings namespace and
       // strips keys it does not declare, so a fake passed in through Config would silently vanish.
       ctx.recursive.attachGoals(goals.service)
@@ -442,7 +442,7 @@ describe('PHASE 0 — the blocking channel decides when it can answer', () => {
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       ctx.recursive.attachGoals(goals.service)
       await ctx.tools.execute({
         signal: new AbortController().signal,
@@ -482,7 +482,7 @@ describe('PHASE 0 — the blocking channel decides when it can answer', () => {
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       // The goals seam is attached AFTER the mount: the plugin's Config is the settings namespace and
       // strips keys it does not declare, so a fake passed in through Config would silently vanish.
       ctx.recursive.attachGoals(goals.service)
@@ -522,7 +522,7 @@ describe('PHASE 0 — the blocking channel decides when it can answer', () => {
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       // The goals seam is attached AFTER the mount: the plugin's Config is the settings namespace and
       // strips keys it does not declare, so a fake passed in through Config would silently vanish.
       ctx.recursive.attachGoals(goals.service)
@@ -567,7 +567,7 @@ describe('PHASE 0 — the blocking channel decides when it can answer', () => {
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       ctx.recursive.attachGoals(goals.service)
       await ctx.tools.execute({
         signal: new AbortController().signal,
@@ -652,7 +652,7 @@ describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the ro
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       ctx.recursive.attachGoals(goals.service)
       await ctx.tools.execute({
         signal: new AbortController().signal,
@@ -740,7 +740,7 @@ describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the ro
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       ctx.recursive.attachGoals(goals.service)
       await ctx.tools.execute({
         signal: new AbortController().signal,
@@ -801,7 +801,7 @@ describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the ro
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       ctx.recursive.attachGoals(goals.service)
       await ctx.tools.execute({
         signal: new AbortController().signal,
@@ -844,7 +844,7 @@ describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the ro
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       ctx.recursive.attachGoals(goals.service)
       await ctx.tools.execute({
         signal: new AbortController().signal,
@@ -907,7 +907,7 @@ describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the ro
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { repoRoot: root } as never)
+      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
       ctx.recursive.attachGoals(goals.service)
       await ctx.tools.execute({
         signal: new AbortController().signal,

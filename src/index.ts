@@ -268,14 +268,40 @@ function blockGoalOnGuardRefusal(
 }
 
 export function apply(ctx: Context, config?: RecursiveModeConfig) {
-  // R4 shell split (02-to-be-plan.addendum-r4-r2-mount-resolution.md): the
-  // global bare-name row in cordis.patch.yml mounts with config.shellOnly=true
-  // to expose ONLY the client bundle for client discovery. It must register
-  // NOTHING on the server root — no tools, no /recursive command, no
-  // recursive:policy, no projection (BUG 4 always-on leak). The full server
-  // surface is mounted ONLY by the recursive preset's isolated recursive-realm,
-  // whose rows carry no config (shellOnly undefined).
-  if (config?.shellOnly) return
+  // ⚠ DEFAULT-INERT (the recursive-surface global-leak fix). THIS GUARD REPLACED A GUARD THAT WAS
+  // LOST WHEN ITS KEY WAS LOST, AND IT IS DELIBERATELY THE OPPOSITE POLARITY.
+  //
+  // WHAT WAS MEASURED. Decoding all 496 DSH session logs found THIS plugin's whole surface — the 13
+  // `recursive_*` tools and the `recursive-mode` + 12 `recursive-phase-*` skills — registered inside
+  // sessions running a DIFFERENT agent preset (`cordis`, the GUI's "Creator mode"). Session
+  // `3c7e83b4`'s `request/header` went 49 tools (0 recursive) at 06:09:48 → 62 tools (13 recursive)
+  // at 06:25:05 with no preset switch, the changed skill catalogue injected at that same second, 13
+  // `tool-addition` entries emitted, and the model's own reasoning recording "The tool catalog now
+  // includes the recursive_* tools". Withdrawn fifteen minutes later.
+  //
+  // WHY. Both the `tools` and `skills` registries are layered by the CALLER's scope and
+  // `register`/`registerProvider` bind `this.ctx` to that caller. The `recursive` and `cordis`
+  // preset scopes are SIBLINGS, so a registration made inside the preset's `recursive-realm` group
+  // cannot reach a cordis agent — therefore those registrations landed in the GLOBAL layer, from an
+  // unscoped context: the HOST row, applied with `config.shellOnly` FALSY.
+  //
+  // WHY THE OLD GUARD FAILED. This bundle shipped TWO rows whose id was the same word (`recursive`):
+  // the host shell row (`shellOnly: true`) and the preset row inside `recursive-realm`, which
+  // carried NO config at all — deliberately, so the guard would not fire. The Loader addresses rows
+  // BY ID, and the settings service edits a Loader entry's config and the Loader RE-APPLIES the
+  // plugin (the re-application IS the hot reload — see T7 below). A guard that fires on the
+  // PRESENCE of a key is lost the moment that key is lost: any rewrite that dropped or cleared
+  // `shellOnly` registered the full surface globally through an unscoped ctx.
+  //
+  // THE FIX, IN ONE LINE: absence is now INERT. Only an explicit `serverSurface: true` registers
+  // anything, so the identical config rewrite — and any future one — makes the plugin do NOTHING
+  // instead of doing everything in the wrong layer.
+  //
+  // `shellOnly` stays as the belt-and-braces explicit "do nothing". It is checked on PRESENCE
+  // (`=== true`), because the host shell row also carries `serverSurface: false` and this keeps the
+  // two independent statements of intent from ever disagreeing about the outcome. `undefined`
+  // (a caller that said nothing, or a composition whose schema never ran) is NOT the opt-in.
+  if (config?.shellOnly === true || config?.serverSurface !== true) return
   ctx.effect(function* () {
     // Workspace registry: optional host service (durable). Access via ctx.get —
     // property access requires inject and would fail boot when undeclared.

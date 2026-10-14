@@ -4,7 +4,8 @@
  * The unit suite proves the recognition and the placement logic; this spec proves
  * the plugin actually SUBSCRIBES, which is the half that was missing. It mounts the
  * real plugin entry the same way `tests/guard-path.spec.ts` does — through
- * `ctx.plugin(plugin, { repoRoot })` — and delivers a settlement the way the
+ * `ctx.plugin(plugin, { serverSurface: true, repoRoot })`, the explicit opt-in without
+ * which the plugin is DEFAULT-INERT (see `src/config.ts`) — and delivers a settlement the way the
  * harness does: as a committed `session/event`.
  *
  * The listener is wired to EVERY session event in EVERY session, so the cases that
@@ -47,7 +48,7 @@ async function mount(options: { childDir?: boolean } = {}): Promise<Mounted> {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
-  await ctx.plugin(plugin, { repoRoot: repo })
+  await ctx.plugin(plugin, { serverSurface: true, repoRoot: repo })
   return {
     ctx,
     repo,

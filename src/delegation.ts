@@ -629,6 +629,17 @@ export async function delegateContinuable(input: {
   readVerdict?: (result: SubagentResultLike) => DelegationVerdict
   readRepair?: (result: SubagentResultLike) => string | undefined
   awaitRoundResult?: (childId: ContinuableChildId, messageId: ContinuableMessageId) => Promise<SubagentResultLike | null>
+  /**
+   * ⚠ THE FOLLOW-UP SEAM, OVERRIDABLE — and this is the roster dispatch's way in (see `src/teammate.ts`).
+   *
+   * Absent, this is resolved from `ctx.subagents` exactly as it always was (`resolveFollowupSeam`, which accepts
+   * either the host's `sendMessage` or the older `followup`). A caller that started its child somewhere OTHER than
+   * `startContinuable` — a rostered teammate — must be able to deliver the repair through that same surface, or
+   * the repair loop would send a REVISE to a child the caller did not create through this seam. The roster
+   * addresses children BY NAME, so its seam supplies one: `(parent, childId, content) => team.sendMessage(parent,
+   * { target: name, content, signal })`.
+   */
+  followup?: FollowupSeam
   /** T9: the child's provider/model overrides, forwarded onto the start request verbatim. */
   agentOptions?: { model?: string; provider?: string }
 }): Promise<ContinuableDelegationLike> {
@@ -662,10 +673,20 @@ export async function delegateContinuable(input: {
     : (spec: ContinuableStartSpecLike) => subagents!.startContinuable!(spec)
   // ⚠ RESOLVED UNDER EITHER NAME. The host calls it `sendMessage`; probing only `followup` made
   // this whole branch dead against the live service (see `sendMessage` on SubagentsRuntimeLike).
-  const followup = resolveFollowupSeam(subagents ?? undefined)
+  // A caller-supplied seam WINS: a child started through the roster is followed up through the roster
+  // (`src/teammate.ts`), and that seam addresses it by the name the roster knows.
+  const followup = input.followup ?? resolveFollowupSeam(subagents ?? undefined)
   // A continuable loop MUST observe the child's real settlement AND hold the exact live parent
   // Agent (the live service authorizes followup by object identity).
-  const hasContinuableSeam = startContinuable !== undefined && followup !== undefined && input.awaitRoundResult !== undefined
+  //
+  // ⚠ A RESUMED ROUND DOES NOT NEED `startContinuable`, and requiring it hid a real shape: a roster child was
+  // created by `agentTeams.spawnTeammate`, whose own follow-up seam is the roster's. `startContinuable` exists on
+  // the live host anyway (the roster itself calls it), so this relaxation changes nothing live — it makes the
+  // requirement say what the branch actually uses, instead of demanding a method it will not call. Every other
+  // input combination is judged exactly as before, which is what keeps the refusal's meaning intact.
+  const canStartOrResume = startContinuable !== undefined
+    || (input.resumeChild !== undefined && input.followup !== undefined)
+  const hasContinuableSeam = canStartOrResume && followup !== undefined && input.awaitRoundResult !== undefined
   if (!hasContinuableSeam || subagents === undefined || parent === undefined) {
     // ⚠⚠ NO ONE-SHOT FALLBACK. THIS BRANCH USED TO DEGRADE SILENTLY, AND THAT VIOLATED THE RULE THIS
     // FILE ALREADY STATES. T35 (runtime.ts / tests/delegation-mode.spec.ts) is explicit: "delegation is
@@ -749,6 +770,12 @@ export async function delegateContinuable(input: {
       childId = input.resumeChild
       rounds.push({ text: prompt })
     } else {
+      // ⚠ THE INVARIANT, STATED WHERE THE TYPE SYSTEM CAN SEE IT. `hasContinuableSeam` above admits two shapes:
+      // a start seam, or a RESUMED roster child with an explicit follow-up seam. This branch is not a resume, so a
+      // missing start seam here would mean the gate was wrong — a bug, not a runtime condition to paper over.
+      if (startContinuable === undefined) {
+        throw new Error('no startContinuable seam for a round that is not a resume')
+      }
       const started = await startContinuable(spec)
       childId = started.childId
       messageIds.push(started.messageId)

@@ -27,7 +27,7 @@ import { codeRuntimeRefusal, toolError } from './errors.ts'
 import { replyPath } from './handoff.ts'
 import { advanceReview } from './review-round.ts'
 import { settlementRoundObserver } from './settlement.ts'
-import { resolveFollowupSeam, type ContinuableDelegationLike, type SubagentParentHandle, type SubagentsRuntimeLike } from './delegation.ts'
+import { type ContinuableDelegationLike, type SubagentParentHandle, type SubagentsRuntimeLike } from './delegation.ts'
 
 /**
  * The reply contract, stated for the child AND relied on by the fail-closed reader:
@@ -136,11 +136,19 @@ export function createRecursiveReviewTool(recursive: RecursiveRuntime, subagents
           // The loop can stop believing a prose reply was approved; the driver
           // disagrees, so it must be able to deliver the repair itself.
           sendRepair: async (childId, instruction) => {
-            // Either host name; `sendMessage` is the live one (see resolveFollowupSeam).
-            const followup = resolveFollowupSeam(seam)
-            if (followup === undefined) throw new Error('no continuable followup seam')
-            await followup(parent, childId, [{ type: 'text', text: instruction }], {
-              source: { kind: 'coordinator', form: 'relay', senderSessionId: parent?.id ?? '' },
+            // ⚠ G2 — THE SURFACE IS DECIDED BY THE CHILD, NOT BY THIS CALL SITE. A child this plugin dispatched
+            // as a roster teammate is followed up through `agentTeams.sendMessage` by NAME; anything else uses the
+            // primitive follow-up seam, exactly as before. `deliverRepair` owns that decision so this tool and
+            // `recursive_delegate` cannot disagree about where a repair goes.
+            await recursive.deliverRepair({
+              root,
+              runId,
+              delegationId,
+              childId,
+              instruction,
+              parent,
+              // Either host name; `sendMessage` is the live one (see resolveFollowupSeam).
+              subagents: seam,
             })
           },
         })

@@ -35,7 +35,7 @@ import { buildWorkSlice } from './handoff.ts'
 import { advanceReview } from './review-round.ts'
 import { settlementRoundObserver } from './settlement.ts'
 import { CURRENT_WORKFLOW_PROFILE, getArtifactRequiredSections } from './phase-rules.ts'
-import { resolveFollowupSeam, type SubagentParentHandle, type SubagentsRuntimeLike } from './delegation.ts'
+import { type SubagentParentHandle, type SubagentsRuntimeLike } from './delegation.ts'
 import { readReplyText, toContinuable } from './recursive_review.tool.ts'
 
 /**
@@ -180,11 +180,16 @@ export function createRecursiveDelegateTool(recursive: RecursiveRuntime, subagen
           },
           readReply: (childId) => readReplyText(root, runId, delegationId, childId),
           sendRepair: async (childId, repair) => {
-            // Either host name; `sendMessage` is the live one (see resolveFollowupSeam).
-            const followup = resolveFollowupSeam(recursive.attachedSubagents() ?? subagents ?? undefined)
-            if (followup === undefined) throw new Error('no continuable followup seam')
-            await followup(parent, childId, [{ type: 'text', text: repair }], {
-              source: { kind: 'coordinator', form: 'relay', senderSessionId: parent?.id ?? '' },
+            // ⚠ G2 — ONE DECISION, TWO SURFACES. See `recursive_review`'s identical call: a roster teammate is
+            // followed up through `agentTeams.sendMessage` by name, any other child through the primitive seam.
+            await recursive.deliverRepair({
+              root,
+              runId,
+              delegationId,
+              childId,
+              instruction: repair,
+              parent,
+              subagents: recursive.attachedSubagents() ?? subagents,
             })
           },
         })

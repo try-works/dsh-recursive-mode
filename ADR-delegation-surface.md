@@ -1,6 +1,32 @@
 # ADR: the delegation surface — wrap the harness primitive, do not adopt the harness tools
 
-**Status:** accepted · **Date:** 2026-10-06 · **Supersedes:** nothing · **Related:** FU-17, FU-9, §8 of README.md
+> ## ⚠ SUPERSEDED IN PART — 2026-10-17
+>
+> **The decision below to make `ctx.subagents` "the only spawn path" is NO LONGER IN FORCE.** The owner has decided
+> that **every delegated child — review, work and audit — is created through the agent-team roster**
+> (`ctx.agentTeams.spawnTeammate`) and followed up through `ctx.agentTeams.sendMessage`. See
+> **[`decisions/DECISION-teammate-delegation.md`](decisions/DECISION-teammate-delegation.md)**, which records the
+> rule, the two-step dispatch, the settlement-attribution fix, the flat-roster limits and the fail-closed errors.
+>
+> **Why the earlier reasoning did not survive:** this ADR treated the teams roster as a *sibling* of this plugin
+> over one shared primitive, and counted its layer as cost with no countervailing benefit. It is not a sibling — it
+> is a **layer over the same primitive** (`agent-team/src/roster.ts` `spawnAdmitted` calls
+> `ctx.subagents.startContinuable`), so a teammate IS a continuable child: same durable id, same steer path for
+> follow-ups, same `subagent-settled` notice. Routing through it therefore costs the repair loop nothing and buys a
+> durable, named, board-visible child for every delegation this plugin starts.
+>
+> **What still stands from this ADR, and is not superseded:**
+> - this plugin ships its **own phase-aware surface** and keeps the phase contract (brief, reply, action record,
+>   verification) — the harness's tools still cannot satisfy it, so they are still not adopted as *the* interface;
+> - the **audit breadth** mechanism remains the teams task board (`recursive_audit_team`), and now the same roster
+>   also carries review and work children;
+> - the **evidence-capture obligation** ("a settlement for a child nobody filed must still land in the run") remains,
+>   and was strengthened: the adopted record is now filed where the round observer READS it, marked `adopted: true`;
+> - the **FU-9 host limitations** argument is untouched: the known live blocker sits beneath both paths.
+>
+> Read the sections below as the record of what was decided on 2026-10-06 and why, **not as the current contract**.
+
+**Status:** superseded in part (see the notice above) · **Date:** 2026-10-06 · **Supersedes:** nothing · **Related:** FU-17, FU-9, §8 of README.md
 
 ---
 
@@ -26,6 +52,10 @@ The harness's tools and this plugin are **siblings over one service**. The real 
 the phase contract** — the brief, the reply, the action record, the verification — not who spawns the child.
 
 ## Decision
+
+> **⚠ SUPERSEDED (2026-10-17) — the paragraph below is the original decision and is kept as the record of it.** The
+> operative contract is `decisions/DECISION-teammate-delegation.md`: the roster, not `ctx.subagents`, is the spawn
+> path.
 
 **Wrap the primitive. Ship our own thin, phase-aware surface (FU-17). Keep the harness's tools working, and add
 evidence capture so work done through them still lands in the run.**
@@ -85,6 +115,11 @@ the sandbox has already demonstrated — collide with host constraints we do not
 
 ## Consequences
 
+- **⚠ SUPERSEDED — one spawn path, but it is the ROSTER'S.** The bullet below said "every child this plugin starts
+  goes through `ctx.subagents`". Since 2026-10-17 every delegated child goes through
+  `ctx.agentTeams.spawnTeammate`, which itself goes through `ctx.subagents.startContinuable`; the primitive remains
+  the path for an explicit one-shot delegation and for compositions with no roster. One spawn path still holds —
+  the layer is simply named correctly now.
 - **One spawn path.** Every child this plugin starts goes through `ctx.subagents`. No parallel lifecycle.
 - **`advanceReview` generalises to `advanceDelegation(kind)`** so review and work share the round/repair loop
   rather than duplicating it. Review behaviour must not change as a result — that is a test obligation, not a

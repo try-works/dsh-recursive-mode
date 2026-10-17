@@ -36,6 +36,19 @@ export interface SettlementNotice {
   closingText: string
   /** The message id the notice arrived as, when the event carried one. */
   messageId?: string
+  /**
+   * ⚠ G1 — ADOPTED, NOT NATIVE, AND THE MARKER HAS TO SURVIVE THE READ.
+   *
+   * A native settlement is filed by a delegation that wrote `subagents/<delegationId>/child-<childId>/`, so
+   * its placement is a fact the run itself produced. An ADOPTED settlement had no delegation directory at all
+   * (a roster child, a harness-tool child, or a child whose directory was never written), and was filed into
+   * the single run that could own it. The two are different evidence, and a reader must be able to tell them
+   * apart — that is the whole content of this boolean, and it travels WITH the notice rather than being
+   * recoverable only from a separate file the observer never reads.
+   */
+  adopted?: true
+  /** Why the notice was adopted (present only when `adopted` is true). */
+  adoptionReason?: string
 }
 
 /** Minimal structural view of a delivered session event (no harness import). */
@@ -150,7 +163,6 @@ export function recordSettlement(runDir: string, notice: SettlementNotice): stri
   return path
 }
 
-/** Every recorded notice for a run, in arrival order. Never throws. */
 /**
  * ⚠ FU-17 — THE ADOPTION PATH, for a settlement whose child this plugin never filed.
  *
@@ -165,11 +177,31 @@ export function recordSettlement(runDir: string, notice: SettlementNotice): stri
  * never filed.
  *
  * THE RULE IS PROGRESSIVE AND NEVER GUESSES BETWEEN RUNS:
- *   1. exactly one run under the root  → file into THAT run, under a clearly-marked `adopted-<child>/` directory,
- *      and say in the record that it was adopted and why;
+ *   1. exactly one run under the root  → file into THAT RUN’S OWN SETTLEMENT LOG, with `adopted: true` and the
+ *      reason, which is the log `readSettlements`/`readUnconsumedSettlement` already read;
  *   2. more than one run               → file into a ROOT-level `adopted-settlements.jsonl` instead, because
  *      choosing between runs is exactly the mis-filing the rule above forbids. The fact is still recorded, in a
  *      place that can attribute nothing to the wrong chain.
+ *
+ * ⚠ G1 — WHY THE SINGLE-RUN CASE FILES INTO THE CANONICAL LOG RATHER THAN A `subagents/adopted-<child>/` FILE,
+ * and this was a real defect, not tidiness. The first version of this function wrote
+ * `subagents/adopted-<childId>/settlement.jsonl` and NOTHING read that path: `readSettlements` reads exactly one
+ * file, `subagents/settlements.jsonl`. So an adopted settlement was RECORDED and INVISIBLE — a roster child (or any
+ * child without a delegation directory) would have its verdict filed where no round observer could ever see it,
+ * and `settlementRoundObserver` would wait out its timeout and report "no settlement yet" for a child that had
+ * already answered. A phase could never be approved by a child whose verdict was filed in the wrong drawer.
+ *
+ * THE MECHANISM CHOSEN: ONE LOG, ONE READER, AND THE ORIGIN IN THE RECORD. The run keeps ONE append-only
+ * settlement log, and adoption appends to it with `adopted: true` and the reason beside the notice. The
+ * alternatives were worse:
+ *   • a second file that `readSettlements` also reads — the same fact in two places, and a merge whose ordering
+ *     across files is not defined by anything; the round observer consumes settlements FIFO per child, so
+ *     "which of these two arrived first" is load-bearing and would have become a guess;
+ *   • writing a synthetic `child-<id>` directory so `runDirForChild` attributes it next time — that would make
+ *     the plugin claim a delegation layout it never wrote, and would ERASE the adopted marker on the next round;
+ *   • dropping it (the old behaviour) — the defect above.
+ * The marker therefore lives IN the record (`adopted` + `adoptionReason`), which is where a reader looks, and the
+ * observer needs no change at all because the fact is already in the log it reads.
  *
  * Returns the path it wrote, or null when there was nothing to write. Never throws: this rides the same hot path
  * as `captureSettlement` and must not break the session it observes.
@@ -203,9 +235,10 @@ export function adoptSettlement(root: string, notice: SettlementNotice): string 
       return path
     }
 
-    // Case 1 — one run, so the child can only belong to it. Still marked as adopted: the delegation directory
-    // the normal path would have used does not exist, and a reader must be able to tell the two apart.
-    const path = join(runsRoot, runs[0]!, 'subagents', 'adopted-' + notice.childId, 'settlement.jsonl')
+    // Case 1 — one run, so the child can only belong to it. Filed into THAT run's canonical settlement log, so
+    // the round observer reads it, and marked as adopted, so a reader can tell it from a delegation's own record.
+    const runDir = join(runsRoot, runs[0]!)
+    const path = settlementLogPath(runDir)
     mkdirSync(dirname(path), { recursive: true })
     appendFileSync(path, JSON.stringify({
       adopted: true,
@@ -213,6 +246,7 @@ export function adoptSettlement(root: string, notice: SettlementNotice): string 
       childId: notice.childId,
       summary: notice.summary,
       closingText: notice.closingText,
+      ...(notice.messageId === undefined ? {} : { messageId: notice.messageId }),
     }) + '\n', 'utf8')
     return path
   } catch {
@@ -239,6 +273,11 @@ export function readSettlements(runDir: string): SettlementNotice[] {  let raw: 
           closingText: typeof parsed.closingText === 'string' ? parsed.closingText : '',
         }
         if (typeof parsed.messageId === 'string') notice.messageId = parsed.messageId
+        // ⚠ G1 — THE ADOPTED MARKER IS PARSED, NOT LOST ON THE WAY BACK. An adopted record is filed in the same
+        // log so the round observer can READ it; dropping the marker here would make it indistinguishable from a
+        // delegation's own settlement, which is the one thing adoption must never be.
+        if (parsed.adopted === true) notice.adopted = true
+        if (typeof parsed.reason === 'string' && parsed.reason !== '') notice.adoptionReason = parsed.reason
         out.push(notice)
       }
     } catch {

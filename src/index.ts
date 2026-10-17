@@ -30,6 +30,8 @@ import { evaluateToolGuard, coerceAskToDecision, tamperCandidatePath, type ToolG
 import { appendGuardDecision, appendObservedTamper, type GuardDecisionRecord } from './guard-log.ts'
 import type { GoalServiceLike } from './goals-projection.ts'
 import type { TeamRuntimeLike } from './teams-loop.ts'
+// ⚠ G2 — the roster seam's structural type, exported so a caller can mount/assert the delegation surface.
+import type { TeammateRosterLike } from './teammate.ts'
 import { renderRecursivePolicy } from './policy.ts'
 import { fsPolicyIntent } from './fs-intent.ts'
 import { snapshotWorkspace } from './snapshot.ts'
@@ -129,6 +131,9 @@ export * from './policy.ts'
 export * from './snapshot.ts'
 export * from './live-route.ts'
 export * from './teams-loop.ts'
+// ⚠ G2 — the roster dispatch surface: the seam type, the deterministic name, the durable mapping and the named
+// fail-closed errors. Exported so a composition, a test or a caller can use the same definitions the plugin uses.
+export * from './teammate.ts'
 export * from './skills.ts'
 
 /**
@@ -328,7 +333,12 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     // production caller of `delegateReview` — passes no seam, and the runtime then reported
     // "no ctx.subagents runtime available" on a host that had mounted it all along.
     const subagentsSeamForRuntime = ctx.get('subagents') as SubagentsRuntimeLike | undefined
-    const recursive = new RecursiveRuntime(ctx, { repoRoot: config?.repoRoot ?? process.cwd(), workspaceRegistry, goals, jobs, subagents: subagentsSeamForRuntime ?? null, workflow: ctx.get('workflow') as WorkflowEngineLike | undefined ?? null })
+    // ⚠ G2 — THE AGENT-TEAM ROSTER SEAM, resolved the same way. Present, and with the live caller as its Lead,
+    // EVERY delegated child is created through `spawnTeammate` (review, work, audit); absent, delegation keeps the
+    // `subagents` path unchanged. Resolved twice (here and in the `ctx.inject` row below) for the measured reason
+    // FIX 1 records: the agent-team row can be mounted by a LATER loader layer than this plugin.
+    const teamsSeamForRuntime = ctx.get('agentTeams') as TeammateRosterLike | undefined
+    const recursive = new RecursiveRuntime(ctx, { repoRoot: config?.repoRoot ?? process.cwd(), workspaceRegistry, goals, jobs, subagents: subagentsSeamForRuntime ?? null, teams: teamsSeamForRuntime ?? null, workflow: ctx.get('workflow') as WorkflowEngineLike | undefined ?? null })
     // ⚠ FU-9 — AND RESOLVE IT AGAIN WHENEVER THE SERVICE APPEARS, because the one-shot get above is only a
     // fast path. A live run proved the cost of relying on it: the review fell back to self-audit and reported
     // `Status: failed` while a child DIRECTORY sat there — written by this plugin's own brief writer, before
@@ -449,6 +459,10 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     let auditTeamRegistered = agentTeams !== undefined && agentTeams !== null
     if (auditTeamRegistered) disposers.push(ctx.tools.register(createRecursiveAuditTeamTool(agentTeams ?? null)))
     ctx.inject(['agentTeams'], (teamCtx: Context) => {
+      // ⚠ G2 — THE ROSTER BECOMES THE DELEGATION SURFACE WHENEVER IT ARRIVES, which is the same seam the audit tool
+      // below needs; attaching it here is what makes "every delegated child is a teammate" true on a composition
+      // that mounts agent-team after this plugin (which the preset does).
+      recursive.attachTeams((teamCtx.get('agentTeams') as TeammateRosterLike | undefined) ?? null)
       if (auditTeamRegistered) return
       const late = teamCtx.get('agentTeams') as TeamRuntimeLike | undefined
       if (late === undefined || late === null) return
@@ -754,6 +768,13 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
             // means a phase artifact cannot cite it. `adoptSettlement` files it into the single run when there
             // is exactly one, and into a root-level adoption log when choosing would mean guessing. Marked as
             // adopted either way, so a reader can tell an adopted record from a delegation's own.
+            //
+            // ⚠ G1 — AND THE SINGLE-RUN CASE NOW LANDS WHERE THE ROUND OBSERVER READS. It used to write
+            // `subagents/adopted-<childId>/settlement.jsonl`, which `readSettlements` never opened, so an
+            // adopted verdict was filed and invisible: `settlementRoundObserver` would report "no settlement
+            // yet" for a child that had already answered. It now appends to the run's own
+            // `subagents/settlements.jsonl` with the adopted marker. See `adoptSettlement` for why one log
+            // beats a second file here.
             adoptSettlement(cwd, notice)
             return
           }

@@ -40,7 +40,8 @@ import { contractDigest } from './policy.ts'
 import type { WorkflowEngineLike } from './workflow-audit.ts'
 import { createHandoff, createChildBrief, replyPath, childScratchPath, buildDelegationPrompt, type HandoffInput, type ChildBriefInput } from './handoff.ts'
 import { loadRouterPolicy, routerPolicyPath, resolveRole, capabilityProbe, delegationDecisionBasis, type RouterPolicy, type RouterPolicyOverrides, type SubagentProviderLike, type RouteDecision, type CapabilityProbe } from './router.ts'
-import { delegate, delegateContinuable, drainContinuableChildren, remainingDepthFor, validateReferences, referencesFromResult, writeActionRecord, evaluateDelegationResult, reviewOutputSchema, defaultReviewToolFilter, type SubagentsRuntimeLike, type SubagentStartRequestLike, type SubagentResultLike, type Reference, type ActionRecordInput, type ContinuableDelegationLike, type SubagentParentHandle } from './delegation.ts'
+import { delegate, delegateContinuable, drainContinuableChildren, remainingDepthFor, validateReferences, referencesFromResult, writeActionRecord, evaluateDelegationResult, reviewOutputSchema, defaultReviewToolFilter, resolveFollowupSeam, type SubagentsRuntimeLike, type SubagentStartRequestLike, type SubagentResultLike, type Reference, type ActionRecordInput, type ContinuableDelegationLike, type SubagentParentHandle, type FollowupSeam } from './delegation.ts'
+import { canRosterDispatch, describeSendFailure, describeSpawnFailure, findTeammate, findTeammateByChild, isTeamLeadCaller, liveMemberNamed, recordTeammate, teamCallSignal, teammateHoldPrompt, teammateNameFor, type TeammateRosterLike } from './teammate.ts'
 import { validateTransition, coupleGateBlockToGoal, type PhaseTransitionIntent, type RecursivePhaseState, type GateCheckResult } from './lifecycle.ts'
 import { resolveEnforcementConfig, DEFAULT_ENFORCEMENT, evaluateToolGuard, detectTamper, type EnforcementConfig, type ToolGuardDecision, type ToolExecLike } from './enforcement.ts'
 import type { Session } from '@deepseek-ai/dsh-session'
@@ -225,7 +226,7 @@ const ARTIFACT_STUB = {
 export class RecursiveRuntime extends Service {
   /** Recursive-mode runtime service. Owns run-state reads + lock/init/lint operations. */
 
-  constructor(ctx: Context, config: { repoRoot?: string; workspaceRegistry?: WorkspaceRegistryLike; goals?: GoalServiceLike | null; jobs?: JobsRegistryLike | null; subagents?: SubagentsRuntimeLike | null; workflow?: WorkflowEngineLike | null } = {}) {
+  constructor(ctx: Context, config: { repoRoot?: string; workspaceRegistry?: WorkspaceRegistryLike; goals?: GoalServiceLike | null; jobs?: JobsRegistryLike | null; subagents?: SubagentsRuntimeLike | null; teams?: TeammateRosterLike | null; workflow?: WorkflowEngineLike | null } = {}) {
     super(ctx, 'recursive')
     this.repoRoot = config.repoRoot ?? process.cwd()
     this.workspaceRegistry = config.workspaceRegistry ?? null
@@ -235,6 +236,9 @@ export class RecursiveRuntime extends Service {
     this.jobs = config.jobs ?? null
     // T39: the subagents seam, resolved at the COMPOSITION like the other optional services.
     this.subagentsSeam = config.subagents ?? null
+    // ⚠ THE ROSTER SEAM (G2). Optional like every other seam: absent it, delegation keeps using
+    // `ctx.subagents.startContinuable` exactly as it does today. See `src/teammate.ts`.
+    this.teamsSeam = config.teams ?? null
     // T2: the workflow engine, likewise.
     this.workflow = config.workflow ?? null
   }
@@ -309,6 +313,16 @@ export class RecursiveRuntime extends Service {
    * remember, while an explicit `input.subagents` still wins for a test or a narrower caller.
    */
   private subagentsSeam: SubagentsRuntimeLike | null
+  /**
+   * ⚠ G2 — THE AGENT-TEAM ROSTER SEAM (`ctx.agentTeams`), when the composition mounts one.
+   *
+   * Optional in exactly the way `subagents` is optional: without it, delegation continues on the primitive path
+   * unchanged. With it — and with the LIVE caller resolving as the team Lead — every delegated child is created
+   * through `spawnTeammate` and followed up through `sendMessage`, so the child is a named, durable roster member
+   * instead of an anonymous continuable child. Attachable after construction for the same measured reason as
+   * `attachSubagents`/`attachJobs`: the agent-team row can be mounted by a LATER loader layer than this plugin.
+   */
+  private teamsSeam: TeammateRosterLike | null
   /** FU-19: the host's provider/model inventory, or null when no llm service is mounted. */
   private llmInventory: LlmInventoryLike | null = null
 
@@ -356,6 +370,20 @@ export class RecursiveRuntime extends Service {
    */
   attachSubagents(seam: SubagentsRuntimeLike | null): void {
     this.subagentsSeam = seam
+  }
+
+  /**
+   * ⚠ G2 — ATTACH THE ROSTER SEAM, the same late-attaching pattern as `attachSubagents`/`attachJobs`, for the
+   * same measured reason: `agentTeams` may be mounted by a later loader layer than this plugin (FIX 1 in
+   * `src/index.ts` proves the case for the audit tool). Idempotent: the last attach wins.
+   */
+  attachTeams(seam: TeammateRosterLike | null): void {
+    this.teamsSeam = seam
+  }
+
+  /** What the roster seam is, for a caller that needs to report or assert it. */
+  attachedTeams(): TeammateRosterLike | null {
+    return this.teamsSeam
   }
 
   /**
@@ -779,6 +807,12 @@ export class RecursiveRuntime extends Service {
     policyPath?: string
     providers?: Record<string, SubagentProviderLike>
     subagents?: SubagentsRuntimeLike
+    /**
+     * ⚠ G2 — THE ROSTER SEAM FOR THIS CALL. Absent, the runtime's attached `ctx.agentTeams` is used; absent both,
+     * the delegation runs on the `subagents` path exactly as it always has. Present AND a Lead caller, the child is
+     * a rostered teammate (see `src/teammate.ts` for the gate and the protocol).
+     */
+    teams?: TeammateRosterLike
     maxDepth?: number
     toolFilter?: unknown
     /**
@@ -907,23 +941,51 @@ export class RecursiveRuntime extends Service {
         'Fail loud: capability mismatches reject; do not silently degrade.',
       ],
     })
-    const briefPath = createChildBrief({
-      root: input.root,
-      runId: input.runId,
-      delegationId: input.delegationId,
-      childId: input.childId,
-      // ⚠ FU-17 — `input.slice` wins when a work caller supplies one; otherwise this is byte-for-byte the review
-      // slice it has always been. A work brief cannot be built here without a second copy of the phase standard.
-      slice: input.slice ?? 'Perform the delegated ' + input.role + ' for run ' + input.runId + ' (' + input.phase + ') and write your submission to reply.md.',
-    })
-    const prompt = buildDelegationPrompt({
-      root: input.root,
-      runId: input.runId,
-      delegationId: input.delegationId,
-      childId: input.childId,
-      handoffPath,
-      briefPath,
-    })
+    // ⚠ G2/G3 — THE BRIEF AND THE PROMPT ARE BUILT **AFTER** THE CHILD EXISTS WHEN THE CHILD IS A TEAMMATE.
+    //
+    // The two paths need different orders, and the difference is forced by the roster, not chosen:
+    //   • the primitive path reserves the child id up front (`input.childId`) and `startContinuable` HONOURS it, so
+    //     the brief, the reply path and the start request can all agree BEFORE the call — which is exactly what
+    //     this code has always done, and it stays byte-for-byte that;
+    //   • `SpawnTeammateRequest` has NO `childId` (`roster.ts` generates one), and the reply path embeds the id
+    //     (`subagents/<delegationId>/child-<childId>/`). So the roster dispatch is TWO STEPS: spawn, learn
+    //     `member.id`, THEN write the brief/reply tree and deliver the instructions by `sendMessage`.
+    // Keeping ONE builder means the brief cannot differ between the paths; only WHEN it runs differs.
+    const teams: TeammateRosterLike | undefined = input.teams ?? this.teamsSeam ?? undefined
+    // The loop's own prerequisites. If any is missing `delegateContinuable` will REFUSE, so a roster child must not
+    // be spawned first — a teammate created for a round that cannot observe it would be a child nobody can use.
+    const continuablePrereqs = subagents !== undefined && input.parent !== undefined && input.awaitRoundResult !== undefined
+    // ⚠ THE GATE, AND THE ONE-SHOT EXCEPTION. The roster has no one-shot mode (`spawnTeammate` always creates a
+    // continuable child), and T35 makes one-shot an EXPLICIT ask — so an explicit `mode: 'one-shot'` keeps the
+    // primitive path rather than being silently upgraded to a teammate. Every OTHER delegated child is rostered.
+    const rosterEligible = input.mode !== 'one-shot' && continuablePrereqs && canRosterDispatch(teams, input.parent)
+    const teammateName = rosterEligible ? teammateNameFor(input.runId, input.delegationId, input.role) : ''
+    const runDir = input.root === '' ? '' : join(input.root, '.recursive', 'run', input.runId)
+    let briefPath = ''
+    let prompt = ''
+    /** Write the child's brief + prompt for a KNOWN child id; returns the prompt. */
+    const writeBriefAndPrompt = (childId: string): string => {
+      briefPath = createChildBrief({
+        root: input.root,
+        runId: input.runId,
+        delegationId: input.delegationId,
+        childId,
+        // ⚠ FU-17 — `input.slice` wins when a work caller supplies one; otherwise this is byte-for-byte the review
+        // slice it has always been. A work brief cannot be built here without a second copy of the phase standard.
+        slice: input.slice ?? 'Perform the delegated ' + input.role + ' for run ' + input.runId + ' (' + input.phase + ') and write your submission to reply.md.',
+      })
+      prompt = buildDelegationPrompt({
+        root: input.root,
+        runId: input.runId,
+        delegationId: input.delegationId,
+        childId,
+        handoffPath,
+        briefPath,
+      })
+      return prompt
+    }
+    // The primitive path builds both now, from the reserved id — the original behaviour, unchanged.
+    if (!rosterEligible) writeBriefAndPrompt(input.childId)
 
     // R4: plugin-driven delegation with the full request shape. `parent` is the
     // exact live direct-parent Agent (object-identity authority in the live
@@ -1060,6 +1122,18 @@ export class RecursiveRuntime extends Service {
     let result: SubagentResultLike | null = null
     let error: string | null = null
     let continuable: ContinuableDelegationLike | null = null
+    /**
+     * ⚠ G2 — THE ROSTER CHILD THIS ROUND TALKS TO, once it is known. `childId` is the member id the roster
+     * generated (the request can never carry one), and `name` is the only handle the roster's follow-up accepts.
+     */
+    let rosterChild: { name: string; childId: string } | null = null
+    /**
+     * ⚠ G3 — THE NAMED ROSTER REFUSAL, when a roster dispatch was attempted and failed. It is a string rather than
+     * an exception because the run still has to RECORD the attempt: the action record and the operation log are
+     * written for a refusal too, and a refusal that fell back to an unrecorded child would be the exact defect the
+     * provenance gate exists to catch. NEVER set on the primitive path.
+     */
+    let rosterFailure: string | null = null
     // T36: a parked round is NOT an error — it means the child has not settled yet.
     // Kept apart from `error` so a turn-shaped caller can resume instead of treating
     // an ordinary wait as a failure of the delegation.
@@ -1108,23 +1182,116 @@ export class RecursiveRuntime extends Service {
       }
     }
 
-    if (decision.tier === 'native' || decision.tier === 'external-cli') {
+    // ⚠ G2/G3 — THE ROSTER DISPATCH, BEFORE ANY CHILD IS DISPATCHED AND BEFORE THE TIER BRANCH DECIDES ANYTHING.
+    //
+    // WHY HERE. The two-step protocol has to run BEFORE the round loop (the loop needs the child id), and it must
+    // NOT run when the router resolved to self-audit or when the continuable loop would refuse — a teammate spawned
+    // for a round that cannot observe it is a child nobody can use. So it is gated on exactly the conditions under
+    // which a child will really be dispatched:
+    //   (a) the roster seam exists and the LIVE caller is its Lead (`canRosterDispatch`),
+    //   (b) the tier is going to dispatch a child (`native`/`external-cli`), and it is not an explicit one-shot,
+    //   (c) the continuable loop's prerequisites are present.
+    //
+    // THE SEQUENCE, and each step is a property a test asserts:
+    //   1. RESOLVE the child id — reuse the delegation's existing teammate (durable registry first, then the live
+    //      roster under the deterministic name), and SPAWN only when neither knows it. Names are never reusable, so
+    //      spawning per round would fail on the second one;
+    //   2. SPAWN (two-step) with a HOLD prompt, learn `member.id` (the request cannot carry one), write
+    //      `subagents/<delegationId>/child-<member.id>/brief.md`, then deliver the real brief/prompt with
+    //      `agentTeams.sendMessage`;
+    //   3. hand that id to the round loop as a RESUME with the roster's repair seam, so `startContinuable` is never
+    //      called for a teammate and a REVISE returns to the SAME teammate BY NAME.
+    // A refusal leaves `rosterFailure` set and NO child; the dispatch branch then does not run at all. It NEVER
+    // falls back to `startContinuable` — an unrecorded child is the exact defect this change removes.
+    let resumeChild = input.resumeChild === undefined ? undefined : input.resumeChild as ContinuableChildId
+    let rosterFollowup: FollowupSeam | undefined
+    if (
+      rosterEligible
+      && teams !== undefined
+      && subagents !== undefined
+      && (decision.tier === 'native' || decision.tier === 'external-cli')
+    ) {
+      const prepared = await this.prepareTeammateChild({
+        teams,
+        runId: input.runId,
+        root: input.root,
+        delegationId: input.delegationId,
+        role: input.role,
+        name: teammateName,
+        provider: (target.provider ?? decision.provider ?? '') as string,
+        ...(input.parent === undefined ? {} : { parent: input.parent }),
+        ...(input.resumeChild === undefined ? {} : { resumeChild: input.resumeChild }),
+        // On a RESUME the caller's driver delivers the follow-up (or already did) — exactly as the primitive path
+        // assumes — so this must not send anything. A fresh round must OPEN the round with the prompt.
+        deliver: input.resumeChild === undefined,
+        writeBriefAndPrompt,
+      })
+      if (prepared.ok) {
+        routingNotes.push(...prepared.notes)
+        // ⚠ A LEGACY CHILD KEEPS ITS SURFACE: on a resume of a child the roster does not know, `legacy` is set, no
+        // teammate is claimed, and the loop keeps the primitive follow-up seam. Nothing is created either way.
+        if (prepared.legacy !== true) {
+          rosterChild = { name: prepared.name, childId: prepared.childId }
+          resumeChild = prepared.childId as ContinuableChildId
+          rosterFollowup = prepared.followup
+          // The one-shot `request` is not used for a teammate, but this method reports it — keep it coherent rather
+          // than handing a caller a request whose prompt is the empty string the deferred builder started with.
+          request.prompt = [{ type: 'text', text: prompt }]
+          // ⚠ WHAT DOES NOT TRAVEL THROUGH THE ROSTER, SAID RATHER THAN LEFT TO BE DISCOVERED. A teammate IS a real
+          // continuable child, but `SpawnTeammateRequest` carries only name, description, prompt, context, provider
+          // and signal (`agent-team/src/types.ts`) — no toolFilter, no maxDepth, no agentOptions. So a roster child
+          // runs with the composition's default toolset and model: the reviewer's read-only filter and the routed
+          // model are NOT applied to it. Both are reported, so no reader infers either from the record.
+          if (input.toolFilter !== undefined || decision.tier === 'native') {
+            routingNotes.push(
+              'this child is the rostered teammate "' + rosterChild.name + '": the delegation toolFilter was NOT '
+              + 'applied, because SpawnTeammateRequest has no such field — the composition\'s default tools apply',
+            )
+          }
+          if (request.agentOptions !== undefined) {
+            routingNotes.push(
+              'model ' + String(request.agentOptions.model) + ' was NOT applied to teammate "' + rosterChild.name
+              + '": SpawnTeammateRequest carries no agentOptions, so the composition\'s model applies',
+            )
+          }
+        }
+      } else {
+        rosterFailure = prepared.message
+        error = rosterFailure
+      }
+    }
+
+    if (rosterFailure !== null) {
+      // A roster dispatch was REQUIRED and failed. Nothing is dispatched in its place: a fallback child would be
+      // unrecorded, so the operation log would claim a dispatch no roster member answers — refused by the
+      // provenance gate, and dishonest even where it is not. `error` already carries the named sentence.
+    } else if (decision.tier === 'native' || decision.tier === 'external-cli') {
       if (!subagents) {
         error = 'no ctx.subagents runtime available (self-audit fallback)'
       } else if (input.mode !== 'one-shot') {
         // T35: continuable BY DEFAULT — only an explicit 'one-shot' opts out of
         // the repair path, because a one-shot child cannot be resumed.
+        //
+        // ⚠ G2 — THE ROSTER CHILD WAS PREPARED ABOVE (spawn-or-reuse, brief, delivery), and this loop RESUMES it:
+        // `resumeChild` is set on that path, so `startContinuable` is never called for a teammate, and the repair
+        // seam is the roster's. On the primitive path both are exactly what they always were.
         continuable = await delegateContinuable({
           subagents,
           provider: (target.provider ?? decision.provider ?? '') as string,
-          label: input.delegationId + '/' + input.childId,
+          label: input.delegationId + '/' + (rosterChild?.childId ?? input.childId),
           prompt,
           childId: input.childId,
           // ⚠ T36 — A RETRY MUST RESUME, NOT RE-CREATE. `childId` above reserves an identity for a
           // child that does not exist yet; when the caller says a child already exists, its id must
           // travel as `resumeChild` instead, or the host refuses with `subagent "<id>" already exists`
           // and every retry of a parked review fails the same way.
-          ...(input.resumeChild === undefined ? {} : { resumeChild: input.resumeChild as ContinuableChildId }),
+          //
+          // ⚠ AND ON THE ROSTER PATH THIS IS THE TARGET AS WELL: the child is already a teammate, so the loop
+          // must RESUME it — that is what keeps `startContinuable` off this path entirely.
+          ...(resumeChild === undefined ? {} : { resumeChild }),
+          // ⚠ G2 — THE REPAIR GOES BACK THROUGH THE ROSTER. `delegateContinuable` sends every REVISE through this
+          // seam, so a repair reaches the SAME teammate BY NAME instead of by the child id the primitive uses.
+          ...(rosterFollowup === undefined ? {} : { followup: rosterFollowup }),
           maxDepth: remainingDepthFor(this.enforcementConfig.budgets, parentDepthOf(input.parent), input.maxDepth),
           toolFilter: input.toolFilter ?? defaultReviewToolFilter(),
           maxRounds: input.maxRounds ?? 3,
@@ -1278,6 +1445,18 @@ export class RecursiveRuntime extends Service {
       ? rawEvaluation
       : { accepted: false, reason: 'review references failed: ' + referenceCheck.failures.join('; ') }
 
+    /**
+     * ⚠ G2 — THE CHILD THIS DELEGATION ACTUALLY TALKED TO, and every record below must name THIS id.
+     *
+     * On the primitive path it is the reserved `input.childId` — the host honours a reserved id, so this is the
+     * same string the old code used and the records are byte-identical. On the roster path the reserved id never
+     * became a child: `SpawnTeammateRequest` has no `childId`, so the roster generated `member.id`, and the reply
+     * tree was written under `child-<member.id>/`. If the operation line and the action record kept naming the
+     * reserved id, the provenance gate would resolve `child-<member.id>` from the cited reply path and find no
+     * dispatch of it — refusing a phase this plugin really did dispatch.
+     */
+    const actualChildId = continuable?.childId ?? rosterChild?.childId ?? input.childId
+
     // T19 — persist the attempt so a RESTART can match it. Only an accepted review is
     // recorded as `accepted`, which is what makes the recognition above block a
     // genuine repeat while leaving every failure path retryable. Best-effort: a
@@ -1303,7 +1482,9 @@ export class RecursiveRuntime extends Service {
         // against. Recorded for EVERY outcome, including a park and a refusal: the gate asks whether the
         // plugin dispatched this delegation, not whether the dispatch succeeded.
         delegationId: input.delegationId,
-        childId: input.childId,
+        // ⚠ G2 — THE LEARNED CHILD, not the reserved one (see `actualChildId`): a roster teammate's id is the only
+        // one any citation of its reply can name, and this line is what the provenance gate matches against.
+        childId: actualChildId,
       })
     }
 
@@ -1311,7 +1492,9 @@ export class RecursiveRuntime extends Service {
     const actionRecordPath = writeActionRecord({
       root: input.root,
       runId: input.runId,
-      subagentId: input.childId,
+      // ⚠ G2 — the same learned id as the operation line above, for the same reason: the record's `Subagent ID`
+      // and the run's dispatch line must agree, whichever path created the child.
+      subagentId: actualChildId,
       // ⚠ THE RECORD SAYS WHICH DELEGATION PRODUCED IT, which is what lets the delegation gate reconcile a
       // citation in `## Subagent Contribution Verification` against the run's own operation index. Without it,
       // the record is only a well-formed document in a directory the linter already trusts — the exact gap a
@@ -1321,7 +1504,13 @@ export class RecursiveRuntime extends Service {
       // ⚠ FU-17 — the kind is stated in the record. `Status` says accepted, failed or parked; nothing said whether
       // the child PRODUCED the phase's work or JUDGED it, and a reader of a run could not tell the two apart.
       purpose: input.role + (input.kind === 'work' ? ' (work)' : '') + ' for run ' + input.runId,
-      executionMode: decision.tier + (input.mode !== 'one-shot' ? ' (continuable)' : ''),
+      // ⚠ G2 — A READER MUST BE ABLE TO TELL A ROSTER DISPATCH FROM A RAW ONE. Both are "continuable", and the
+      // roster name is the only handle a follow-up can use, so it is stated inside the same parenthetical. Absent
+      // on the primitive path, where the record is exactly the record it always was.
+      executionMode: decision.tier
+        + (input.mode !== 'one-shot'
+          ? ' (continuable' + (rosterChild === null ? '' : ', team ' + rosterChild.name) + ')'
+          : ''),
       artifactPath: input.artifactPath,
       upstreamArtifacts: input.upstreamArtifacts,
       reviewBundle: bundle.repoRelativePath,
@@ -1345,9 +1534,15 @@ export class RecursiveRuntime extends Service {
       // start was made and NO SETTLEMENT arrived within the wait (the child never reported, or never ran)".
       // That is the exact false conclusion this fix exists for, and it was reached whatever the record's
       // Status said. Order is therefore load-bearing here.
+      // ⚠ G2/G3 — A NAMED ROSTER REFUSAL IS ITS OWN FAILURE, and it must not wear the "no settlement arrived"
+      // sentence below: NO child was started, so that text would be a false conclusion drawn from a path the call
+      // never took. Branching it FIRST keeps every other path's text byte-identical, because `rosterFailure` is null
+      // unless a roster dispatch was actually attempted.
       failure: evaluation.accepted
         ? undefined
-        : parked
+        : rosterFailure !== null
+          ? rosterFailure
+          : parked
           // ⚠ WHAT IS KNOWN, AND ONLY WHAT IS KNOWN, WITH THE ID THE READER NEEDS TO ACT.
           //
           // The text this replaces said "the child never reported, or never ran" — a CONCLUSION drawn from an
@@ -1415,8 +1610,10 @@ export class RecursiveRuntime extends Service {
       bundle,
       handoffPath,
       briefPath,
-      replyPath: replyPath({ root: input.root, runId: input.runId, delegationId: input.delegationId, childId: input.childId }),
-      childScratchPath: childScratchPath({ root: input.root, runId: input.runId, childId: input.childId }),
+      // ⚠ G2 — the paths and the prompt name the child that ACTUALLY carries the round. On the primitive path that
+      // is the reserved id, so these are the strings they always were.
+      replyPath: replyPath({ root: input.root, runId: input.runId, delegationId: input.delegationId, childId: actualChildId }),
+      childScratchPath: childScratchPath({ root: input.root, runId: input.runId, childId: actualChildId }),
       prompt,
       request,
       result,
@@ -1427,6 +1624,14 @@ export class RecursiveRuntime extends Service {
       error,
       /** T35: which child lifecycle actually carried this delegation. */
       delegationMode,
+      /**
+       * ⚠ G2 — THE ROSTER CHILD THIS ROUND TALKED TO, when it was one (`{ name, childId }`), else null.
+       *
+       * Reported because both halves are unguessable from outside: the NAME is the only address a follow-up can
+       * use, and the child id was LEARNED from the roster rather than reserved. `childId` here is also what a
+       * caller must pass as `resumeChild` on the next turn.
+       */
+      teammate: rosterChild,
       /** T19: the deterministic id of this review, persisted so a restart can match it. */
       operationId: operation,
       /**
@@ -1444,6 +1649,285 @@ export class RecursiveRuntime extends Service {
         // name never reaches it.
         ok: continuable.ok, reason: continuable.reason } : null,
     }
+  }
+
+  /**
+   * ⚠ G2/G3 — PUT A DELEGATION ON THE AGENT-TEAM ROSTER, IN TWO STEPS, AND RETURN THE HANDLE THE LOOP NEEDS.
+   *
+   * The protocol, in the order the constraints force:
+   *   1. **RESUME** — the caller already has a child (a parked round being resumed). Its id is known, so nothing is
+   *      created and nothing is sent: the round that parked already delivered whatever it needed to. The brief is
+   *      rewritten (idempotent) and the (delegation, role) → name mapping is refreshed.
+   *   2. **REUSE** — a fresh round for a delegation that already has a teammate. The durable registry
+   *      (`subagents/teammates.json`) is authoritative; the live roster is the second source, under the SAME
+   *      deterministic name. Reuse is not an optimisation: teammate names are never reusable
+   *      (`TEAM_MEMBER_NAME_TAKEN`), so spawning per round would fail on the second one.
+   *   3. **SPAWN** — only when neither knows the child. The first message is the HOLD prompt, because the brief
+   *      cannot exist yet: its reply path embeds a child id that only the roster can generate. Once `member.id` is
+   *      learned, the mapping is RECORDED FIRST (a child that exists must never become anonymous, even if the next
+   *      step fails), the brief/reply tree is written under `subagents/<delegationId>/child-<member.id>/`, and the
+   *      real instructions are delivered with `sendMessage`.
+   *
+   * RETURNS the child id plus the roster's repair seam (`sendMessage` addressed by NAME), or a NAMED failure. It
+   * never falls back: a failure here means no child, and the caller reports that rather than dispatching an
+   * unrecorded one.
+   */
+  private async prepareTeammateChild(input: {
+    teams: TeammateRosterLike
+    runId: string
+    root: string
+    delegationId: string
+    role: string
+    name: string
+    provider: string
+    parent?: SubagentParentHandle
+    resumeChild?: string
+    /** Deliver the round-opening prompt. False on a resume, whose follow-up the caller's driver owns. */
+    deliver: boolean
+    /** Write the brief + reply tree for a known child id and return the delegation prompt. */
+    writeBriefAndPrompt: (childId: string) => string
+  }): Promise<
+    | { ok: true; name: string; childId: string; reused: boolean; followup?: FollowupSeam; notes: string[]; legacy?: true }
+    | { ok: false; code: string; message: string }
+  > {
+    const { teams, delegationId, role, name } = input
+    const caller = input.parent
+    const runDir = input.root === '' ? '' : join(input.root, '.recursive', 'run', input.runId)
+    const notes: string[] = []
+    const record = (childId: string): void => {
+      if (runDir === '') return
+      try {
+        recordTeammate(runDir, { delegationId, role, name, childId, at: new Date().toISOString() })
+      } catch (err) {
+        // A mapping that could not be written costs the NEXT round its reuse (it re-reads the live roster first),
+        // so it is reported rather than swallowed — but it does not fail a dispatch that already happened.
+        notes.push(
+          'the teammate mapping could not be recorded in the run (' + (err instanceof Error ? err.message : String(err))
+          + '), so a later round must find teammate "' + name + '" in the live roster to reuse it',
+        )
+      }
+    }
+    /**
+     * The repair seam, addressed BY NAME. `delegateContinuable` calls this with the child id it knows; the roster
+     * is addressed by name, so the name is captured here — one seam per child, built where the name is known.
+     */
+    const followup: FollowupSeam = async (_parent, _childId, content) => {
+      const send = teams.sendMessage
+      if (send === undefined) {
+        throw new Error(describeSendFailure({ delegationId, name, error: 'the roster has no sendMessage' }).message)
+      }
+      try {
+        const sent = await send.call(teams, caller, {
+          target: name,
+          content: content.map((block) => ({ type: 'text' as const, text: block.text })),
+          signal: teamCallSignal(),
+        })
+        return sent.messageId
+      } catch (err) {
+        throw new Error(describeSendFailure({ delegationId, name, error: err }).message)
+      }
+    }
+
+    // 1 — RESUME.
+    if (input.resumeChild !== undefined) {
+      const childId = input.resumeChild
+      /**
+       * ⚠ A RESUMED CHILD KEEPS THE SURFACE IT WAS CREATED ON. A run that parked a delegation under the PRIMITIVE
+       * path (before this change, or with no roster) holds a child id that no roster knows. Following that child up
+       * through `sendMessage` would address a teammate name the roster does not have, and fail — for a child that
+       * exists and is perfectly repairable. So the roster is used ONLY when it can prove this child is one of its
+       * own: a durable mapping for this child id, or a live roster member with the deterministic name AND that id.
+       * Otherwise the delegation stays on the primitive follow-up seam, which is exactly how the child was created.
+       * NOTHING is spawned either way — a resume never creates a child.
+       */
+      const known = runDir === '' ? null : findTeammateByChild(runDir, childId)
+      const live = known === null ? liveMemberNamed(teams, caller, name) : null
+      const isRosterChild = known !== null || (live !== null && live.id === childId)
+      if (!isRosterChild) {
+        input.writeBriefAndPrompt(childId)
+        notes.push(
+          'the resumed child ' + childId + ' has no record in `subagents/teammates.json` and no roster member named "'
+          + name + '", so this round keeps the primitive follow-up seam it was created on; nothing was spawned',
+        )
+        return { ok: true, name, childId, reused: true, notes, legacy: true }
+      }
+      input.writeBriefAndPrompt(childId)
+      record(childId)
+      return { ok: true, name, childId, reused: true, followup, notes }
+    }
+
+    // 2 — REUSE: the durable mapping first, then the live roster under the same deterministic name.
+    const recorded = runDir === '' ? null : findTeammate(runDir, delegationId, role)
+    let childId = recorded !== null && recorded.name === name ? recorded.childId : ''
+    if (childId === '') {
+      const live = liveMemberNamed(teams, caller, name)
+      if (live !== null) {
+        childId = live.id
+        notes.push(
+          'reused the LIVE roster teammate "' + name + '" (' + childId + ') for delegation ' + delegationId
+          + ': no durable mapping matched it, so the roster row is what this round resumes',
+        )
+      }
+    }
+    if (childId !== '') {
+      const promptText = input.writeBriefAndPrompt(childId)
+      if (input.deliver) {
+        const send = teams.sendMessage
+        if (send === undefined) {
+          return { ok: false, code: 'TEAM_SEND_FAILED', message: describeSendFailure({ delegationId, name, error: 'the roster has no sendMessage' }).message }
+        }
+        try {
+          await send.call(teams, caller, {
+            target: name,
+            content: [{ type: 'text', text: promptText }],
+            signal: teamCallSignal(),
+          })
+        } catch (err) {
+          return { ok: false, code: 'TEAM_SEND_FAILED', message: describeSendFailure({ delegationId, name, error: err }).message }
+        }
+      }
+      record(childId)
+      return { ok: true, name, childId, reused: true, followup, notes }
+    }
+
+    // 3 — SPAWN. A provider is required by the roster (`requiredText(request.provider, …)`), and it is resolved by
+    // the router above — so an empty one is a routing gap, named rather than sent as an empty string.
+    if (input.provider.trim() === '') {
+      return {
+        ok: false,
+        code: 'TEAM_PROVIDER_MISSING',
+        message: 'no subagent provider was resolved for delegation ' + delegationId + ' (role ' + role + '), so the '
+          + 'agent-team roster cannot create its teammate — the roster requires a non-empty `provider`. The child was '
+          + 'NOT dispatched and no unrecorded substitute was started. Enable this role in the router policy (or '
+          + 'configure a provider for the phase) and call again.',
+      }
+    }
+    const spawn = teams.spawnTeammate
+    const send = teams.sendMessage
+    if (spawn === undefined || send === undefined) {
+      return {
+        ok: false,
+        code: 'TEAM_SPAWN_FAILED',
+        message: 'the agent-team roster seam for delegation ' + delegationId + ' has no '
+          + (spawn === undefined ? 'spawnTeammate' : 'sendMessage') + ', so no teammate could be created and no '
+          + 'unrecorded substitute was started.',
+      }
+    }
+    const description = ('recursive-mode delegation ' + delegationId + ' (role ' + role + ') for run ' + input.runId)
+      .slice(0, 200)
+    let learned = ''
+    try {
+      const spawned = await spawn.call(teams, caller, {
+        name,
+        description,
+        // ⚠ THE HOLD PROMPT, AND IT IS NOT A PLACEHOLDER. The brief cannot be written yet — its reply path embeds the
+        // child id the roster is about to generate — so the first message says exactly that and tells the child to
+        // WAIT, which is what keeps its instructions coherent: it knows a brief is coming and what it will contain.
+        prompt: [{ type: 'text', text: teammateHoldPrompt({ delegationId, role, name }) }],
+        // `fresh` matches the plugin's whole briefing posture: the child is given files by path, not a copied
+        // conversation, so a fork would add context the delegation never chose.
+        context: 'fresh',
+        provider: input.provider,
+        signal: teamCallSignal(),
+      })
+      learned = typeof spawned?.member?.id === 'string' ? spawned.member.id : ''
+    } catch (err) {
+      const failure = describeSpawnFailure({ delegationId, role, name, provider: input.provider, error: err })
+      return { ok: false, code: failure.code, message: failure.message }
+    }
+    if (learned === '') {
+      return {
+        ok: false,
+        code: 'TEAM_SPAWN_FAILED',
+        message: 'the agent-team roster reported teammate "' + name + '" for delegation ' + delegationId
+          + ' with no member id, so its reply path cannot be written. The child may exist; inspect the roster '
+          + '(listMembers) before dispatching again, and do not start an unrecorded substitute.',
+      }
+    }
+    // ⚠ RECORDED BEFORE THE BRIEF IS WRITTEN, because the child EXISTS from this line on: if the write or the
+    // delivery below fails, the next attempt must be able to find this teammate and finish the briefing rather than
+    // spawning a second one under a name the roster will refuse.
+    record(learned)
+    let promptText = ''
+    try {
+      promptText = input.writeBriefAndPrompt(learned)
+    } catch (err) {
+      return {
+        ok: false,
+        code: 'TEAM_SPAWN_FAILED',
+        message: 'teammate "' + name + '" (' + learned + ') was created for delegation ' + delegationId
+          + ', but its brief could not be written: ' + (err instanceof Error ? err.message : String(err))
+          + '. The child is recorded in `subagents/teammates.json`, so a retry resumes it; nothing was dispatched in '
+          + 'its place.',
+      }
+    }
+    try {
+      await send.call(teams, caller, {
+        target: name,
+        content: [{ type: 'text', text: promptText }],
+        signal: teamCallSignal(),
+      })
+    } catch (err) {
+      return {
+        ok: false,
+        code: 'TEAM_SEND_FAILED',
+        message: describeSendFailure({ delegationId, name, error: err }).message
+          + ' The teammate (' + learned + ') and its brief both exist, so a retry can finish the delivery.',
+      }
+    }
+    return { ok: true, name, childId: learned, reused: false, followup, notes }
+  }
+
+  /**
+   * ⚠ G2 — DELIVER A FOLLOW-UP TO THE CHILD THAT DID THE WORK, ON WHICHEVER SURFACE OWNS IT.
+   *
+   * WHY THIS IS ONE METHOD AND NOT TWO CALL SITES. Both delegation tools deliver a repair themselves (the
+   * round driver re-reads a reply fail-closed and can disagree with the loop, so it must be able to send the
+   * instruction even when the loop believed it was approved). Those call sites used `resolveFollowupSeam` directly,
+   * which addresses a child by id — and a roster teammate is addressed BY NAME. Routing the decision through one
+   * place is what stops the two tools from drifting apart, and it is where the roster's own mapping is read.
+   *
+   * THE RULE, and it is never mixed: a child this plugin dispatched as a teammate is followed up THROUGH THE
+   * ROSTER, by the name recorded for it; any other child uses the primitive follow-up seam exactly as before. A
+   * failed roster send is REPORTED (named, with the child kept) rather than retried down the primitive route, so
+   * the caller can tell which surface was used and the child is never abandoned silently.
+   */
+  async deliverRepair(input: {
+    root: string
+    runId: string
+    delegationId: string
+    childId: string
+    instruction: string
+    parent?: SubagentParentHandle
+    subagents?: SubagentsRuntimeLike
+    teams?: TeammateRosterLike
+  }): Promise<{ via: 'team' | 'subagents'; target?: string }> {
+    const teams = input.teams ?? this.teamsSeam ?? undefined
+    const runDir = input.root === '' ? '' : join(input.root, '.recursive', 'run', input.runId)
+    const roster = runDir === '' ? null : findTeammateByChild(runDir, input.childId)
+    if (
+      roster !== null
+      && teams !== undefined
+      && typeof teams.sendMessage === 'function'
+      && isTeamLeadCaller(teams, input.parent)
+    ) {
+      try {
+        await teams.sendMessage(input.parent, {
+          target: roster.name,
+          content: [{ type: 'text', text: input.instruction }],
+          signal: teamCallSignal(),
+        })
+        return { via: 'team', target: roster.name }
+      } catch (err) {
+        throw new Error(describeSendFailure({ delegationId: input.delegationId, name: roster.name, error: err }).message)
+      }
+    }
+    const followup = resolveFollowupSeam(input.subagents ?? this.subagentsSeam ?? undefined)
+    if (followup === undefined) throw new Error('no continuable followup seam')
+    await followup(input.parent ?? {}, input.childId, [{ type: 'text', text: input.instruction }], {
+      source: { kind: 'coordinator', form: 'relay', senderSessionId: input.parent?.id ?? '' },
+    })
+    return { via: 'subagents' }
   }
 
   /** R6: validate a child's claimed references against actual files. */

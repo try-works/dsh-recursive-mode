@@ -115,11 +115,37 @@ describe('T36 — the plugin captures settlements at delivery', () => {
     }
   })
 
-  it('files NOTHING for a child no run owns, rather than guessing a run', async () => {
+  it('ADOPTS a child no run owns instead of guessing — marked, and never as a native record', async () => {
+    // ⚠ G1 REWROTE THIS CASE'S ASSERTION, AND ITS INTENT IS UNCHANGED: the listener must never file an
+    // unowned child as though a delegation had written its directory. It used to assert "nothing at all is
+    // recorded in the run" — which was true only because the adopted record went to a file NOTHING read, and
+    // that made an adopted verdict invisible to `settlementRoundObserver`. The guarantee is now asserted where
+    // it actually lives: the record IS in the run's settlement log (so the loop can read it), and it is marked
+    // `adopted: true` (so it cannot be mistaken for a delegation's own). See `adoptSettlement`.
     const m = await mount()
     try {
       deliver(m.ctx, { header: { cwd: m.repo } }, settlementEvent('a-different-child'))
+      const recorded = readSettlements(m.runDir)
+      expect(recorded, 'the settlement is not dropped: it is adopted by the single run').toHaveLength(1)
+      expect(recorded[0]!.childId).toBe('a-different-child')
+      expect(recorded[0]!.adopted, 'and a reader can tell it from a native settlement').toBe(true)
+      expect(recorded[0]!.adoptionReason).toContain('no delegation directory')
+    } finally {
+      await m.dispose()
+    }
+  })
+
+  it('refuses to guess between TWO runs, so neither run sees the settlement', async () => {
+    // The other half of the rule, and the one the previous case must not be read as weakening: with more than
+    // one run there is no single owner, so the adoption is recorded OUTSIDE every run's evidence chain.
+    const m = await mount()
+    try {
+      const other = join(m.repo, '.recursive', 'run', 'another-run')
+      mkdirSync(other, { recursive: true })
+      deliver(m.ctx, { header: { cwd: m.repo } }, settlementEvent('a-different-child'))
       expect(readSettlements(m.runDir)).toEqual([])
+      expect(readSettlements(other)).toEqual([])
+      expect(existsSync(join(m.repo, '.recursive', 'adopted-settlements.jsonl'))).toBe(true)
     } finally {
       await m.dispose()
     }

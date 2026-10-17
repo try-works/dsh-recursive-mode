@@ -439,7 +439,7 @@ export function createRecursiveAskTool(recursive: RecursiveRuntime) {
       //     person's call, and picking one would have the plugin abandon a phase on their behalf.
       //   • a configured default that is not one of the gate's own labels is refused through the SAME
       //     validator a caller's answer goes through, rather than being written and read as a decision.
-      const askPolicy = recursive.gateAsk(gateId)
+      const askPolicy = recursive.gateAsk(gateId, root)
       // `run-start` can never be silenced: it is the approval that ARMS the run, so this is refused whether or
       // not an answer was supplied — and the message must not offer a remedy that cannot work.
       if (!askPolicy.ask && isRunStartGate(gateId)) {

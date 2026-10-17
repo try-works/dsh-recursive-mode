@@ -63,7 +63,18 @@ import { auditToPass, renderTaskHistory, type TeamRuntimeLike, type AuditToPassR
 import type { ContinuableChildId, ContinuableMessageId } from './delegation.ts'
 import { runChildIds } from './settlement.ts'
 import { gateAskFor, resolveGateAsks, type ResolvedGateAsk, type ResolvedGateAsks } from './gates.ts'
-import type { RecursiveModeGates } from './config.ts'
+import type { RecursiveModeGates, RecursiveModeQa } from './config.ts'
+import {
+  effectiveGateAsks,
+  readGatesConfig,
+  resolveEffectiveGates,
+  validateEffectiveGates,
+  validateGatesFile,
+  writeGatesConfig,
+  type EffectiveGates,
+  type GatesResolution,
+  type RecursiveGatesFile,
+} from './gates-config.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -246,13 +257,16 @@ export class RecursiveRuntime extends Service {
     // tool (`tool-subagent/src/index.ts:369`), never by `startContinuable`, so a registered provider cannot inject
     // a model into a teammate either. A role that MUST run on its own model therefore keeps the PRIMITIVE path,
     // where this plugin passes `agentOptions` itself. Empty by default: team everywhere.
-    this.teammatePrimitiveRoles = [...(config.teammatePrimitiveRoles ?? [])]
+    // ⚠ THE CONFIG SIDE OF THE GATES PRECEDENCE. `index.ts` resolves this from
+    // `config.teammate.primitiveRoles`, so the workspace file fills it only when the Config left the
+    // schema default (an empty list) — see `gatesConfigSlice`.
+    this._configTeammateRoles = [...(config.teammatePrimitiveRoles ?? [])]
     // T2: the workflow engine, likewise.
     this.workflow = config.workflow ?? null
   }
 
-  /** Roles that must keep the primitive dispatch surface so their own provider/model/effort apply. */
-  private readonly teammatePrimitiveRoles: string[]
+  /** The Config half of the `teammate.primitiveRoles` precedence decision (see `gatesConfigSlice`). */
+  private readonly _configTeammateRoles: string[]
 
   /**
    * Should this role be dispatched on the PRIMITIVE path even when the roster is available?
@@ -264,8 +278,11 @@ export class RecursiveRuntime extends Service {
    * wrong one. Listing it here trades the roster surface for its own route, which is the truthful way to get both
    * behaviours — and the routing notes say which surface a child actually got.
    */
-  private isTeammatePrimitiveRole(role: string): boolean {
-    return this.teammatePrimitiveRoles.some((candidate) => candidate === role)
+  private isTeammatePrimitiveRole(role: string, root?: string): boolean {
+    // ⚠ THE EFFECTIVE LIST, NOT ONLY THE CONSTRUCTOR'S. The workspace file can add a role at use time
+    // (the Recursive tab edits it), so the dispatch decision must read the same composed answer the ask
+    // and lint paths read. `root` is the delegation's run root; absent it, the configured repo root.
+    return this.gatesResolutionAt(root).effective.teammate.primitiveRoles.some((candidate) => candidate === role)
   }
 
   /**
@@ -522,57 +539,152 @@ export class RecursiveRuntime extends Service {
   /**
    * PART B — `qa.humanReview`, as the phase-5 lint sees it.
    *
-   * ⚠ A BOOLEAN, NOT THE CONFIG OBJECT, and `false` when the namespace is absent. The lint needs exactly one
-   * fact ("must a person sign the QA phase off?"), and a lint that reached back into the plugin's Config
-   * would make the module function `lintRun` depend on a mounted service — it is also called directly by
-   * tests and by `lockArtifact`, neither of which has one. The switch is resolved HERE, once, at apply time;
-   * `lintArtifact` passes the resolved value down (see `LintOptions` in `ts-lint.ts`).
+   * ⚠ THE CONFIG VALUE AND THE EFFECTIVE VALUE ARE DIFFERENT THINGS NOW. `_configQa` is the plugin
+   * Config as the profile supplied it; the EFFECTIVE answer also consults
+   * `.recursive/config/recursive-gates.json` at USE time (see `qaHumanReviewFor`), so a save in the
+   * Recursive tab takes effect without re-applying the plugin. The eager boolean is kept only as the
+   * documented fallback for callers that have no workspace root (and for the compatibility getter).
    */
-  private _qaHumanReview = false
+  private _configQa: RecursiveModeQa | undefined = undefined
 
-  /** PART B: resolve the `qa` namespace. Called from `apply` on every plugin load, like the other seams. */
-  setQaConfig(config: { humanReview?: boolean } | undefined): void {
-    this._qaHumanReview = config?.humanReview === true
-  }
-
-  /** PART B: the phase-5 lint's one input — true when a person must sign the QA phase off. */
-  get qaHumanReview(): boolean {
-    return this._qaHumanReview
+  /** PART B: remember the `qa` namespace. Called from `apply` on every plugin load. */
+  setQaConfig(config: RecursiveModeQa | undefined): void {
+    this._configQa = config
   }
 
   /**
-   * ⚠ PER-GATE ASK SWITCHES, RESOLVED ONCE, WITH THE SAFE ABSENCE MEANING.
+   * The phase-5 lint's one input for a KNOWN workspace root: true when a person must sign the QA
+   * phase off. Reads the workspace gates file on every call (see `gates-config.ts` for why that is
+   * cheap enough and why there is no cache); a malformed file THROWS its named refusal instead of
+   * falling back to the Config.
+   */
+  qaHumanReviewFor(root: string): boolean {
+    return this.gatesResolutionAt(root).effective.qa.humanReview
+  }
+
+  /**
+   * PART B compatibility getter: the effective value at the configured repo root. It throws the named
+   * problem for a malformed workspace file — the same no-silent-fallback rule as `qaHumanReviewFor`.
+   */
+  get qaHumanReview(): boolean {
+    return this.qaHumanReviewFor(this.repoRoot)
+  }
+
+  /**
+   * ⚠ PER-GATE ASK SWITCHES, WITH THE SAFE ABSENCE MEANING.
    *
    * Absence means ENABLED (a person is asked), because a switch that disabled itself when a key went missing
    * would repeat the `shellOnly` leak in the opposite direction. `tddMode` is the single exception at the
    * owner's explicit instruction: it does not ask, and it records `strict`.
    *
-   * The resolved shape is what the ask path reads, so there is exactly one place where "was the person asked"
-   * is decided — and the caller reports that answer back as `source: 'config'` + `ask: 'disabled'` instead of
-   * leaving a reader to infer that nobody was involved.
+   * `_configGates` is the plugin Config half. The EFFECTIVE half is composed with the workspace file per
+   * call by `gatesResolutionAt`, so the ask path reads one answer no matter which layer supplied it.
    */
-  private _gates: ResolvedGateAsks = resolveGateAsks(undefined)
+  private _configGates: RecursiveModeGates | undefined = undefined
 
-  /** PER-GATE ASK SWITCHES: resolve the `gates` namespace. Called from `apply`, like the other seams. */
+  /** PER-GATE ASK SWITCHES: remember the `gates` namespace. Called from `apply`, like the other seams. */
   setGatesConfig(config: RecursiveModeGates | undefined): void {
-    this._gates = resolveGateAsks(config)
-  }
-
-  /** The resolved ask policy for one gate. Unknown gate ids fall back to ASKED — never to silence. */
-  gateAsk(gateId: string): ResolvedGateAsk {
-    // ⚠ THROUGH `gateAskFor`, NOT A PROPERTY LOOKUP: the gate ids are hyphenated (`tdd-mode`) while the
-    // config namespace is camelCase (`tddMode`), and indexing one with the other silently yields `undefined`
-    // — which resolved to "asked" and would have made every switch a no-op that still passed a typecheck.
-    return gateAskFor(this._gates, gateId)
+    // ⚠ THE CONFIG IS STILL REFUSED AT MOUNT, NOT ONLY ON FIRST USE. `resolveGateAsks` is the one
+    // validator for the configured `default` labels (RM1145); calling it here preserves the existing
+    // contract that a settings form can never save a configuration whose first use fails. The RESULT is
+    // discarded on purpose — the effective policy is composed per call with the workspace file (see
+    // `gatesFor`), but the validation must happen while the plugin is being applied.
+    resolveGateAsks(config)
+    this._configGates = config
   }
 
   /**
-   * PER-GATE ASK SWITCHES: the WHOLE resolved policy, for the two surfaces that are not the ask tool itself —
-   * the phase guidance (`recursive_phase`'s payload and the pre-step/closeout text) and the lint, which must
-   * be able to say "no person will be asked, so call the gate" instead of leaving an agent waiting.
+   * The plugin Config as it rides the precedence rule. The third field is the constructor's
+   * `teammatePrimitiveRoles`, which `index.ts` already resolves from `config.teammate.primitiveRoles`;
+   * the constructor copy is what this object reads.
+   */
+  private gatesConfigSlice(): { qa?: RecursiveModeQa; gates?: RecursiveModeGates; teammate?: { primitiveRoles?: string[] } } {
+    return {
+      ...(this._configQa === undefined ? {} : { qa: this._configQa }),
+      ...(this._configGates === undefined ? {} : { gates: this._configGates }),
+      teammate: { primitiveRoles: [...this._configTeammateRoles] },
+    }
+  }
+
+  /**
+   * ⚠ THE ONE USE-TIME COMPOSITION OF CONFIG + WORKSPACE FILE.
+   *
+   * `root` is the workspace the operation belongs to (`resolveRootFor` / the ask tool's resolved root /
+   * the delegation's run root). It falls back to the configured repo root only for callers that have no
+   * workspace in hand. A malformed file throws here, by name: obeying the Config silently would make
+   * the settings the user can see in the tab disagree with the settings the run obeys.
+   */
+  private gatesResolutionAt(root?: string): GatesResolution & { file: RecursiveGatesFile | null } {
+    const where = root !== undefined && root !== '' ? root : this.repoRoot
+    const read = readGatesConfig(where)
+    if (!read.ok) throw new Error(read.problem)
+    return { ...resolveEffectiveGates(this.gatesConfigSlice(), read.value), file: read.value }
+  }
+
+  /** The effective ask policy for one gate at one workspace root. Unknown ids fall back to ASKED. */
+  gateAsk(gateId: string, root?: string): ResolvedGateAsk {
+    // ⚠ THROUGH `gateAskFor`, NOT A PROPERTY LOOKUP: the gate ids are hyphenated (`tdd-mode`) while the
+    // config namespace is camelCase (`tddMode`), and indexing one with the other silently yields `undefined`
+    // — which resolved to "asked" and would have made every switch a no-op that still passed a typecheck.
+    return gateAskFor(this.gatesFor(root), gateId)
+  }
+
+  /**
+   * PER-GATE ASK SWITCHES: the WHOLE effective policy at one workspace root, for the surfaces that are
+   * not the ask tool itself — the phase guidance (the pre-step reminder, `recursive_phase`'s payload and
+   * the closeout text) and the lint, which must be able to say "no person will be asked, so call the
+   * gate" instead of leaving an agent waiting.
+   */
+  gatesFor(root?: string): ResolvedGateAsks {
+    return effectiveGateAsks(this.gatesResolutionAt(root).effective)
+  }
+
+  /**
+   * The compatibility getter: the effective policy at the configured repo root. New call sites that
+   * know the workspace root should call `gatesFor(root)` instead.
    */
   get gates(): ResolvedGateAsks {
-    return this._gates
+    return this.gatesFor(this.repoRoot)
+  }
+
+  /** The plain effective settings plus sources, as the GET route reports them. */
+  gatesView(root: string): { effective: EffectiveGates | null; sources: Record<string, string>; fromConfig: Record<string, unknown>; fromFile: Record<string, unknown>; problem?: string } {
+    const read = readGatesConfig(root)
+    if (!read.ok) {
+      // ⚠ NO GUESSED VALUES. The route says the file is unusable and reports no effective settings,
+      // rather than a Config-derived answer that would look like the workspace's decision.
+      return { effective: null, sources: {}, fromConfig: {}, fromFile: {}, problem: read.problem }
+    }
+    const resolution = resolveEffectiveGates(this.gatesConfigSlice(), read.value)
+    const problem = validateEffectiveGates(this.gatesConfigSlice(), read.value)
+    return {
+      effective: resolution.effective,
+      sources: resolution.sources,
+      fromConfig: resolution.fromConfig,
+      fromFile: resolution.fromFile,
+      ...(problem === null ? {} : { problem }),
+    }
+  }
+
+  /**
+   * Validate and write the workspace gates file. The EFFECTIVE contradiction is checked before writing,
+   * so a save that would make the plugin's two instructions disagree is refused with the same named
+   * refusal the mount uses (RM2203) instead of being written and discovered later.
+   */
+  writeGates(root: string, value: unknown): { ok: true; path: string } | { ok: false; problem: string } {
+    let candidate: RecursiveGatesFile
+    try {
+      candidate = validateGatesFile(value)
+    } catch (error) {
+      return { ok: false, problem: error instanceof Error ? error.message : String(error) }
+    }
+    const contradiction = validateEffectiveGates(this.gatesConfigSlice(), candidate)
+    if (contradiction !== null) return { ok: false, problem: contradiction }
+    try {
+      return { ok: true, path: writeGatesConfig(root, candidate) }
+    } catch (error) {
+      return { ok: false, problem: error instanceof Error ? error.message : String(error) }
+    }
   }
 
   /**
@@ -759,7 +871,7 @@ export class RecursiveRuntime extends Service {
       // ⚠ AND THE PER-GATE ASK POLICY RIDES INTO THE REPORT, so its `guidance` can say "nobody will be asked"
       // for a phase whose gate is silenced. Without it the closeout would tell an agent to "declare the QA
       // execution mode" while the card that would obtain it never appears — the stall this switch introduces.
-      const result = closeoutReport(runDir, phase, { gates: this._gates })
+      const result = closeoutReport(runDir, phase, { gates: this.gatesFor(root) })
       // P3b: settle this run's injections against its own outcome. Only phases that LOCKED are evidence, and
       // a run settles once, at closeout.
       settleInjections(root, runDir, PHASE_SEQUENCE.filter((file) => getLockStatus(join(runDir, file)) === 'LOCKED'))
@@ -1044,7 +1156,7 @@ export class RecursiveRuntime extends Service {
     // primitive path rather than being silently upgraded to a teammate. A role listed in
     // `teammate.primitiveRoles` ALSO keeps it, because a teammate cannot carry provider/model/effort (see
     // `isTeammatePrimitiveRole`). Everything else is rostered.
-    const primitiveSurfaceRole = this.isTeammatePrimitiveRole(input.role)
+    const primitiveSurfaceRole = this.isTeammatePrimitiveRole(input.role, input.root)
     const rosterEligible = input.mode !== 'one-shot' && !primitiveSurfaceRole && continuablePrereqs && canRosterDispatch(teams, input.parent)
     const teammateName = rosterEligible ? teammateNameFor(input.runId, input.delegationId, input.role) : ''
     const runDir = input.root === '' ? '' : join(input.root, '.recursive', 'run', input.runId)
@@ -2161,7 +2273,7 @@ export class RecursiveRuntime extends Service {
     // PER-GATE ASK SWITCHES — whether the gate this phase owes will actually put a question to a person.
     // The note is non-null only when the gate is owed AND its ask is disabled AND it has a configured default
     // to record; that is the state in which an agent must NOT wait for a card (see `phaseAskNote`).
-    const askNote = pending === null ? null : phaseAskNote(GATE_DEFAULT_ARTIFACT[pending], this._gates)
+    const askNote = pending === null ? null : phaseAskNote(GATE_DEFAULT_ARTIFACT[pending], this.gatesFor(root))
     const selection = selectMemory(root, {
       query: requirements.slice(0, 4000),
       // FU-4: the run's OWN changed paths, computed when the caller supplies none — so T29's path
@@ -2819,7 +2931,10 @@ export class RecursiveRuntime extends Service {
         // no service to reach back into, so the resolved switch travels as an argument — which is also what
         // makes the wiring testable: a runtime whose `_qaHumanReview` stayed false cannot produce the
         // config refusal, and a lint called without this argument behaves exactly as it did before.
-        return lintRun(root, runId, { humanReview: this._qaHumanReview, gates: this._gates })
+        // ⚠ AND IT IS READ FOR THIS ROOT AT USE TIME, so a save in the Recursive tab changes the very next
+        // lint without re-applying the plugin; a malformed workspace file throws its named problem here
+        // rather than letting the lint run on a guessed switch.
+        return lintRun(root, runId, { humanReview: this.qaHumanReviewFor(root), gates: this.gatesFor(root) })
       },
     })
     // T39: record the run in the RUN LAYER, where the run id is known — see job-log.ts for why

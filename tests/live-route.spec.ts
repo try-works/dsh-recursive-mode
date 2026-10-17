@@ -77,9 +77,14 @@ describe('G2 snapshotWorkspace + G3 route keying', () => {
       snapshot: vi.fn(async (_root: string) => ({ '/w': { r1: { runId: 'r1', worktreeRoot: '/w', phases: {}, state: 'active' as const, tampers: {}, subagents: {} } } })),
       revision: vi.fn(() => 1),
     }
-    const [state] = makeRecursiveRoutes(host)
+    const [state, events, doc, gates] = makeRecursiveRoutes(host)
     expect(state.kind).toBe('exact')
     expect(state.path).toBe('/.recursive/api/state')
+    // ⚠ THE GATES ROUTE IS ONE RESOURCE WITH TWO METHODS. WebServer.register throws on a duplicate
+    // (kind, path), so a GET and a PUT at the same path must be one handler — pinned here so a later
+    // split cannot silently fail to register.
+    expect(doc.path).toBe('/.recursive/api/doc')
+    expect(gates.path).toBe('/.recursive/api/gates')
     const res = { status: 0, headers: {}, body: '' } as unknown as import('node:http').ServerResponse
     const ended = new Promise<void>((done) => {
       ;(res as unknown as { end: (b?: string) => void }).end = (b?: string) => { (res as unknown as { body: string }).body = b ?? ''; done() }
@@ -145,7 +150,7 @@ describe('G4 mountOnce-global', () => {
     }), webServer as never)
     const d1 = mk()
     const d2 = mk()
-    expect(register).toHaveBeenCalledTimes(3) // three routes per mount: state + events + doc
+    expect(register).toHaveBeenCalledTimes(4) // four routes per mount: state + events + doc + gates
     expect(typeof d1).toBe('function')
     expect(typeof d2).toBe('function')
   })

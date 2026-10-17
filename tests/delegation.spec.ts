@@ -103,14 +103,23 @@ describe('FU-20 — a delegated child reports the route it actually took', () =>
     session: { requestHeader: () => ({ config: { provider, model } }) },
   })
 
-  /** A continuable seam that never settles, so the outcome is a PARK (the cheapest full round trip). */
+  /** A current-host (0.2.1-rc.2) continuable seam that never settles, so the outcome is a PARK. */
   async function run(input: {
     parent: unknown
     agentOptions?: { model?: string }
   }): Promise<ReturnType<typeof delegateContinuable> extends Promise<infer T> ? T : never> {
     const subagents = {
-      startContinuable: async () => ({ childId: 'c1', messageId: 'm1' }),
-      followup: async () => ({ messageId: 'm2' }),
+      startActivation: async (spec: { delivery?: string }) => {
+        // The current host REQUIRES this field; the seam's continuable path always passes 'parent'.
+        expect(spec.delivery).toBe('parent')
+        return {
+          childId: 'c1',
+          messageId: 'm1',
+          result: Promise.resolve({ output: [], stopReason: 'completed' }),
+          dispose: async () => {},
+        }
+      },
+      sendMessage: async () => 'm2',
     }
     return await delegateContinuable({
       subagents: subagents as never,

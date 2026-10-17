@@ -32,6 +32,34 @@ export interface LiveScope {
   cwd?: string
 }
 
+/**
+ * The effective gate/QA settings, as GET /.recursive/api/gates reports them. Plain values (the form
+ * binds to this), with `sources` naming the layer that decided each Config field path.
+ */
+export interface GatesEffective {
+  qa: { humanReview: boolean }
+  gates: {
+    runStart: { ask: boolean }
+    tddMode: { ask: boolean; default: string }
+    qaSignoff: { ask: boolean; default: string }
+    gateBlock: { ask: boolean }
+  }
+  teammate: { primitiveRoles: string[] }
+}
+
+/** The GET /gates payload. `effective` is null when the workspace file is unusable. */
+export interface GatesPayload {
+  root: string | null
+  effective: GatesEffective | null
+  sources: Record<string, 'config' | 'file' | 'default'>
+  fromConfig: Record<string, unknown>
+  fromFile: Record<string, unknown>
+  problem?: string
+}
+
+/** The PUT /gates result: success, or the host's NAMED refusal to show verbatim. */
+export type GatesSaveResult = { ok: true; path?: string } | { ok: false; problem: string }
+
 const FETCH_TIMEOUT_MS = 15_000
 
 /** Query-string encoder for the two params. */
@@ -53,6 +81,66 @@ export async function fetchLiveState(scope: LiveScope, signal?: AbortSignal): Pr
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * Read the effective gate/QA settings plus their sources (GET /.recursive/api/gates). The host resolves
+ * the workspace root exactly as it does for /state; the client never sends a path it chose.
+ */
+export async function fetchGates(scope: LiveScope, signal?: AbortSignal): Promise<GatesPayload> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  const onAbort = (): void => { controller.abort() }
+  signal?.addEventListener('abort', onAbort)
+  try {
+    const res = await fetch(RECURSIVE_API_PREFIX + '/gates' + scopeQuery(scope), { signal: controller.signal, cache: 'no-store' })
+    const body = (await res.json()) as GatesPayload
+    // A 4xx/5xx here is still a payload the panel reports; only a non-JSON/network failure throws.
+    if (!res.ok && body.problem === undefined) throw new Error('recursive gates: HTTP ' + String(res.status))
+    return body
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
+  }
+}
+
+/**
+ * Write the workspace gates file (PUT /.recursive/api/gates). A 4xx is NOT thrown: the host's named
+ * refusal (`RM#### input: ...`) is returned so the UI can show it verbatim, which is the requirement.
+ * A network failure is returned in the same shape rather than thrown, so the panel has one path.
+ */
+export async function saveGates(scope: LiveScope, value: unknown, signal?: AbortSignal): Promise<GatesSaveResult> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  const onAbort = (): void => { controller.abort() }
+  signal?.addEventListener('abort', onAbort)
+  try {
+    const res = await fetch(RECURSIVE_API_PREFIX + '/gates' + scopeQuery(scope), {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(value),
+      signal: controller.signal,
+      cache: 'no-store',
+    })
+    let body: unknown = null
+    try {
+      body = await res.json()
+    } catch {
+      // Fall through to the plain HTTP message below.
+    }
+    if (res.ok) return { ok: true, ...(isPlainRecord(body) && typeof body.path === 'string' ? { path: body.path } : {}) }
+    if (isPlainRecord(body) && typeof body.problem === 'string') return { ok: false, problem: body.problem }
+    return { ok: false, problem: 'recursive gates: HTTP ' + String(res.status) }
+  } catch (error) {
+    return { ok: false, problem: 'recursive gates: ' + (error instanceof Error ? error.message : String(error)) }
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object'
 }
 
 /** One doc fetch request: the host-known workspace root + run id + phase doc file. */

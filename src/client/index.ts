@@ -18,14 +18,25 @@ import { claimClientApply, releaseClientApply } from './apply-guard.ts'
 export { Board, listRuns } from './board.tsx'
 export { Inspector } from './inspector.tsx'
 export { DocViewer, parseDoc, parseInline } from './doc-viewer.tsx'
-export { RecursiveView } from './slots.ts'
+export { RecursiveView, RECURSIVE_TAB_ID, RECURSIVE_TAB_KIND } from './slots.ts'
+export {
+  RecursiveGatesTab,
+  RecursiveGatesTitle,
+  GATE_ROW_DEFS,
+  GATES_CONFIG_DISPLAY_PATH,
+  emptyGatesForm,
+  formValueOf,
+  gatesFileValue,
+  gatesContradiction,
+} from './gates-form.tsx'
+export type { GatesFormValue, GatesTransport, RecursiveGatesTabProps } from './gates-form.tsx'
 export { RecursiveSettings, RecursiveSettingsLive } from './settings.tsx'
 export { settingsView } from './settings-view.ts'
 export type { SettingsView, SettingsRunView, SettingsRow } from './settings-view.ts'
 export { useLiveProjection } from './use-live.ts'
 export type { LiveProjectionSnapshot } from './use-live.ts'
-export { fetchLiveState, subscribeLiveEvents } from './host-api.ts'
-export type { LiveRecursiveState, LiveRecursiveFrame, LiveScope } from './host-api.ts'
+export { fetchLiveState, fetchGates, saveGates, subscribeLiveEvents } from './host-api.ts'
+export type { GatesEffective, GatesPayload, GatesSaveResult, LiveRecursiveState, LiveRecursiveFrame, LiveScope } from './host-api.ts'
 export { isRecursivePreset, currentSessionCwd, currentWorkspacePath } from './contract.ts'
 export type { SessionSummaryRow, SessionListStateLike, SnapshotSelectorHook, WorkspaceViewLike, WorkspaceListStateLike, ClientContext } from './contract.ts'
 

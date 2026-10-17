@@ -882,7 +882,7 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
                 // with `gates.tddMode.ask: false` nobody will be asked at phase 3, and without this line the
                 // agent waits for a card that is never raised. `phaseAskNote` returns null when the gate does
                 // ask, so an ordinary workspace sees the reminder it always saw.
-                const reminder = phaseLintRulesMessage(phase, undefined, recursive.delegatedReviewerCapability(root, phasePath), phaseAskNote(phase, recursive.gates))
+                const reminder = phaseLintRulesMessage(phase, undefined, recursive.delegatedReviewerCapability(root, phasePath), phaseAskNote(phase, recursive.gatesFor(root)))
         return {
           kind: 'enter',
           messages: [...messages, createUserMessage({ content: [{ type: 'text', text: reminder }], source: { ...REMINDER_SOURCE, form: 'notice', summary: 'phase ' + phase + ' lint rules' } })],
@@ -906,6 +906,11 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
         resolveRoot: async (sessionId: string | undefined, cwd: string) => recursive.resolveRootForRoute(sessionId, cwd, sessionsStore),
         snapshot: async (root: string) => snapshotWorkspace(root),
         revision: () => 1,
+        // ⚠ THE WRITE SIDE'S ROOT IS THE SAME HOST-RESOLVED ROOT as /state's. The route never accepts
+        // a client path, so a PUT cannot be aimed at another workspace; `writeGates` also re-checks the
+        // EFFECTIVE contradiction before anything lands on disk.
+        gates: (root: string) => recursive.gatesView(root),
+        writeGates: (root: string, value: unknown) => recursive.writeGates(root, value),
       }
       disposers.push(mountRecursiveRoutesOnce('@try-works/dsh-recursive-mode', () => makeRecursiveRoutes(host), webServer))
     }

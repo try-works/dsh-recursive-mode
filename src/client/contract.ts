@@ -59,6 +59,28 @@ export interface ClientSlots {
   register(options: SlotOptions, component: unknown): () => void
 }
 
+/**
+ * The right sidebar's tab-type registry (`@deepseek-ai/dsh-client-ui-sidebar-right`,
+ * `tab-registry.ts`). Stage one of a tab type's registration: what the type IS. The `id` is the
+ * implementation identity and is the key its body and title register under; `kind` is what
+ * `sidebarRight.openTab(kind)` names.
+ */
+export interface ClientSidebarRightTabs {
+  register(definition: {
+    id: string
+    kind: string
+    title: (address: string) => string
+    multiple?: boolean
+    keepMounted?: boolean
+    priority?: 'extension' | 'builtin' | 'fallback'
+  }): () => void
+}
+
+/** The right sidebar's navigation face — only what the plugin's entry button needs. */
+export interface ClientSidebarRight {
+  openTab(kind: string, options?: { readonly params?: unknown }): void
+}
+
 /** A registered slot's options. */
 export interface SlotOptions {
   name: string
@@ -84,7 +106,21 @@ export interface SlotOptions {
 /** The client root context the bundle receives from the module loader. */
 export interface ClientContext {
   slots: ClientSlots
-  get(name: string): unknown
+  /**
+   * The right-sidebar services. OPTIONAL on purpose: the tab is an addition to a bundle that also
+   * mounts on hosts where the right sidebar package is absent, and the plugin's existing seats must
+   * keep working there. `registerSlots` resolves them without a bare property read (Cordis throws for
+   * an undeclared service property) and simply registers no gates tab when they are absent.
+   */
+  sidebarRight?: ClientSidebarRight
+  sidebarRightTabs?: ClientSidebarRightTabs
+  get(name: string, strict?: boolean): unknown
+  /**
+   * Cordis' optional-service loader. Used for the right-sidebar services: they may be mounted by a
+   * package the loader starts AFTER this bundle, so the tab registration must be able to wait for them
+   * and follow their lifetime. Optional in this structural face so a plain test double can omit it.
+   */
+  inject?(deps: string[], callback: (ctx: ClientContext) => void): unknown
   /** Cordis effect: registers a disposer; returns a disposer. */
   effect(fn: () => () => void, label?: string): () => void
 }

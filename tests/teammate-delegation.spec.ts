@@ -272,6 +272,30 @@ describe('G2 — the roster dispatch: spawn, learn the id, brief, deliver', () =
     expect(team.calls.filter((call) => call.op === 'spawn')).toHaveLength(1)
   })
 
+  it('the WORKSPACE gates file can hold a role on the primitive path, read at USE time', async () => {
+    // The same switch as `teammate.primitiveRoles` in the plugin Config, saved in
+    // `.recursive/config/recursive-gates.json` AFTER the runtime was constructed — which is what the
+    // Recursive tab's PUT does. A dispatch that still read only the constructor snapshot would roster
+    // this child; the file must decide, on the same use-time terms as the ask and lint paths.
+    const team = fakeRoster()
+    m.runtime.attachTeams(team.service)
+    const primitive = fakePrimitive()
+    settle(m.runDir, RESERVED, 'APPROVE')
+    writeFileSync(
+      join(m.root, '.recursive', 'config', 'recursive-gates.json'),
+      JSON.stringify({ teammate: { primitiveRoles: [ROLE] } }),
+      'utf8',
+    )
+
+    const result = await m.runtime.delegateReview(reviewInput(m, {
+      subagents: primitive.seam,
+      parent: team.lead as unknown as SubagentParentHandle,
+    }))
+    expect(result).toBeDefined()
+    expect(team.calls.filter((call) => call.op === 'spawn'), 'the file-listed role must not be rostered').toHaveLength(0)
+    expect(primitive.calls.some((call) => call.startsWith('startContinuable')), 'the primitive path carries the role\'s own route').toBe(true)
+  })
+
   it('G1 × G2: a settlement ADOPTED into the run still feeds the roster round', async () => {
     // ⚠ THE WINDOW THE TWO CHANGES MEET IN. A roster child has no delegation directory between `spawnTeammate` and the
     // brief write, so a settlement arriving there cannot be attributed by `runDirForChild` and is ADOPTED into the

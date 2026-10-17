@@ -3,8 +3,10 @@
  * which SUPERSEDES the "wrap the primitive" half of `ADR-delegation-surface.md`).
  *
  * WHAT CHANGED AND WHY IT IS FEASIBLE. `TeamService` is a LAYER over the very service this plugin used directly:
- * `spawnTeammate` internally calls `ctx.subagents.startContinuable({ childId, provider, label, request: { prompt,
- * parent }, signal })` (`agent-team/src/roster.ts`, `spawnAdmitted`), so a teammate IS a continuable child. Its
+ * `spawnTeammate` internally starts a continuable child through the host's activation API — as of DSH 0.2.1-rc.2
+ * that is `ctx.subagents.startActivation({ delivery: 'parent', childId, provider, label, request: { prompt,
+ * parent }, signal })` (`agent-team/src/roster.ts`, `spawnAdmitted`; it was `startContinuable` on 0.2.0) — so a
+ * teammate IS a continuable child. Its
  * durable roster id is a `SessionId`, follow-ups reach it through the same host steer path
  * (`mailbox.ts` → `steerHostSubagentPrompt`), and its settlement arrives as the harness's own
  * `source.kind === 'subagent-settled'` notice — the exact shape `src/settlement.ts` already recognises. Nothing

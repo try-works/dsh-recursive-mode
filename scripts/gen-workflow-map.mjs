@@ -1526,9 +1526,13 @@ const ERRORS = [
   { code: 'RM1142', k: 'input', p: 'the answer is not one of the labels the gate offered', where: '`recursive_ask`' },
   { code: 'RM1143', k: 'input', p: 'this gate has no default artifact, so one must be named', where: '`recursive_ask` (gate-block)' },
   { code: 'RM1144', k: 'input', p: 'probeArguments is not a JSON object', where: '`recursive_preview`' },
+  { code: 'RM1145', k: 'input', p: 'a gates entry names a default that is not one of the labels that same gate offers', where: 'the gate-default validator shared by the plugin Config and `.recursive/config/recursive-gates.json`' },
+  { code: 'RM1146', k: 'input', p: 'gates.runStart.ask is false, but the run-start gate is the approval that arms the run and cannot be disabled', where: 'the plugin Config and `.recursive/config/recursive-gates.json`' },
+  { code: 'RM1147', k: 'input', p: 'the workspace gates file cannot be read as the gates schema: it is malformed, or it names a field the schema does not declare', where: '`.recursive/config/recursive-gates.json` — reads, writes, and the GET/PUT `/.recursive/api/gates` route' },
   { code: 'RM1150', k: 'input', p: 'relay applies only to the run-start gate', where: '`recursive_ask`' },
   { code: 'RM2201', k: 'value', p: 'target must be md or ts', where: '`recursive_scratch`' },
   { code: 'RM2202', k: 'value', p: 'action must be create | promote | status', where: '`recursive_worktree`' },
+  { code: 'RM2203', k: 'value', p: 'the config is contradictory: qa.humanReview is true while gates.qaSignoff.ask is false', where: 'the plugin mount and the effective gates settings composed from the Config + `.recursive/config/recursive-gates.json`' },
   { code: 'RM3301', k: 'workspace', p: 'this session is not attached to a registered workspace', where: 'the workspace-root resolution every tool shares' },
   { code: 'RM4401', k: 'state', p: 'no recursive run exists in this workspace', where: '`recursive_status`, `recursive_review`, `recursive_delegate`' },
   { code: 'RM4402', k: 'state', p: 'no current recursive phase could be determined', where: '`recursive_phase`, `recursive_review`, `recursive_delegate`' },
@@ -1540,6 +1544,7 @@ const ERRORS = [
   { code: 'RM5504', k: 'runtime', p: 'a person was asked to start this run and their answer was not one of the labels offered', where: '`recursive_ask gate=run-start` — NOT relayable' },
   { code: 'RM5505', k: 'runtime', p: 'a person was shown this human gate and their answer was not one of the labels the gate offered', where: '`recursive_ask` for `tdd-mode` / `qa-signoff` / `gate-block` — records nothing' },
   { code: 'RM5506', k: 'runtime', p: 'the human-gate question reached no decision: the mounted user-questions channel failed or was settled from outside', where: '`recursive_ask` for `tdd-mode` / `qa-signoff` / `gate-block` — no relay; records nothing' },
+  { code: 'RM5507', k: 'runtime', p: 'this human gate is configured with its ask disabled and has no decision it can honestly record in the person\'s place', where: '`recursive_ask` (gate-block, or run-start) — nothing is written' },
   { code: 'RM6601', k: 'capability', p: 'the agent-teams service is not available in this composition', where: '`recursive_audit_team`' },
 ]
 

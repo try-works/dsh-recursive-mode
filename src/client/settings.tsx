@@ -46,6 +46,11 @@ export interface RecursiveSettingsProps {
   close: () => void
   /** The live host-route frame, or null while the first fetch is in flight. */
   snapshot?: LiveProjectionValue | null
+  /**
+   * Open the Recursive gates tab in the right sidebar (the owner's required entry point). Present only
+   * when the host mounts the right sidebar; absent, the panel renders no button rather than a dead one.
+   */
+  onOpenTab?: () => void
 }
 
 /** The route-answer states, each said plainly instead of implied by an empty panel. */
@@ -149,12 +154,17 @@ function runSection(run: SettingsRunView): ReactElement {
 }
 
 /** The panel: a report of one live frame. Pure — snapshot in, tree out. */
-export function RecursiveSettings({ close, snapshot = null }: RecursiveSettingsProps) {
+export function RecursiveSettings({ close, snapshot = null, onOpenTab }: RecursiveSettingsProps) {
   const view = settingsView(snapshot)
   return createElement('div', { className: 'rec-settings' },
     createElement('header', { className: 'rec-settings-header' },
       createElement('h2', { className: 'rec-settings-title' }, 'Recursive'),
       createElement('span', { className: 'rec-settings-tag' }, 'live projection · read-only'),
+      onOpenTab !== undefined && createElement('button', {
+        type: 'button',
+        className: 'rec-settings-tab',
+        onClick: onOpenTab,
+      }, 'Open Recursive tab'),
       createElement('button', { type: 'button', className: 'rec-settings-close', onClick: close }, 'Close'),
     ),
     createElement('p', { className: 'rec-settings-lede' },
@@ -180,12 +190,15 @@ export interface RecursiveSettingsSeatProps {
   close: () => void
   useSessions?: SnapshotSelectorHook<SessionListStateLike>
   useWorkspaces?: SnapshotSelectorHook<WorkspaceListStateLike>
+  /** Opens the Recursive gates tab; supplied by `slots.ts` when the host has the right sidebar. */
+  onOpenTab?: () => void
 }
 
 export interface RecursiveSettingsLiveProps {
   close: () => void
   useSessions: SnapshotSelectorHook<SessionListStateLike>
   useWorkspaces: SnapshotSelectorHook<WorkspaceListStateLike>
+  onOpenTab?: () => void
 }
 
 /**
@@ -194,11 +207,11 @@ export interface RecursiveSettingsLiveProps {
  * are called unconditionally — the seat only renders this component when both
  * selector hooks are present (slots.ts), so the hook order is fixed.
  */
-export function RecursiveSettingsLive({ close, useSessions, useWorkspaces }: RecursiveSettingsLiveProps) {
+export function RecursiveSettingsLive({ close, useSessions, useWorkspaces, onOpenTab }: RecursiveSettingsLiveProps) {
   const sessions = useSessions((s) => s)
   const workspaces: WorkspaceListStateLike = useWorkspaces((s) => s) ?? { items: [], recentWorkspaceId: undefined }
   const wsPath = currentWorkspacePath(workspaces, sessions)
   const cwd = wsPath !== '' ? wsPath : currentSessionCwd(sessions)
   const snapshot = useLiveProjection({ sessionId: sessions.current, cwd })
-  return createElement(RecursiveSettings, { close, snapshot })
+  return createElement(RecursiveSettings, { close, snapshot, ...(onOpenTab === undefined ? {} : { onOpenTab }) })
 }

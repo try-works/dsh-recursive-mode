@@ -37,7 +37,27 @@ export interface RecursiveRouteHost {
   snapshot(root: string): Promise<RecursiveProjection> | RecursiveProjection
   /** Monotone revision; bump whenever the fs fold changes (SSE frame + state). */
   revision(root: string): number
+  /**
+   * The EFFECTIVE gate/QA settings at one host-resolved root, plus the layer that decided each value.
+   * Optional so an older/structural host (the state-only tests) still satisfies this seam; the gates
+   * route then answers "this host does not serve gates configuration" instead of guessing.
+   */
+  gates?(root: string): GatesRouteData
+  /** Validate + atomically write the workspace gates file at one host-resolved root. */
+  writeGates?(root: string, value: unknown): GatesWriteResult
 }
+
+/** The GET /gates payload's settings half. `effective` is null when the file is unusable. */
+export interface GatesRouteData {
+  effective: unknown
+  sources: Record<string, string>
+  fromConfig: Record<string, unknown>
+  fromFile: Record<string, unknown>
+  problem?: string
+}
+
+/** The PUT /gates result. A refusal carries the named message the client must show verbatim. */
+export type GatesWriteResult = { ok: true; path?: string } | { ok: false; problem: string }
 
 /** The state payload the board/strip read. */
 export interface RecursiveStatePayload {
@@ -133,7 +153,148 @@ function docRoute(host: RecursiveRouteHost) {
 }
 
 /**
- * Build the read-only routes. Returns [state, events, doc] in registration order.
+ * The gates route: GET reads the EFFECTIVE settings + sources, PUT validates and writes the workspace
+ * file. ONE route object with two methods, because `WebServer.register` throws on a duplicate
+ * (kind, path) and a GET and a PUT at the same path are one resource.
+ *
+ * SECURITY POSTURE, identical to `/state` and `/doc`:
+ *   • the same-origin browser marker is required (the loopback socket remains the real boundary);
+ *   • the root is resolved SERVER-SIDE from the session id / cwd the client already has — a client
+ *     path is never accepted as the write target, so this route cannot be aimed at another workspace;
+ *   • the body is capped (64 KiB) so a PUT cannot buffer an unbounded payload;
+ *   • every refusal is the plugin's named message (`RM####`), returned verbatim with a 4xx, so the UI
+ *     shows exactly what the host decided rather than inventing a sentence.
+ */
+const MAX_GATES_BODY_BYTES = 64 * 1024
+
+function readGatesBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const declared = Number(req.headers['content-length'] ?? Number.NaN)
+    if (Number.isFinite(declared) && declared > MAX_GATES_BODY_BYTES) {
+      // Drain rather than abandon the socket: an unread request body on a keep-alive connection would
+      // be parsed as the NEXT request's start line.
+      req.resume()
+      reject(new Error('the request body exceeds ' + String(MAX_GATES_BODY_BYTES) + ' bytes'))
+      return
+    }
+    const chunks: Buffer[] = []
+    let size = 0
+    let settled = false
+    const finish = (error: Error | null): void => {
+      if (settled) return
+      settled = true
+      if (error !== null) reject(error)
+      else resolve(Buffer.concat(chunks).toString('utf8'))
+    }
+    req.on('data', (chunk: Buffer | string) => {
+      if (settled) return
+      const buffer = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
+      size += buffer.byteLength
+      if (size > MAX_GATES_BODY_BYTES) {
+        finish(new Error('the request body exceeds ' + String(MAX_GATES_BODY_BYTES) + ' bytes'))
+        return
+      }
+      chunks.push(buffer)
+    })
+    req.once('end', () => { finish(null) })
+    req.once('error', (error: Error) => { finish(error) })
+  })
+}
+
+/** Resolve the host root EXACTLY as `/state` does: no client-supplied path is trusted. */
+async function resolveRouteRoot(host: RecursiveRouteHost, req: IncomingMessage): Promise<string | null> {
+  const sessionId = queryOf(req, 'sessionId') || undefined
+  const cwd = queryOf(req, 'cwd')
+  if (sessionId === undefined && cwd === '') return null
+  return host.resolveRoot(sessionId, cwd)
+}
+
+function gatesRoute(host: RecursiveRouteHost) {
+  return {
+    kind: 'exact' as const,
+    path: RECURSIVE_API_PREFIX + '/gates',
+    handler: async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+      if (!browserMarker(req)) { res.writeHead(403); res.end(); return }
+      const method = req.method ?? 'GET'
+      if (method !== 'GET' && method !== 'PUT') { res.writeHead(405); res.end(); return }
+      const root = await resolveRouteRoot(host, req)
+      if (method === 'GET') {
+        if (root === null) {
+          json(res, 200, {
+            root: null,
+            effective: null,
+            sources: {},
+            fromConfig: {},
+            fromFile: {},
+            problem: 'no recursive control-plane root could be resolved for this session',
+          })
+          return
+        }
+        try {
+          const data = host.gates?.(root)
+          if (data === undefined) {
+            json(res, 200, {
+              root,
+              effective: null,
+              sources: {},
+              fromConfig: {},
+              fromFile: {},
+              problem: 'this host does not serve gates configuration',
+            })
+            return
+          }
+          json(res, 200, { root, ...data })
+        } catch (error) {
+          json(res, 500, {
+            root,
+            effective: null,
+            sources: {},
+            fromConfig: {},
+            fromFile: {},
+            problem: error instanceof Error ? error.message : String(error),
+          })
+        }
+        return
+      }
+      // PUT — a write. There is no root without a session/cwd, and there is no write to guess about.
+      if (root === null) {
+        // Drain the unread body before answering, or a keep-alive connection would parse it as the
+        // next request's start line.
+        req.resume()
+        json(res, 400, { ok: false, problem: 'no recursive control-plane root could be resolved for this session' })
+        return
+      }
+      if (host.writeGates === undefined) {
+        req.resume()
+        json(res, 501, { ok: false, problem: 'this host does not serve gates configuration' })
+        return
+      }
+      let body: string
+      try {
+        body = await readGatesBody(req)
+      } catch (error) {
+        json(res, 413, { ok: false, problem: error instanceof Error ? error.message : String(error) })
+        return
+      }
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(body)
+      } catch (error) {
+        json(res, 400, {
+          ok: false,
+          problem: 'the PUT body is not valid JSON: ' + (error instanceof Error ? error.message : String(error)),
+        })
+        return
+      }
+      const written = host.writeGates(root, parsed)
+      if (!written.ok) json(res, 400, { ok: false, problem: written.problem })
+      else json(res, 200, { ok: true, ...(written.path === undefined ? {} : { path: written.path }) })
+    },
+  }
+}
+
+/**
+ * Build the routes. Returns [state, events, doc, gates] in registration order.
  * @param host - the resolved-root + fs-fold seam (the RecursiveRuntime adapter).
  */
 export function makeRecursiveRoutes(host: RecursiveRouteHost): readonly { kind: 'exact'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }[] {
@@ -176,7 +337,7 @@ export function makeRecursiveRoutes(host: RecursiveRouteHost): readonly { kind: 
       await push()
     },
   }
-  return [state, events, docRoute(host)]
+  return [state, events, docRoute(host), gatesRoute(host)]
 }
 
 /**

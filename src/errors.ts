@@ -103,6 +103,24 @@ export const TOOL_ERRORS = {
     next: 'fix the workspace config — remove gates.runStart.ask (or set it true) — then call recursive_ask with gate run-start so a person approves the run before it begins',
   },
   /**
+   * THE WORKSPACE GATES FILE'S OWN REFUSAL, covering the three ways it can be unusable: not JSON, not
+   * an object, or naming a field the schema does not declare. All three are the same class of failure
+   * — the file cannot be interpreted — and all three must be LOUD: a malformed
+   * `.recursive/config/recursive-gates.json` that silently fell back to the plugin Config would make
+   * the settings the user can see in the workspace disagree with the settings the run obeys.
+   *
+   * The detail names the unknown key and lists the keys that ARE allowed, so the refusal is actionable
+   * without opening this source. Type and label refusals use the codes that already exist (RM1145 for a
+   * `default` outside its gate's labels, RM1146 for a disabled run-start ask); this entry is only for
+   * "this file is not the shape".
+   */
+  GATES_CONFIG_INVALID: {
+    code: 'RM1147',
+    klass: 'input',
+    problem: 'the workspace gates file cannot be read as the gates schema: it is malformed, or it names a field the schema does not declare',
+    next: 'fix .recursive/config/recursive-gates.json (valid JSON, only qa.humanReview, gates.<runStart|tddMode|qaSignoff|gateBlock>.{ask,default}, and teammate.primitiveRoles) or delete it to fall back to the plugin configuration',
+  },
+  /**
    * ⚠ THIS SENTENCE USED TO BE FALSE, and the falseness is the point of the entry.
    *
    * It said relay "applies only to the run-start gate, which is the only gate that asks the user-questions

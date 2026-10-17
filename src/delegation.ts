@@ -1,9 +1,10 @@
 /**
  * Plugin-driven delegation + report/reference validation + durable action
  * records (Phase B R4/R6/R7, PROPOSAL 10.5/10.9). The ENFORCED path (distinct
- * from the agent-driven subagent tool): the plugin calls ctx.subagents.start()
- * with the full SubagentStartRequest (outputSchema/toolFilter/maxDepth) and
- * validates the child's references before writing an action record.
+ * from the agent-driven subagent tool): the plugin calls `ctx.subagents.startActivation()`
+ * (legacy hosts: `start()`) with the full SubagentStartRequest (outputSchema/toolFilter/maxDepth) and
+ * validates the child's references before writing an action record. The CONTINUABLE path uses the same
+ * activation method with `delivery: 'parent'`.
  *
  * Workspace-scoped (run 03 R1) + fail-loud + optionality-preserving.
  */
@@ -64,12 +65,67 @@ export interface ContinuableOpResult {
   reason?: string
 }
 
+/**
+ * ⚠ THE HOST'S CURRENT METHOD NAMES, AND THE RETIRED ONES THIS SEAM STILL ACCEPTS.
+ *
+ * DSH 0.2.1-rc.2 renamed the managed-child lifecycle (verified in
+ * `D:\deepseek-harness\packages\subagent\subagent`, tag `dsh-v0.2.1-rc.2`):
+ *
+ *   startContinuable             → startActivation   (whose spec now REQUIRES `delivery`)
+ *   drainContinuableChildren     → drainChildren
+ *   drainContinuableDescendants  → drainDescendants
+ *   start (one-shot)             → startActivation with `delivery: 'caller'`
+ *
+ * `sendMessage` and `interrupt` were NOT renamed; `followup` was never a host name at all (it is the name the
+ * plugin's own fakes used, and is kept only as a legacy fallback so older fakes keep exercising the loop).
+ *
+ * The table below is the seam's PREFERRED resolution order. It is exported because
+ * `tests/delegation-contract.spec.ts` reads the INSTALLED host's own source and asserts every `current` name
+ * still exists there — so the NEXT rename fails a test loudly instead of degrading to a refusal or a silent
+ * `{ ok: true }` no-op (the exact failure mode that let the 0.2.1 rename pass a 1419-test suite).
+ */
+export const SUBAGENT_SEAM_CONTRACT = {
+  /** Current host methods the seam resolves FIRST; each MUST exist in the installed host. */
+  current: {
+    startActivation: 'startActivation',
+    sendMessage: 'sendMessage',
+    interrupt: 'interrupt',
+    drainChildren: 'drainChildren',
+    drainDescendants: 'drainDescendants',
+    getProvider: 'getProvider',
+    list: 'list',
+  },
+  /** Retired names kept ONLY as documented fallbacks; a current host need not have any of them. */
+  legacy: {
+    start: 'start',
+    startContinuable: 'startContinuable',
+    followup: 'followup',
+    drainContinuableChildren: 'drainContinuableChildren',
+    drainContinuableDescendants: 'drainContinuableDescendants',
+  },
+} as const
+
 /** Minimal host-realm contract for ctx.subagents (the seam we call). */
 export interface SubagentsRuntimeLike {
-  start(name: string, request: SubagentStartRequestLike): Promise<SubagentResultLike>
+  /**
+   * LEGACY one-shot start (DSH <= 0.2.0-rc.2). 0.2.1-rc.2 REMOVED it: a one-shot child is now established
+   * through `startActivation` with `delivery: 'caller'`. It stays optional and second in preference (see
+   * `resolveOneShotStart`), because the widened peer range still admits 0.2.0-rc.2.
+   */
+  start?(name: string, request: SubagentStartRequestLike): Promise<SubagentResultLike>
   getProvider?(name: string): unknown
   list?(): unknown
-  /** T4: continuable child lifecycle (startContinuable / followup / interrupt / drain). */
+  /**
+   * CURRENT (DSH >= 0.2.1-rc.2): establish a managed activation. The spec's `delivery` is REQUIRED:
+   * `'parent'` makes the settlement notify the model, `'caller'` only returns it. The returned activation's
+   * `result`/`dispose` are retained by the host's registry; this seam consumes only the identities on the
+   * continuable path and must NOT dispose the activation there (the same child receives repair follow-ups).
+   */
+  startActivation?(spec: ContinuableStartSpecLike): Promise<SubagentActivationLike>
+  /**
+   * LEGACY (DSH <= 0.2.0-rc.2): renamed to `startActivation`. Preferred name first, this fallback second —
+   * and only when `startActivation` is absent, because a host that has both is a current host.
+   */
   startContinuable?(spec: ContinuableStartSpecLike): Promise<ContinuableStartLike>
   /** The parent MUST be the exact live Agent (object-identity authority), never a `{ id }` copy. */
   followup?(parent: SubagentParentHandle, childId: ContinuableChildId, content: readonly { type: 'text'; text: string }[], options: SubagentFollowupOptionsLike): Promise<ContinuableMessageId>
@@ -95,7 +151,23 @@ export interface SubagentsRuntimeLike {
    */
   sendMessage?(sender: SubagentParentHandle, targetId: ContinuableChildId, content: readonly { type: 'text'; text: string }[], options: { signal?: AbortSignalLike }): Promise<ContinuableMessageId>
   interrupt?(targetSessionId: ContinuableChildId, authority: SubagentInterruptAuthorityLike): void
+  /**
+   * CURRENT (DSH >= 0.2.1-rc.2): release selected resident direct children of one exact live parent.
+   * Preferred over the legacy `drainContinuableChildren` below.
+   */
+  drainChildren?(parent: SubagentParentHandle, childIds: readonly ContinuableChildId[]): Promise<void>
+  /**
+   * LEGACY (DSH <= 0.2.0-rc.2): renamed to `drainChildren`. A fallback only.
+   */
   drainContinuableChildren?(parent: SubagentParentHandle, childIds: readonly ContinuableChildId[]): Promise<void>
+  /**
+   * CURRENT (DSH >= 0.2.1-rc.2): release every descendant below the given exact live parents. Preferred over
+   * the legacy `drainContinuableDescendants` below.
+   */
+  drainDescendants?(parents: readonly SubagentParentHandle[]): Promise<void>
+  /**
+   * LEGACY (DSH <= 0.2.0-rc.2): renamed to `drainDescendants`. A fallback only.
+   */
   drainContinuableDescendants?(parents: readonly SubagentParentHandle[]): Promise<void>
 }
 
@@ -195,8 +267,125 @@ export function defaultReviewToolFilter(): unknown {
 }
 
 /**
- * Call ctx.subagents.start() with the full request. Fail loud on capability
- * mismatch, missing provider, or unsupported schema (never silent).
+ * ⚠ THE HOST'S TERMINAL RESULT, STRUCTURALLY. It is NOT {@link SubagentResultLike}: the host's `output` is
+ * `ContentBlock[]` (`types.ts:252-278`) and its `stopReason` is a closed vocabulary, while this plugin's
+ * structural result (which fakes and older hosts produce) carries `output?: string`. The one-shot activation
+ * path maps between them ONCE, in {@link activationResultToSubagentResult}.
+ */
+export interface SubagentActivationResultLike {
+  readonly output?: readonly { readonly type?: string; readonly text?: string }[] | string
+  readonly structured?: unknown
+  readonly stopReason?: string
+  readonly diagnostic?: string
+}
+
+/**
+ * One accepted managed activation (the current host's `startActivation` return shape,
+ * `packages/subagent/subagent/src/types.ts:47-59`).
+ *
+ * ⚠ THIS SEAM CONSUMES ONLY THE IDENTITIES. `result`/`dispose` are present because the host returns them and a
+ * one-shot delegation uses them; the CONTINUABLE path deliberately does NOT dispose the activation — the same
+ * child receives the repair follow-ups, so its release belongs to the closeout drain.
+ */
+export interface SubagentActivationLike {
+  /** The child's durable session id, stable across activations. */
+  readonly childId: ContinuableChildId
+  /** The accepted inbox message id; the host guarantees it for a reserved (local) child. */
+  readonly messageId?: ContinuableMessageId
+  /** The child's terminal result, resolved when its run settles. */
+  readonly result: Promise<SubagentActivationResultLike>
+  /** Release this exact activation. Idempotent on the host. */
+  dispose(): Promise<void>
+}
+
+/** The one-shot start seam, normalized: always (provider, request) → the child's result. */
+export interface OneShotStartSeam {
+  /** The host method this seam resolved to, so a caller can report WHAT ran. */
+  readonly name: 'startActivation' | 'start'
+  readonly start: (provider: string, request: SubagentStartRequestLike) => Promise<SubagentResultLike>
+}
+
+/**
+ * Resolve the one-shot start under the CURRENT name first and the legacy name second.
+ *
+ * 0.2.1-rc.2 removed `start(name, request)` outright; a one-shot child is now a managed activation with
+ * `delivery: 'caller'` (the settlement is RETURNED, not injected into the parent's inbox). That is why this
+ * resolver exists rather than a bare `subagents.start(...)` call: against a current host the bare call throws
+ * `ctx.subagents.start is not available`, which is the same silent-degradation class as the continuable rename.
+ *
+ * Returns `undefined` when neither exists so the caller can fail loud with the names it looked for.
+ */
+export function resolveOneShotStart(subagents: SubagentsRuntimeLike | undefined): OneShotStartSeam | undefined {
+  if (subagents === undefined) return undefined
+  const startActivation = subagents.startActivation
+  if (startActivation !== undefined) {
+    return {
+      name: 'startActivation',
+      start: (provider, request) => startOneShotActivation(subagents, startActivation, provider, request),
+    }
+  }
+  const start = subagents.start
+  if (start !== undefined) {
+    return { name: 'start', start: (provider, request) => start.call(subagents, provider, request) }
+  }
+  return undefined
+}
+
+/**
+ * Start one child the current way and return its terminal result.
+ *
+ * `delivery: 'caller'` is the one-shot policy: the result comes back to THIS caller instead of being injected
+ * into the parent's inbox, which is what `delegate()`'s synchronous contract expects. `'parent'` would ALSO
+ * notify the model — a second delivery for a result the caller already holds.
+ */
+async function startOneShotActivation(
+  subagents: SubagentsRuntimeLike,
+  startActivation: NonNullable<SubagentsRuntimeLike['startActivation']>,
+  provider: string,
+  request: SubagentStartRequestLike,
+): Promise<SubagentResultLike> {
+  const { label, signal, ...activationRequest } = request
+  const started = await startActivation.call(subagents, {
+    provider,
+    label: label ?? 'subagent',
+    request: activationRequest,
+    // SAFETY: every caller passes an AbortSignal (the tool's exec.signal); the host only calls
+    // `throwIfAborted()` and forwards it as an AbortSignal, and the fallback IS a real AbortSignal.
+    signal: (signal as AbortSignalLike | undefined) ?? new AbortController().signal,
+    delivery: 'caller',
+  })
+  try {
+    return activationResultToSubagentResult(await started.result)
+  } finally {
+    await started.dispose()
+  }
+}
+
+/**
+ * Map the host's `SubagentResult` onto this plugin's structural result.
+ *
+ * The TWO shape differences, both deliberate: the host returns `output` as content blocks (joined to text
+ * here, which is what the plugin's readers consume) and states `success` nowhere (derived from the stop
+ * reason — only a `completed` run is accepted, the same rule `evaluateDelegationResult` applies).
+ */
+export function activationResultToSubagentResult(result: SubagentActivationResultLike): SubagentResultLike {
+  const output = typeof result.output === 'string'
+    ? result.output
+    : Array.isArray(result.output)
+      ? result.output.map((block) => (typeof block?.text === 'string' ? block.text : '')).join('')
+      : undefined
+  // Built property-by-property rather than with conditional spreads: an absent optional field must be
+  // absent, not present-as-undefined, because `evaluateDelegationResult` branches on `stopReason` truthiness.
+  const mapped: SubagentResultLike = { success: result.stopReason === undefined || result.stopReason === 'completed' }
+  if (output !== undefined) mapped.output = output
+  if (result.structured !== undefined) mapped.structured = result.structured
+  if (result.stopReason !== undefined) mapped.stopReason = result.stopReason
+  return mapped
+}
+
+/**
+ * Call ctx.subagents.startActivation() (current) or ctx.subagents.start() (legacy) with the full request. Fail
+ * loud on missing seam, capability mismatch, missing provider, or unsupported schema (never silent).
  */
 export async function delegate(input: {
   subagents: SubagentsRuntimeLike
@@ -204,14 +393,18 @@ export async function delegate(input: {
   request: SubagentStartRequestLike
 }): Promise<SubagentResultLike> {
   const { subagents, provider, request } = input
-  if (!subagents || typeof subagents.start !== 'function') {
-    throw delegationError('ctx.subagents.start is not available (no subagent seam)', 'NO_PROVIDER')
+  const seam = resolveOneShotStart(subagents)
+  if (!subagents || seam === undefined) {
+    throw delegationError(
+      'ctx.subagents.startActivation (or the legacy start) is not available (no subagent seam)',
+      'NO_PROVIDER',
+    )
   }
   if (!provider) {
     throw delegationError('No provider named for delegation', 'NO_PROVIDER')
   }
   try {
-    return await subagents.start(provider, request)
+    return await seam.start(provider, request)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     const code = (err as { code?: string })?.code
@@ -224,14 +417,13 @@ export async function delegate(input: {
 
 /**
  * T4: continuable-child delegation — ONE durable child receives the initial
- * prompt (startContinuable), each REVISE is delivered as a followup to the SAME
- * child (FIFO, working set retained), and the parent observes each round's
- * settlement through the injected `awaitRoundResult` seam (in live usage the
- * child's settlement lands in the parent's inbox — `reportFrom` is the
- * CHILD-side API, so the parent-side loop collects via settlement, not by
- * calling it). A hung reviewer is cancelled with `interruptContinuable`
- * (keepInbox: the child's pending inbox survives). Falls back to one-shot
- * `delegate` when the seam has no continuable methods.
+ * prompt (the start seam: `startActivation` on a current host, legacy `startContinuable` on 0.2.0), each
+ * REVISE is delivered as a followup to the SAME child (FIFO, working set retained), and the parent observes
+ * each round's settlement through the injected `awaitRoundResult` seam (in live usage the child's settlement
+ * lands in the parent's inbox — `reportFrom` is the CHILD-side API, so the parent-side loop collects via
+ * settlement, not by calling it). A hung reviewer is cancelled with `interruptContinuable`
+ * (keepInbox: the child's pending inbox survives). A service with no continuable start seam is REFUSED — this
+ * path never degrades to a one-shot child.
  */
 
 /** What the caller asks for when starting a continuable background child (structural subset). */
@@ -246,6 +438,15 @@ export interface ContinuableStartSpecLike {
   readonly request: Omit<SubagentStartRequestLike, 'label' | 'signal' | 'outputSchema'>
   /** Caller cancellation, owning the operation only until inbox acceptance. */
   readonly signal?: AbortSignalLike
+  /**
+   * ⚠ CURRENT HOST REQUIREMENT (DSH >= 0.2.1-rc.2): the settlement delivery policy.
+   *
+   * `'parent'` injects the settled result into the model's inbox (which is how the repair loop observes a
+   * round); `'caller'` only settles the returned activation. This seam ALWAYS passes `'parent'` — for a
+   * continuable delegation the parent-inbox settlement IS the observation seam — while the one-shot path
+   * passes `'caller'`. The field is absent from the legacy spec and ignored by a 0.2.0 host.
+   */
+  readonly delivery: 'parent' | 'caller'
 }
 
 /** Minimal cancellation shape (a live AbortSignal satisfies it). */
@@ -265,25 +466,77 @@ export type FollowupSeam = (
  * Resolve the follow-up seam under EITHER name the service may use, so a rename on the host side
  * cannot silently disable the repair loop again.
  *
- * `followup` is preferred when present (the shape this plugin's fakes and older hosts use);
- * otherwise the host's real `sendMessage` is adapted. The adapter drops the plugin's `source`
- * descriptor, because the host's `SubagentSendMessageOptions` carries only `signal` — and it
- * SUPPLIES a signal when the caller omits one, because the host types it as required. Omitting it
- * is exactly the defect that made the one-shot fallback throw `reading 'aborted'`.
+ * ⚠ PREFERENCE IS `sendMessage` FIRST — it is the host's REAL method (verified in both 0.2.0-rc.2 and
+ * 0.2.1-rc.2: `sendMessage(sender, targetId, content, { signal })`); `followup` was never a host name at all,
+ * only the name this plugin's older fakes used. Preferring the fake name meant a service that offered BOTH
+ * would be driven through the unbound shape. The legacy `followup` remains as a fallback so those fakes keep
+ * exercising the loop. Either way the adapter drops the plugin's `source` descriptor (the host's
+ * `SubagentSendMessageOptions` carries only `signal`) and SUPPLIES a signal when the caller omits one, because
+ * the host types it as required — omitting it is exactly the defect that made the one-shot fallback throw
+ * `reading 'aborted'`.
  *
  * Returns `undefined` when the service offers neither, so callers keep falling back to one-shot
  * rather than fabricating authority.
  */
 export function resolveFollowupSeam(subagents: SubagentsRuntimeLike | undefined): FollowupSeam | undefined {
   if (subagents === undefined) return undefined
+  const sendMessage = subagents.sendMessage
+  if (sendMessage !== undefined) {
+    return (parent, childId, content, options) =>
+      sendMessage.call(subagents, parent, childId, content, {
+        signal: options.signal ?? new AbortController().signal,
+      })
+  }
   const direct = subagents.followup
   if (direct !== undefined) return (parent, childId, content, options) => direct.call(subagents, parent, childId, content, options)
-  const sendMessage = subagents.sendMessage
-  if (sendMessage === undefined) return undefined
-  return (parent, childId, content, options) =>
-    sendMessage.call(subagents, parent, childId, content, {
-      signal: options.signal ?? (new AbortController().signal as unknown as AbortSignalLike),
-    })
+  return undefined
+}
+
+/** The continuable-start seam, normalized, plus the host method name it resolved to. */
+export interface ContinuableStartSeam {
+  /** `startActivation` on a current host; `startContinuable` only on a 0.2.0-rc.2 host. */
+  readonly name: 'startActivation' | 'startContinuable'
+  readonly start: (spec: ContinuableStartSpecLike) => Promise<ContinuableStartLike>
+}
+
+/**
+ * Resolve the managed-child start under the CURRENT name first (`startActivation`) and the documented LEGACY
+ * fallback second (`startContinuable`).
+ *
+ * ⚠ THE BINDING IS LOAD-BEARING. Both host implementations are methods on a service instance; extracting one
+ * unbound made the live call throw `Cannot read properties of undefined` (measured: the host method opens with
+ * `this.requireManager()` / `this.requireContinuations()`). Every resolution here calls through `.call(service)`,
+ * so the receiver survives.
+ *
+ * Returns `undefined` when neither exists, so `delegateContinuable` can REFUSE with the names it looked for
+ * instead of silently taking a one-shot path.
+ */
+export function resolveContinuableStartSeam(subagents: SubagentsRuntimeLike | undefined): ContinuableStartSeam | undefined {
+  if (subagents === undefined) return undefined
+  const startActivation = subagents.startActivation
+  if (startActivation !== undefined) {
+    return {
+      name: 'startActivation',
+      start: async (spec) => {
+        const activation = await startActivation.call(subagents, spec)
+        // The activation's `messageId` is optional on the host type because an EXTERNAL backend has no local
+        // inbox. A continuable child is observed through its inbox, so an activation without one cannot carry
+        // this loop; fail with that fact instead of pushing `undefined` into the round observer.
+        if (activation.messageId === undefined) {
+          throw new Error(
+            'startActivation returned no messageId: a continuable child needs a local inbox, so the selected '
+            + 'provider must support continuable creation',
+          )
+        }
+        return { childId: activation.childId, messageId: activation.messageId }
+      },
+    }
+  }
+  const startContinuable = subagents.startContinuable
+  if (startContinuable !== undefined) {
+    return { name: 'startContinuable', start: (spec) => startContinuable.call(subagents, spec) }
+  }
+  return undefined
 }
 
 /** Identities returned once a continuable child accepted its initial prompt. */
@@ -599,9 +852,11 @@ export function describeChildRoute(input: {
 
 /**
  * Run a multi-round delegated task on ONE durable continuable child:
- * 1. `startContinuable` (initial prompt) — `start()` is never called.
+ * 1. the start seam (current `startActivation`, legacy `startContinuable`) sends the initial prompt — `start()`
+ *    is never called.
  * 2. `awaitRoundResult` observes the child's settlement for that round.
- * 3. On REVISE: `followup` delivers the repair instruction to the SAME child.
+ * 3. On REVISE: the follow-up seam (current `sendMessage`, legacy `followup`) delivers the repair instruction
+ *    to the SAME child.
  * 4. On APPROVE/REJECT: finish (accepted only when the verdict is APPROVE and
  *    the result evaluates as accepted).
  *
@@ -621,7 +876,7 @@ export async function delegateContinuable(input: {
   /**
    * T36: RESUME an existing durable child instead of starting one. The turn-shaped
    * caller passes the childId from a previous `parked` round, which is what makes
-   * the loop resumable across turns — `startContinuable` is not called, so a parked
+   * the loop resumable across turns — the start seam is not called, so a parked
    * round does not create a second child.
    */
   resumeChild?: ContinuableChildId
@@ -634,7 +889,7 @@ export async function delegateContinuable(input: {
    *
    * Absent, this is resolved from `ctx.subagents` exactly as it always was (`resolveFollowupSeam`, which accepts
    * either the host's `sendMessage` or the older `followup`). A caller that started its child somewhere OTHER than
-   * `startContinuable` — a rostered teammate — must be able to deliver the repair through that same surface, or
+   * the start seam — a rostered teammate — must be able to deliver the repair through that same surface, or
    * the repair loop would send a REVISE to a child the caller did not create through this seam. The roster
    * addresses children BY NAME, so its seam supplies one: `(parent, childId, content) => team.sendMessage(parent,
    * { target: name, content, signal })`.
@@ -654,12 +909,13 @@ export async function delegateContinuable(input: {
   const sessionModel = readSessionModel(parent)
   const childRoute = describeChildRoute({ requested: input.agentOptions?.model ?? null, session: sessionModel })
 
-  // ⚠⚠ A METHOD EXTRACTED FROM A SERVICE MUST BE BOUND — `startContinuable` WAS NOT, AND THAT MADE
+  // ⚠⚠ A METHOD EXTRACTED FROM A SERVICE MUST BE BOUND — THE START METHOD WAS NOT, AND THAT MADE
   // THE WHOLE CONTINUABLE PATH DEAD ON THE HOST EVEN AFTER THE SEAM NAME WAS FIXED.
   //
-  // `const startContinuable = subagents?.startContinuable` captures the function with `this` detached.
-  // The host's implementation opens with `this.requireContinuations()`
-  // (packages/subagent/subagent/src/index.ts:261), so the very first host call threw
+  // Capturing the function (`const start = subagents?.startContinuable`, or the same for `startActivation`)
+  // detaches `this`. The host's implementation opens with `this.requireManager()` (0.2.1-rc.2,
+  // packages/subagent/subagent/src/index.ts:269) / `this.requireContinuations()` (0.2.0-rc.2), so the very
+  // first host call threw
   //   Cannot read properties of undefined (reading 'requireContinuations')
   // — a live-verified failure, caught only by binding the receiver in a scratch shim: with it, a real
   // durable child is created, runs, settles and is filed; without it, no child is ever created.
@@ -667,10 +923,9 @@ export async function delegateContinuable(input: {
   // MEASURED in a live A/B: 0.9.3 entered the continuable branch (no fallback, no fs_read rejection)
   // and still produced no child, because of this one line. The follow-up seam was bound by
   // `resolveFollowupSeam`; this extraction was missed — the same defect, one function over. Bind BOTH
-  // here, and prefer a bound call over passing the raw method anywhere.
-  const startContinuable = subagents?.startContinuable === undefined
-    ? undefined
-    : (spec: ContinuableStartSpecLike) => subagents!.startContinuable!(spec)
+  // here, and prefer a bound call over passing the raw method anywhere. `resolveContinuableStartSeam` binds by
+  // calling `.call(service)`, and prefers `startActivation` over the legacy `startContinuable`.
+  const startSeam = resolveContinuableStartSeam(subagents)
   // ⚠ RESOLVED UNDER EITHER NAME. The host calls it `sendMessage`; probing only `followup` made
   // this whole branch dead against the live service (see `sendMessage` on SubagentsRuntimeLike).
   // A caller-supplied seam WINS: a child started through the roster is followed up through the roster
@@ -679,12 +934,12 @@ export async function delegateContinuable(input: {
   // A continuable loop MUST observe the child's real settlement AND hold the exact live parent
   // Agent (the live service authorizes followup by object identity).
   //
-  // ⚠ A RESUMED ROUND DOES NOT NEED `startContinuable`, and requiring it hid a real shape: a roster child was
-  // created by `agentTeams.spawnTeammate`, whose own follow-up seam is the roster's. `startContinuable` exists on
-  // the live host anyway (the roster itself calls it), so this relaxation changes nothing live — it makes the
-  // requirement say what the branch actually uses, instead of demanding a method it will not call. Every other
-  // input combination is judged exactly as before, which is what keeps the refusal's meaning intact.
-  const canStartOrResume = startContinuable !== undefined
+  // ⚠ A RESUMED ROUND DOES NOT NEED A START SEAM, and requiring one hid a real shape: a roster child was
+  // created by `agentTeams.spawnTeammate`, whose own follow-up seam is the roster's. `startActivation` exists
+  // on the live host anyway (the roster itself calls it), so this relaxation changes nothing live — it makes
+  // the requirement say what the branch actually uses, instead of demanding a method it will not call. Every
+  // other input combination is judged exactly as before, which is what keeps the refusal's meaning intact.
+  const canStartOrResume = startSeam !== undefined
     || (input.resumeChild !== undefined && input.followup !== undefined)
   const hasContinuableSeam = canStartOrResume && followup !== undefined && input.awaitRoundResult !== undefined
   if (!hasContinuableSeam || subagents === undefined || parent === undefined) {
@@ -706,7 +961,11 @@ export async function delegateContinuable(input: {
     // The honest answer is REFUSAL that names every missing piece, and that points at the one
     // supported way to get a fire-and-forget child: ask for it explicitly.
     const missing = [
-      hasContinuableSeam ? null : 'the continuable seam (startContinuable + a follow-up method + awaitRoundResult)',
+      // ⚠ THE MESSAGE NAMES THE METHOD THE SEAM LOOKED FOR, so a future rename is diagnosable from the refusal
+      // alone. `startActivation` is the current name; `startContinuable` is the documented legacy fallback.
+      hasContinuableSeam
+        ? null
+        : 'the continuable seam (startActivation, or the legacy startContinuable, + a follow-up method + awaitRoundResult)',
       subagents === undefined ? 'the subagents runtime' : null,
       parent === undefined ? 'the exact live parent Agent (object identity, never a { id } copy)' : null,
     ].filter((part): part is string => part !== null).join(', ')
@@ -745,19 +1004,24 @@ export async function delegateContinuable(input: {
     provider,
     label,
     request,
-    // ⚠ FU-9 — THE SPEC CARRIES A SIGNAL BECAUSE THE HOST TYPE REQUIRES ONE (`ContinuableStartSpec.signal`
+    // ⚠ CURRENT-HOST REQUIREMENT. `SubagentActivationSpec.delivery` is non-optional in 0.2.1-rc.2
+    // (packages/subagent/subagent/src/types.ts:42-44), and `'parent'` is the policy a continuable delegation
+    // NEEDS: the settlement is injected into the model's inbox, which is the observation seam every repair
+    // round reads. Omitting it against a current host is a contract violation; passing it to a 0.2.0 host is
+    // harmless because that host's `startContinuable` spec has no `delivery` field and ignores extras.
+    delivery: 'parent',
+    // ⚠ FU-9 — THE SPEC CARRIES A SIGNAL BECAUSE THE HOST TYPE REQUIRES ONE (`SubagentActivationSpec.signal`
     // is non-optional in packages/subagent/subagent/src/types.ts), and because both of the harness's own
     // callers supply one (tool-subagent passes `exec.signal`; agent-team's roster passes its own). NOT because
     // this is where `reading 'aborted'` came from — an earlier version of this comment said that and it was
-    // wrong, which cost two investigation rounds. Verified against the host:
+    // wrong, which cost two investigation rounds. Verified against the 0.2.0 host this seam was written against:
     //   • `startContinuable` reads the signal ONLY via `spec.signal.throwIfAborted()`
     //     (continuation.ts:143), so an absent signal there throws `reading 'throwIfAborted'`, never 'aborted'.
     //   • The host's one bare `signal.aborted` read (control.ts:106, `isCancellation`) is reachable only from
-    //     the `@Remote('prompt')` catch at subagent/src/index.ts:464 — NOT from startContinuable.
-    // The actual `reading 'aborted'` throw was on the ONE-SHOT FALLBACK's request below (see the signal on it),
-    // where the in-process driver reads `request.signal.aborted` bare. Supplying a signal here is still correct
-    // and contract-conformant; it is simply not the fix for that error, and saying it was sent this
-    // investigation after a symptom that had a different cause.
+    //     the `@Remote('prompt')` catch at subagent/src/index.ts:464 — NOT from the start method.
+    // The actual `reading 'aborted'` throw was on the ONE-SHOT FALLBACK's request (now removed; the one-shot
+    // path builds its own signal), where the in-process driver reads `request.signal.aborted` bare. Supplying a
+    // signal here is still correct and contract-conformant; it is simply not the fix for that error.
     signal: new AbortController().signal,
   }
   if (input.childId !== undefined) spec.childId = input.childId
@@ -773,10 +1037,10 @@ export async function delegateContinuable(input: {
       // ⚠ THE INVARIANT, STATED WHERE THE TYPE SYSTEM CAN SEE IT. `hasContinuableSeam` above admits two shapes:
       // a start seam, or a RESUMED roster child with an explicit follow-up seam. This branch is not a resume, so a
       // missing start seam here would mean the gate was wrong — a bug, not a runtime condition to paper over.
-      if (startContinuable === undefined) {
-        throw new Error('no startContinuable seam for a round that is not a resume')
+      if (startSeam === undefined) {
+        throw new Error('no startActivation (or legacy startContinuable) seam for a round that is not a resume')
       }
-      const started = await startContinuable(spec)
+      const started = await startSeam.start(spec)
       childId = started.childId
       messageIds.push(started.messageId)
       rounds.push({ text: prompt })
@@ -877,39 +1141,86 @@ export function interruptContinuable(
 }
 
 /**
- * T4 closeout: release one continuable child (host drains its Activation and
- * disposes its handle). No-op when the seam lacks the method (one-shot hosts).
+ * T4 closeout: release selected continuable children (the host drains their Activations and disposes their
+ * handles).
+ *
+ * ⚠ NEW NAME FIRST. 0.2.1-rc.2 renamed the host method `drainContinuableChildren` → `drainChildren`
+ * (packages/subagent/subagent/src/index.ts:390). Probing only the old name made this helper a SILENT no-op on
+ * a current host — it reported `{ ok: true }` while releasing NOTHING, against a default cap of live
+ * continuable children. The old name is resolved only when the new one is absent (a 0.2.0-rc.2 host).
+ *
+ * NEVER THROWS for a missing seam: a closeout must not be turned into a failure by a host that cannot drain.
+ * The no-seam no-op now SAYS which names it looked for, so an empty release is diagnosable rather than silent.
  */
 export async function drainContinuableChildren(
   subagents: SubagentsRuntimeLike,
   parent: SubagentParentHandle,
   childIds: readonly ContinuableChildId[],
 ): Promise<ContinuableOpResult> {
-  if (subagents?.drainContinuableChildren === undefined || childIds.length === 0) return { ok: true }
-  try {
-    await subagents.drainContinuableChildren(parent, childIds)
-    return { ok: true }
-  } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+  if (childIds.length === 0) return { ok: true }
+  if (subagents !== null && subagents !== undefined) {
+    const current = subagents.drainChildren
+    if (current !== undefined) {
+      try {
+        await current.call(subagents, parent, childIds)
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+      }
+    }
+    const legacy = subagents.drainContinuableChildren
+    if (legacy !== undefined) {
+      try {
+        await legacy.call(subagents, parent, childIds)
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  }
+  return {
+    ok: true,
+    reason: 'no children-drain seam: the host exposes neither drainChildren (current, 0.2.1-rc.2) nor '
+      + 'drainContinuableChildren (legacy, <= 0.2.0-rc.2), so nothing was released',
   }
 }
 
 /**
- * T4 closeout (host teardown path): release every continuable descendant below
- * the given live parents (mirrors the live `drainContinuableDescendants`).
- * No-op when the seam lacks the method; the host owns this at session teardown.
+ * T4 closeout (host teardown path): release every continuable descendant below the given live parents.
+ *
+ * ⚠ NEW NAME FIRST: `drainContinuableDescendants` → `drainDescendants`
+ * (packages/subagent/subagent/src/index.ts:373). Same silent-no-op defect class as the children helper above;
+ * the host owns this call at session teardown, so a missing method is reported as a no-op WITH a reason.
  */
 export async function drainContinuableDescendants(
   subagents: SubagentsRuntimeLike | null,
   parents: readonly SubagentParentHandle[],
 ): Promise<ContinuableOpResult> {
-  const drain = subagents?.drainContinuableDescendants
-  if (drain === undefined || parents.length === 0) return { ok: true }
-  try {
-    await drain(parents)
-    return { ok: true }
-  } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+  if (parents.length === 0) return { ok: true }
+  if (subagents !== null) {
+    const current = subagents.drainDescendants
+    if (current !== undefined) {
+      try {
+        await current.call(subagents, parents)
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+      }
+    }
+    const legacy = subagents.drainContinuableDescendants
+    if (legacy !== undefined) {
+      try {
+        await legacy.call(subagents, parents)
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  }
+  return {
+    ok: true,
+    reason: 'no descendant-drain seam: the host exposes neither drainDescendants (current, 0.2.1-rc.2) nor '
+      + 'drainContinuableDescendants (legacy, <= 0.2.0-rc.2), so nothing was released',
   }
 }
 

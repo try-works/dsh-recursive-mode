@@ -17,15 +17,31 @@
  * READ-ONLY (R9): the client only GETs the live host route; no mutation.
  */
 import { createElement, type ReactNode } from 'react'
-import type { ClientContext, SessionListStateLike, SnapshotSelectorHook, WorkspaceListStateLike } from './contract.ts'
+import type {
+  ClientContext,
+  ClientSidebarRight,
+  ClientSidebarRightTabs,
+  SessionListStateLike,
+  SnapshotSelectorHook,
+  WorkspaceListStateLike,
+} from './contract.ts'
 import { isRecursivePreset, currentWorkspacePath } from './contract.ts'
 import { Board } from './board.tsx'
 import { Inspector } from './inspector.tsx'
+import { RecursiveGatesTab, RecursiveGatesTitle } from './gates-form.tsx'
 import { RecursiveSettings, RecursiveSettingsLive, type RecursiveSettingsSeatProps } from './settings.tsx'
 import { RunStartSpecSheet, RUN_START_TOOL_NAME } from './spec-sheet.tsx'
 import { useLiveProjection } from './use-live.ts'
 import { boardState, useBoardState } from './open-state.ts'
 import { injectBoardStyles } from './styles.ts'
+
+/**
+ * The Recursive gates tab's identity and kind, exported so a host/test can name them without a
+ * literal. `id` is the implementation identity AND the key the body/title seats register under;
+ * `kind` is what `sidebarRight.openTab(...)` names.
+ */
+export const RECURSIVE_TAB_ID = '@try-works/dsh-recursive-mode'
+export const RECURSIVE_TAB_KIND = 'recursive'
 
 /** Structural standard-prop face for the root scope (useSessions/useWorkspaces). */
 interface RootSlotProps {
@@ -91,10 +107,98 @@ export function RecursiveView({ useSessions, useWorkspaces }: { useSessions: Sna
   return createElement(Board, { snapshot, workspacePath: wsPath, variant: 'view', onOpenInspector: (sel) => boardState.openInspector(sel) })
 }
 
+/**
+ * Resolve an OPTIONAL client service without a bare property read.
+ *
+ * Cordis's context proxy THROWS on a property the plugin did not declare in `inject` ("cannot get
+ * property ... without inject"), and the right-sidebar services are deliberately not in this plugin's
+ * `dsh.client.inject` list: the tab is an addition to a bundle that must keep mounting on a host
+ * without the right sidebar. So the property read is attempted only defensively, and `ctx.get(name,
+ * false)` (non-strict) is the real lookup. Absent services mean "no gates tab", never a broken bundle.
+ */
+function clientService<T>(ctx: ClientContext, name: string): T | undefined {
+  try {
+    const direct = (ctx as unknown as Record<string, unknown>)[name]
+    if (direct !== undefined && direct !== null) return direct as T
+  } catch {
+    // Undeclared service property — fall through to the non-strict lookup.
+  }
+  try {
+    const service = ctx.get(name, false)
+    return service === null || service === undefined ? undefined : service as T
+  } catch {
+    return undefined
+  }
+}
+
+/** The session-scope standard props the gates body consumes. */
+interface GatesTabSeatProps {
+  sessionId?: string
+  cwd?: string
+}
+
+/**
+ * Register the Recursive tab TYPE and the two keyed seats that make it render (body + title) onto ONE
+ * context. The context decides the lifetime: the plugin fiber on the immediate path, or the
+ * service-scoped child fiber on the late-attach path.
+ *
+ * Stage one: `sidebarRightTabs.register({ id, kind, title })` — `id` is the implementation identity,
+ * `kind` is what `sidebarRight.openTab('recursive')` names. Stage two: the body into the keyed
+ * `sidebar.right.pane.tab` seat and the live title into `sidebar.right.pane.tab.title`, BOTH keyed by
+ * the definition's `id` (not the kind) — that is the dispatch contract the sidebar-right package
+ * documents. Everything is registered inside `ctx.effect`, so an unload disposes the type and the
+ * seats with the fiber.
+ */
+function gatesTabDisposers(ctx: ClientContext, tabs: ClientSidebarRightTabs): (() => void)[] {
+  const disposers: (() => void)[] = []
+  disposers.push(ctx.effect(() => tabs.register({
+    id: RECURSIVE_TAB_ID,
+    kind: RECURSIVE_TAB_KIND,
+    title: () => 'Recursive',
+  }), 'recursive: gates tab type'))
+  disposers.push(ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+    name: 'sidebar.right.pane.tab',
+    key: RECURSIVE_TAB_ID,
+  }, (props: GatesTabSeatProps) => createElement(RecursiveGatesTab, {
+    ...(props?.sessionId === undefined ? {} : { sessionId: props.sessionId }),
+    ...(props?.cwd === undefined ? {} : { cwd: props.cwd }),
+  }))))
+  disposers.push(ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
+    name: 'sidebar.right.pane.tab.title',
+    key: RECURSIVE_TAB_ID,
+  }, RecursiveGatesTitle)))
+  return disposers
+}
+
+function registerGatesTab(ctx: ClientContext): (() => void)[] {
+  const tabs = clientService<ClientSidebarRightTabs>(ctx, 'sidebarRightTabs')
+  if (tabs !== undefined) return gatesTabDisposers(ctx, tabs)
+  // ⚠ LATE ATTACH. The right-sidebar package may be mounted by a package the loader starts AFTER this
+  // one (the tab registry is provided by that package, not by the slot registry this bundle injects).
+  // `ctx.inject` loads a child fiber that starts when the service appears and stops when it goes away;
+  // registering the type + seats inside it ties them to the service's lifetime and retries if it is
+  // remounted, without adding a REQUIRED dependency that would stop this whole client bundle (board,
+  // settings, spec sheet) from mounting on a host without a right sidebar.
+  if (typeof ctx.inject !== 'function') return []
+  try {
+    ctx.inject(['sidebarRightTabs'], (lateCtx) => {
+      const lateTabs = clientService<ClientSidebarRightTabs>(lateCtx, 'sidebarRightTabs')
+      if (lateTabs !== undefined) gatesTabDisposers(lateCtx, lateTabs)
+    })
+  } catch {
+    // A host whose client context has no service loader: the immediate path is all there is.
+  }
+  return []
+}
+
 export function registerSlots(ctx: ClientContext): () => void {
   const disposers: (() => void)[] = []
   // Run 15: inject the one-shot theme-token stylesheet once per document (idempotent).
   disposers.push(injectBoardStyles())
+
+  // The Recursive configuration tab (right sidebar / chat context view). Registered before the
+  // other seats because it is the owner's required entry point; absent services register nothing.
+  disposers.push(...registerGatesTab(ctx))
 
   // Conversation view tab (Chat | Trajectory | Recursive): the recursive run
   // board as a first-class tab in the conversation header, rendered INLINE in
@@ -155,6 +259,16 @@ export function registerSlots(ctx: ClientContext): () => void {
   // scoped-slots standardProps), so the panel can subscribe to the SAME live route the board
   // reads and report the projection. Without the kit the panel still renders — with every value
   // reported as absent (never guessed), which is the honest degradation.
+  //
+  // ⚠ AND IT IS THE ENTRY POINT TO THE GATES TAB. The owner required the configuration surface to be
+  // reached "via the Recursive tab in the chat context view"; this button opens exactly that tab
+  // (`openTab('recursive')`). The service is resolved AT CLICK TIME rather than at registration time,
+  // so a right sidebar mounted by a later loader package still gets a working button — and the button
+  // is always rendered because the settings panel exists inside the GUI shell that owns the sidebar.
+  const openGatesTab = (): void => {
+    const sidebarRight = clientService<ClientSidebarRight>(ctx, 'sidebarRight')
+    sidebarRight?.openTab(RECURSIVE_TAB_KIND)
+  }
   disposers.push(ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'recursive',
@@ -162,12 +276,13 @@ export function registerSlots(ctx: ClientContext): () => void {
     label: 'Recursive',
   }, (props: RecursiveSettingsSeatProps) => {
     if (props.useSessions === undefined || props.useWorkspaces === undefined) {
-      return createElement(RecursiveSettings, { close: props.close })
+      return createElement(RecursiveSettings, { close: props.close, onOpenTab: openGatesTab })
     }
     return createElement(RecursiveSettingsLive, {
       close: props.close,
       useSessions: props.useSessions,
       useWorkspaces: props.useWorkspaces,
+      onOpenTab: openGatesTab,
     })
   })))
 

@@ -1100,6 +1100,255 @@ dl.rec-settings-rows {
   overflow-wrap: anywhere;
 }
 
+/* ===== Recursive gates tab (right sidebar): the workspace settings form =====
+   Lives inside the right-sidebar shell, so it consumes the shell's --dsw-alias-* tokens (like the
+   settings panel) and follows the app theme. The body is the only scroll container: a narrow sidebar
+   can be short, and the Save/Reset actions must stay reachable independently of the list. */
+.rec-settings-tab {
+  margin-left: auto;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.rec-settings-tab:hover {
+  background: var(--dsw-alias-bg-layer-3);
+}
+
+.rec-settings-tab + .rec-settings-close {
+  margin-left: 0;
+}
+
+.rec-gates {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 14px 16px 18px;
+  overflow-y: auto;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.rec-gates-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rec-gates-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.rec-gates-tag {
+  flex: none;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--dsw-alias-label-tertiary);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+}
+
+.rec-gates-lede,
+.rec-gates-hint {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.rec-gates-hint-inline {
+  flex: 1;
+  min-width: 0;
+}
+
+.rec-gates-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rec-gates-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+}
+
+.rec-gates-h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rec-gates-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.rec-gates-row:first-of-type {
+  border-top: none;
+}
+
+.rec-gates-label {
+  flex: 1 1 130px;
+  min-width: 0;
+}
+
+.rec-gates-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.rec-gates-control-text {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.rec-gates-switch {
+  width: 30px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--dsw-alias-state-business-primary);
+  cursor: pointer;
+}
+
+.rec-gates-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.rec-gates-source {
+  flex: none;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--dsw-alias-label-tertiary);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+}
+
+.rec-gates-source[data-source='config'] {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.rec-gates-source[data-source='file'] {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-state-success-primary);
+}
+
+.rec-gates-default {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.rec-gates-default-label {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.rec-gates-select {
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+}
+
+.rec-gates-warning,
+.rec-gates-error,
+.rec-gates-notice {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+
+.rec-gates-warning {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-state-warn-secondary);
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+}
+
+.rec-gates-error {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-state-error-secondary);
+  border: 1px solid var(--dsw-alias-state-error-primary);
+}
+
+.rec-gates-notice {
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-state-success-secondary);
+  border: 1px solid var(--dsw-alias-state-success-primary);
+}
+
+.rec-gates-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: sticky;
+  bottom: 0;
+  padding-top: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.rec-gates-button {
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  background: transparent;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.rec-gates-button:hover:not(:disabled) {
+  background: var(--dsw-alias-bg-layer-3);
+}
+
+.rec-gates-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.rec-gates-save {
+  background: var(--dsw-alias-state-business-primary);
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
 /* ===== Run-start spec sheet (tool.call.toolview key 'recursive_ask') =====
    The document beside the run-start question. LIGHT is the only theme here: the sheet renders inline in a
    transcript row, not on the board, so it does not own a data-theme attribute and must not inherit the

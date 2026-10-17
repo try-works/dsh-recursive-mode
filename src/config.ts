@@ -115,6 +115,63 @@ export interface RecursiveModeConfig {
 }
 
 /**
+ * ⚠ THE THREE SUB-SCHEMAS ARE EXPORTED, AND THAT IS A CONTRACT RATHER THAN TIDINESS.
+ *
+ * `.recursive/config/recursive-gates.json` (see `src/gates-config.ts`) is a SECOND SOURCE for exactly
+ * these three settings. Two shapes hand-written in two files would be two validators, and the first
+ * time one gained a field the other would silently ignore it. So the file's schema is composed from
+ * THESE objects — the same `dict` keys, the same defaults, the same descriptions. A field added here
+ * becomes accepted (and visible to the unknown-key refusal) in the workspace file with no second edit.
+ *
+ * They are declared before `Config` only so `Config` can reference them; the settings service still
+ * discovers `Config` alone.
+ */
+export const teammateConfigSchema = z.object({
+  primitiveRoles: z.array(z.string()).default([]).description(
+    'Roles that keep the primitive dispatch path so their own provider/model/effort apply (a rostered '
+    + 'teammate cannot carry agentOptions and therefore inherits the Lead\'s route). Empty means team everywhere.',
+  ),
+})
+
+/** `qa.humanReview` — the phase-5 lint switch. Shared by the plugin Config and the workspace file. */
+export const qaConfigSchema = z.object({
+  humanReview: z.boolean().default(false).description(
+    'Set true to require a HUMAN sign-off of phase-5 manual QA: an agent-operated QA mode then fails the lint, ' +
+    'the artifact must carry the sign-off line recursive_ask writes, and it must contain a ## Human Review ' +
+    'Instructions section naming where the product runs, what the person must check, and how they sign off. ' +
+    'Leave false — the default — and the phase keeps its existing standard.',
+  ),
+})
+
+/**
+ * The four per-gate ask switches. Shared by the plugin Config and the workspace file, so the file cannot
+ * accept a gate key or a `default` label the Config schema would reject.
+ */
+export const gatesConfigSchema = z.object({
+  runStart: z.object({
+    ask: z.boolean().default(true).description('Ask a person before a run starts (arms the run goal).'),
+  }).description('The run-start gate (phase 0).'),
+  tddMode: z.object({
+    ask: z.boolean().default(false).description('Ask a person which TDD mode phase 3 uses.'),
+    default: z.string().default('strict').description(
+      'The TDD Mode recorded when the ask is disabled. Must be one of strict | pragmatic.',
+    ),
+  }).description('The TDD-mode gate (phase 3). Defaults to NOT asking, and to recording strict.'),
+  qaSignoff: z.object({
+    ask: z.boolean().default(true).description('Ask a person who signs the phase-5 manual QA off.'),
+    default: z.string().default('agent-operated').description(
+      'The QA Execution Mode recorded when the ask is disabled. Must be one of human | agent-operated | hybrid.',
+    ),
+  }).description('The QA-sign-off gate (phase 5).'),
+  gateBlock: z.object({
+    ask: z.boolean().default(true).description(
+      'Ask a person how a blocking gate is resolved (fix | reopen | abandon). Disabling this leaves a blocked '
+      + 'transition blocked on purpose: the ask is refused by name rather than invented.',
+    ),
+  }).description('The block-recovery gate (any phase).'),
+}).description('Per-gate human-ask switches: which gates put a question to a person, and what to record when not.')
+
+/**
  * The schema the settings service discovers. Field descriptions are the form's help
  * text, so they are written for the person toggling them, not for the reader of this file.
  */
@@ -175,12 +232,7 @@ export const Config = z.object({
    * Whichever surface a child gets, the routing notes state it, so the run's record never implies a model it
    * did not use.
    */
-  teammate: z.object({
-    primitiveRoles: z.array(z.string()).default([]).description(
-      'Roles that keep the primitive dispatch path so their own provider/model/effort apply (a rostered '
-      + 'teammate cannot carry agentOptions and therefore inherits the Lead\'s route). Empty means team everywhere.',
-    ),
-  }).description('Teammate dispatch surface: which roles stay off the agent-team roster, and why.'),
+  teammate: teammateConfigSchema.description('Teammate dispatch surface: which roles stay off the agent-team roster, and why.'),
   repoRoot: z.string().description(
     'Control-plane root. Defaults to the process working directory when unset.',
   ),
@@ -241,14 +293,7 @@ export const Config = z.object({
    * CONFIG, so an agent cannot select `agent-operated` to escape the gate — that mode fails the phase no
    * matter who wrote it, and the run cannot lock until a person's answer is what the artifact records.
    */
-  qa: z.object({
-    humanReview: z.boolean().default(false).description(
-      'Set true to require a HUMAN sign-off of phase-5 manual QA: an agent-operated QA mode then fails the lint, ' +
-      'the artifact must carry the sign-off line recursive_ask writes, and it must contain a ## Human Review ' +
-      'Instructions section naming where the product runs, what the person must check, and how they sign off. ' +
-      'Leave false — the default — and the phase keeps its existing standard.',
-    ),
-  }).description('Phase-5 QA: whether a person must sign the manual QA phase off, or an agent may.'),
+  qa: qaConfigSchema.description('Phase-5 QA: whether a person must sign the manual QA phase off, or an agent may.'),
   /**
    * ⚠ PER-GATE ASK SWITCHES — "every phase that has a human ask should also have the ask gate be
    * configurable true/false so users can customize when they are asked or not" (owner, 2026-10-17).
@@ -273,29 +318,7 @@ export const Config = z.object({
    * exists precisely to guarantee that a person signs phase 5 off, so a configuration that also disables that
    * ask must not silently let either side win.
    */
-  gates: z.object({
-    runStart: z.object({
-      ask: z.boolean().default(true).description('Ask a person before a run starts (arms the run goal).'),
-    }).description('The run-start gate (phase 0).'),
-    tddMode: z.object({
-      ask: z.boolean().default(false).description('Ask a person which TDD mode phase 3 uses.'),
-      default: z.string().default('strict').description(
-        'The TDD Mode recorded when the ask is disabled. Must be one of strict | pragmatic.',
-      ),
-    }).description('The TDD-mode gate (phase 3). Defaults to NOT asking, and to recording strict.'),
-    qaSignoff: z.object({
-      ask: z.boolean().default(true).description('Ask a person who signs the phase-5 manual QA off.'),
-      default: z.string().default('agent-operated').description(
-        'The QA Execution Mode recorded when the ask is disabled. Must be one of human | agent-operated | hybrid.',
-      ),
-    }).description('The QA-sign-off gate (phase 5).'),
-    gateBlock: z.object({
-      ask: z.boolean().default(true).description(
-        'Ask a person how a blocking gate is resolved (fix | reopen | abandon). Disabling this leaves a blocked '
-        + 'transition blocked on purpose: the ask is refused by name rather than invented.',
-      ),
-    }).description('The block-recovery gate (any phase).'),
-  }).description('Per-gate human-ask switches: which gates put a question to a person, and what to record when not.'),
+  gates: gatesConfigSchema,
   /**
    * T7 — the ROUTER overrides. Deliberately NO defaults on these fields: `.default()`
    * would make every field present, and a present field overrides the workspace's

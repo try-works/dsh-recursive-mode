@@ -24,6 +24,11 @@ import { CURRENT_WORKFLOW_PROFILE, phaseLintRulesMessage } from './phase-rules.t
 import { RUN_ARTIFACT_SEQUENCE, getGateStatus, hasHeading } from './ts-lint.ts'
 import { getPrerequisiteBlockers } from './lock.ts'
 import { getRunTreeAddenda } from './ts-lint.ts'
+// PER-GATE ASK SWITCHES — the guidance line the closeout must carry when a phase's gate will not ask.
+// `phaseAskNote` owns the artifact→gate mapping (it is the `recursive_ask` module's vocabulary), so this
+// report renders ONE sentence and does not learn the gate ids itself.
+import { phaseAskNote } from './recursive_ask.tool.ts'
+import type { ResolvedGateAsks } from './gates.ts'
 
 /** Gate lines every phase document carries, written as `Coverage: PASS` / `Approval: PASS`. */
 const UNIVERSAL_GATES = ['Coverage', 'Approval'] as const
@@ -69,6 +74,12 @@ export interface CloseoutReportOptions {
   workflowProfile?: string
   /** Include the advisory prerequisite list. Default true. */
   checkPrerequisites?: boolean
+  /**
+   * PER-GATE ASK SWITCHES — the resolved `gates` policy, so the report's `guidance` can tell an agent that
+   * this phase's gate will not ask a person (and which call records the configured default). Absent, the
+   * guidance is exactly what it was before.
+   */
+  gates?: ResolvedGateAsks
 }
 
 /**
@@ -125,7 +136,7 @@ export function closeoutReport(runDir: string, phase: string, options: CloseoutR
     status,
     findings,
     prerequisites,
-    guidance: guidanceFor(entry.file, profile),
+    guidance: guidanceFor(entry.file, profile, options.gates),
     addenda: getRunTreeAddenda(runDir),
   }
 }
@@ -141,8 +152,11 @@ function requiredSectionsFor(file: string, profile: string): string[] {
 }
 
 /** The guidance text for an artifact, from the rules module. */
-function guidanceFor(file: string, profile: string): string[] {
-  const message = phaseLintRulesMessage(file, profile)
+function guidanceFor(file: string, profile: string, gates?: ResolvedGateAsks): string[] {
+  // ⚠ THE PER-GATE ASK NOTE IS THE ONE THING THIS REPORT ADDS TO THE RULES TEXT, and it is passed as the
+  // rules module's own fourth argument so the pre-step reminder and the closeout guidance cannot drift: both
+  // surfaces render `phaseLintRulesMessage`'s lines, and this call is where the phase's gate policy enters it.
+  const message = phaseLintRulesMessage(file, profile, null, gates === undefined ? null : phaseAskNote(file, gates))
   if (Array.isArray(message)) return message.map((line) => String(line))
   return String(message).split('\n').filter((line) => line.trim() !== '')
 }

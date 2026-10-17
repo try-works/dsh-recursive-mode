@@ -31,6 +31,22 @@ export const AUDITED_PHASE_FILES = new Set([
   '08-memory-impact.md',
 ])
 
+/**
+ * PART B — THE PHASE-5 HUMAN-REVIEW VOCABULARY, in ONE place.
+ *
+ * Three modules need the same names and none of them may import the others freely: `recursive_ask.tool.ts`
+ * WRITES the sign-off line when it records the `qa-signoff` answer, `ts-lint.ts` REQUIRES it under
+ * `qa.humanReview`, and `closeout.ts` SCAFFOLDS the section a person fills in. Spelling the field name three
+ * times is how a writer and a reader come to disagree, and the disagreement would look like a run that
+ * recorded a sign-off nobody can find. `phase-rules.ts` is the existing home for per-phase vocabulary
+ * (`getArtifactRequiredSections` lives here), so the names ride beside it — deliberately NOT in the required
+ * section list above, because that list is byte-parity with the canonical linter and `humanReview: false`
+ * must not change what an artifact has to contain.
+ */
+export const QA_SIGN_OFF_FIELD = 'QA Sign-Off'
+export const QA_HUMAN_REVIEW_SECTION = 'Human Review Instructions'
+export const QA_HUMAN_REVIEW_FIELDS = ['Where it runs', 'What to check', 'How to sign off'] as const
+
 export const PRIOR_RECURSIVE_EVIDENCE_FILES = new Set([
   '01-as-is.md',
   '02-to-be-plan.md',
@@ -1065,10 +1081,39 @@ export function phaseRulesFor(fileName: string, workflowProfile: string = CURREN
 }
 
 /**
+ * PER-GATE ASK SWITCHES — what a phase's guidance must say when its human gate will NOT ask.
+ *
+ * ⚠ THE FAILURE THIS PREVENTS IS A STALL, NOT A WRONG RECORD. With `gates.<gate>.ask: false` the gate is
+ * settled from configuration the moment `recursive_ask` is called — nobody is asked, and the call returns
+ * the recorded default. An agent that does not know that waits for a person: it puts "please confirm the
+ * TDD mode" in the transcript and stops, which is exactly the behaviour that made the ask flow feel broken
+ * before the cards existed. So the guidance says, in the same breath as the phase's rules, that no person
+ * will be asked and which single call records the answer.
+ *
+ * ⚠ IT CARRIES NO GATE KNOWLEDGE ITSELF. The caller resolves the phase's pending gate and its policy (the
+ * `recursive_ask` module owns that vocabulary) and passes the result in; this module only renders. That keeps
+ * `phase-rules.ts` a rules module and keeps the artifact→gate mapping in the one place that already has it.
+ */
+export interface PhaseAskNote {
+  /** The gate id (`tdd-mode`, `qa-signoff`) — what the agent passes to `recursive_ask`. */
+  gate: string
+  /** The config key (`tddMode`, `qaSignoff`) — what a person edits to turn the question back on. */
+  key: string
+  /** The label `recursive_ask` records instead of asking. */
+  default: string
+}
+
+/**
  * Compact lint-rules message for the pre-step injection (R5): this phase's
  * required sections + phase-specific gate notes, built from phaseRulesFor
  * (single source of truth with the recursive_phase tool). Output is unchanged
  * from the prior inline build so r5-parity.spec.ts stays green.
+ *
+ * ⚠ THE OUTPUT IS UNCHANGED WHEN `askNote` IS ABSENT. This message is asserted by `r5-parity.spec.ts` and
+ * cited (by exact sentence) by `scripts/gen-workflow-map.mjs`, so a new line may only appear when there is
+ * something true to say about THIS phase — which is exactly the case `askNote` carries. A default workspace
+ * (where `tddMode` does not ask) still gets the line, because for it the sentence IS true; a workspace that
+ * turned the ask back on gets the old text, byte for byte.
  */
 export function phaseLintRulesMessage(
   fileName: string,
@@ -1078,6 +1123,11 @@ export function phaseLintRulesMessage(
    * this message from rules alone are unchanged; `runtime` passes the same value it puts in the payload.
    */
   delegatedReviewer: DelegatedReviewerCapability | null = null,
+  /**
+   * The per-gate ask policy for THIS phase's gate, when the gate will not ask. OPTIONAL and FOURTH: a caller
+   * that knows nothing about the config passes nothing and gets the pre-existing text unchanged.
+   */
+  askNote: PhaseAskNote | null = null,
 ): string {
   const rules = phaseRulesFor(fileName, workflowProfile)
   // ⚠ THE REMINDER NAMES THE ENTRY-ROW SECTIONS AND THE ONE THING THAT DECIDES THEIR PARSE, and does not
@@ -1123,6 +1173,17 @@ export function phaseLintRulesMessage(
     ...(reviewer === null || reviewer.available
       ? []
       : ['Delegated reviewer UNAVAILABLE for this phase (do NOT record self-audit as a deviation): ' + reviewer.reason]),
+    // ⚠ PER-GATE ASK SWITCHES — THE LINE THAT PREVENTS A STALL. It appears ONLY when this phase's gate is
+    // configured not to ask, and it says the three things an agent needs in order not to wait for a person
+    // who is not coming: the ask is off, nobody will be asked, and the ONE call that records the answer.
+    // The switch lives in the workspace config, so the agent cannot discover it from the question card (there
+    // is no card) — this reminder is the surface that reaches it automatically at phase entry.
+    ...(askNote === null
+      ? []
+      : ['Human gate (' + askNote.gate + '): the ask is DISABLED by config (`gates.' + askNote.key + '.ask: false`), so '
+        + 'NO PERSON WILL BE ASKED. Do NOT wait for a card and do NOT ask in the transcript: call recursive_ask '
+        + 'gate=' + askNote.gate + ' and it records the configured default `' + askNote.default + '` at once '
+        + '(`source: "config"`, `ask: "disabled"`).']),
     '</system-reminder>',
   ]
   return lines.join('\n')

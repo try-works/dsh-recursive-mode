@@ -416,15 +416,49 @@ prove. Three facts shape the picture:
    phase-0 approval that decides whether a run's goal exists at all — as structured decisions rather
    than prose, so the answer is validated and citeable.
 
-   `run-start` is unlike the other three: it is the only gate that asks the harness's **blocking
-   human channel**, and the only one that **arms a goal**. Creating a spec therefore creates no goal;
-   nothing runs unattended until a person approves it. When the mounted channel cannot deliver the
-   question, the refusal **names the channel's own cause** (`RM5503`) instead of asserting one — and a
+   **every** gate is put to the harness's **blocking human channel** when the composition mounts one — the
+   card is what notifies the person, and the person's own selection is what gets recorded (`source:
+   "channel"`). Only `run-start` additionally **arms a goal**: creating a spec therefore creates no goal;
+   nothing runs unattended until a person approves it. A workflow gate whose question reached nobody, or
+   whose card was cancelled, is refused with the channel's own cause (`RM5506`) and records **nothing**, so
+   the artifact stays unanswered and the phase cannot lock on a non-answer; a channel that reached a person
+   whose answer was not one of the gate's labels is `RM5505`. For `run-start`, when the mounted channel
+   cannot deliver the question, the refusal **names the cause** (`RM5503`) instead of asserting one — and a
    composition that cannot render a card at all can still record the decision explicitly by passing
    `answer` with `relay: true`, which is reported as relayed rather than as a person's selection. A
-   person's own answer always wins, and a question that was cancelled, aborted or timed out is **never**
-   relayable. A channel that *did* reach a person whose answer was not one of the offered labels is
-   `RM5504`, which is a different event from `RM5503`.
+   question that was cancelled, aborted or timed out is **never** relayable, and `RM5504` is the different
+   event it always was: a person *was* reached and did not approve.
+
+   The phase-5 QA gate has a **configurable** human requirement, `qa.humanReview`. It defaults to `false`,
+   which leaves every existing run's standard exactly as it is; set to `true`, an `agent-operated` QA mode
+   **fails the lint** (the refusal comes from configuration, so it cannot be escaped by choosing a mode),
+   and `05-manual-qa.md` must carry the `QA Sign-Off` line `recursive_ask` writes plus an authored
+   `## Human Review Instructions` section naming where the product runs, what the person must check, and
+   how they sign off.
+
+   **Which gates ask at all is a per-gate choice.** Each of the four human asks has its own switch, and only
+   an explicit `false` silences one — absence means a person IS asked, because a switch that disabled itself
+   when a key went missing would be the `shellOnly` leak in the opposite direction:
+
+   ```yaml
+   gates:
+     runStart:  { ask: true }
+     tddMode:   { ask: false, default: strict }         # the default: no question, records strict
+     qaSignoff: { ask: true, default: agent-operated }
+     gateBlock: { ask: true }
+   ```
+
+   With `ask: false` nobody is asked: `recursive_ask` records the gate's configured default and reports
+   `source: config` + `ask: disabled`, so the run's own record says a person was not involved rather than
+   leaving a reader to infer it. An **explicitly supplied** `answer` still wins and is reported as
+   `source: caller` — the switch governs whether a question is raised, not whether a decision may be recorded.
+   Two gates cannot be silenced into a decision: `gate-block` has no default to record (fix/reopen/abandon are
+   a person's call, so a disabled ask refuses with `RM5507`), and `run-start` cannot be disabled at all (it is
+   the approval that arms the run). A configured `default` that is not one of its gate's own labels is refused
+   **at mount**, naming the gate and the labels it accepts. Finally, `qa.humanReview: true` beside
+   `gates.qaSignoff.ask: false` is a **contradiction** and fails the mount: one asks for a person's sign-off,
+   the other removes the question that obtains it, and letting either win silently would be the plugin choosing
+   which instruction to ignore.
 
 ```mermaid
 flowchart TB

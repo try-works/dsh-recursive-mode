@@ -120,12 +120,20 @@ describe('T23 — an accepted answer becomes a durable marker', () => {
  * question the host renders, and the answered call writes the marker into the run's artifact.
  */
 describe('T23 — the tool is registered and both branches work end to end', () => {
-  async function mount() {
+  /**
+   * ⚠ THE ASK PATH MUST BE ENABLED EXPLICITLY NOW, AND THAT IS THE OWNER'S DEFAULT RATHER THAN A TEST
+   * DETAIL. `gates.tddMode.ask` defaults to `false` ("i want tdd to defalt to ask: false and default:
+   * strict"), so a call for the `tdd-mode` gate in a default workspace RECORDS the configured default
+   * instead of returning a question. The tests below that are about the ASK BRANCH therefore mount with
+   * `gates: { tddMode: { ask: true } }` — the switch is what decides, and this spec pins the branch it is
+   * talking about. The default itself is pinned in `tests/gate-ask-switch.spec.ts`.
+   */
+  async function mount(config: Record<string, unknown> = {}) {
     const repo = mkdtempSync(join(tmpdir(), 'rm-ask-'))
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: repo } as never)
+    await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: repo, ...config } as never)
     await ctx.recursive.initRun('r1')
     return {
       ctx,
@@ -157,7 +165,8 @@ describe('T23 — the tool is registered and both branches work end to end', () 
   })
 
   it('ASKING returns the card-ready question, with the gate’s options and marker', async () => {
-    const m = await mount()
+    // The ask must be ON for this branch to run at all — see the mount helper's note.
+    const m = await mount({ gates: { tddMode: { ask: true } } })
     try {
       const text = JSON.stringify(await m.call({ gate: 'tdd-mode', runId: 'r1' }))
       expect(text).toContain('TDD Mode')

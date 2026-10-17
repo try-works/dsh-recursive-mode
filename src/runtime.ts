@@ -35,7 +35,7 @@ import { buildReviewBundle, type ReviewBundleInput } from './review.ts'
 import { readMemoryEntries, retrieveMemory, renderMemorySection, selectMemory } from './memory.ts'
 import { readFeedback, recordInjection, recordMemoryRead, settleInjections } from './memory-feedback.ts'
 import { runPhase8Trigger, resolveExtractor, spawnExtractorRunner, phase8MemoryLockRefusal } from './training.ts'
-import { buildAskQuestion, GATE_DEFAULT_ARTIFACT, pendingGateFor } from './recursive_ask.tool.ts'
+import { buildAskQuestion, GATE_DEFAULT_ARTIFACT, pendingGateFor, phaseAskNote } from './recursive_ask.tool.ts'
 import { contractDigest } from './policy.ts'
 import type { WorkflowEngineLike } from './workflow-audit.ts'
 import { createHandoff, createChildBrief, replyPath, childScratchPath, buildDelegationPrompt, type HandoffInput, type ChildBriefInput } from './handoff.ts'
@@ -62,6 +62,8 @@ import {
 import { auditToPass, renderTaskHistory, type TeamRuntimeLike, type AuditToPassResult, type TeamCallerHandle, type TeamTaskViewLike, type AuditRoundOutcome } from './teams-loop.ts'
 import type { ContinuableChildId, ContinuableMessageId } from './delegation.ts'
 import { runChildIds } from './settlement.ts'
+import { gateAskFor, resolveGateAsks, type ResolvedGateAsk, type ResolvedGateAsks } from './gates.ts'
+import type { RecursiveModeGates } from './config.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -518,6 +520,62 @@ export class RecursiveRuntime extends Service {
   private _enforcementConfig: EnforcementConfig | null = null
 
   /**
+   * PART B — `qa.humanReview`, as the phase-5 lint sees it.
+   *
+   * ⚠ A BOOLEAN, NOT THE CONFIG OBJECT, and `false` when the namespace is absent. The lint needs exactly one
+   * fact ("must a person sign the QA phase off?"), and a lint that reached back into the plugin's Config
+   * would make the module function `lintRun` depend on a mounted service — it is also called directly by
+   * tests and by `lockArtifact`, neither of which has one. The switch is resolved HERE, once, at apply time;
+   * `lintArtifact` passes the resolved value down (see `LintOptions` in `ts-lint.ts`).
+   */
+  private _qaHumanReview = false
+
+  /** PART B: resolve the `qa` namespace. Called from `apply` on every plugin load, like the other seams. */
+  setQaConfig(config: { humanReview?: boolean } | undefined): void {
+    this._qaHumanReview = config?.humanReview === true
+  }
+
+  /** PART B: the phase-5 lint's one input — true when a person must sign the QA phase off. */
+  get qaHumanReview(): boolean {
+    return this._qaHumanReview
+  }
+
+  /**
+   * ⚠ PER-GATE ASK SWITCHES, RESOLVED ONCE, WITH THE SAFE ABSENCE MEANING.
+   *
+   * Absence means ENABLED (a person is asked), because a switch that disabled itself when a key went missing
+   * would repeat the `shellOnly` leak in the opposite direction. `tddMode` is the single exception at the
+   * owner's explicit instruction: it does not ask, and it records `strict`.
+   *
+   * The resolved shape is what the ask path reads, so there is exactly one place where "was the person asked"
+   * is decided — and the caller reports that answer back as `source: 'config'` + `ask: 'disabled'` instead of
+   * leaving a reader to infer that nobody was involved.
+   */
+  private _gates: ResolvedGateAsks = resolveGateAsks(undefined)
+
+  /** PER-GATE ASK SWITCHES: resolve the `gates` namespace. Called from `apply`, like the other seams. */
+  setGatesConfig(config: RecursiveModeGates | undefined): void {
+    this._gates = resolveGateAsks(config)
+  }
+
+  /** The resolved ask policy for one gate. Unknown gate ids fall back to ASKED — never to silence. */
+  gateAsk(gateId: string): ResolvedGateAsk {
+    // ⚠ THROUGH `gateAskFor`, NOT A PROPERTY LOOKUP: the gate ids are hyphenated (`tdd-mode`) while the
+    // config namespace is camelCase (`tddMode`), and indexing one with the other silently yields `undefined`
+    // — which resolved to "asked" and would have made every switch a no-op that still passed a typecheck.
+    return gateAskFor(this._gates, gateId)
+  }
+
+  /**
+   * PER-GATE ASK SWITCHES: the WHOLE resolved policy, for the two surfaces that are not the ask tool itself —
+   * the phase guidance (`recursive_phase`'s payload and the pre-step/closeout text) and the lint, which must
+   * be able to say "no person will be asked, so call the gate" instead of leaving an agent waiting.
+   */
+  get gates(): ResolvedGateAsks {
+    return this._gates
+  }
+
+  /**
    * T3 (agentTeams task loop): run the audit→repair→re-audit state machine on
    * ONE durable team task. The `teams` seam (live `ctx.agentTeams`) is injected
    * per-call so the loop stays unit-testable; `runAuditRound` is the caller's
@@ -698,7 +756,10 @@ export class RecursiveRuntime extends Service {
       // ⚠ FU-12 — THE CLOSEOUT NO LONGER WRITES TO THE PHASE DOCUMENT.
       // It READS the artifact, reports what the standard requires and what is missing, and records that
       // examination as a receipt of its own under locks/<stem>.closeout.receipt.json — never over the doc.
-      const result = closeoutReport(runDir, phase)
+      // ⚠ AND THE PER-GATE ASK POLICY RIDES INTO THE REPORT, so its `guidance` can say "nobody will be asked"
+      // for a phase whose gate is silenced. Without it the closeout would tell an agent to "declare the QA
+      // execution mode" while the card that would obtain it never appears — the stall this switch introduces.
+      const result = closeoutReport(runDir, phase, { gates: this._gates })
       // P3b: settle this run's injections against its own outcome. Only phases that LOCKED are evidence, and
       // a run settles once, at closeout.
       settleInjections(root, runDir, PHASE_SEQUENCE.filter((file) => getLockStatus(join(runDir, file)) === 'LOCKED'))
@@ -2097,6 +2158,10 @@ export class RecursiveRuntime extends Service {
         return null
       }
     })())
+    // PER-GATE ASK SWITCHES — whether the gate this phase owes will actually put a question to a person.
+    // The note is non-null only when the gate is owed AND its ask is disabled AND it has a configured default
+    // to record; that is the state in which an agent must NOT wait for a card (see `phaseAskNote`).
+    const askNote = pending === null ? null : phaseAskNote(GATE_DEFAULT_ARTIFACT[pending], this._gates)
     const selection = selectMemory(root, {
       query: requirements.slice(0, 4000),
       // FU-4: the run's OWN changed paths, computed when the caller supplies none — so T29's path
@@ -2171,7 +2236,22 @@ export class RecursiveRuntime extends Service {
       // `QA Execution Mode` one; both are surfaced HERE, at the entry the tool already makes, so a
       // caller does not have to know the workflow's gate vocabulary to be asked the right question.
       // Omitted entirely once the artifact carries the marker (that IS the once-gate).
-      ...(pending === null ? {} : { ask: { gate: pending, ...buildAskQuestion(pending), artifact: GATE_DEFAULT_ARTIFACT[pending] } }),
+      //
+      // ⚠ AND `personAsked` IS THE PER-GATE ASK SWITCH, STATED RATHER THAN IMPLIED. With
+      // `gates.tddMode.ask: false` (the owner's default) the `recursive_ask` call records `strict` and asks
+      // nobody, so a caller that reads only the question would wait for an answer that is never coming. The
+      // disabled case therefore says so in the payload and names the label that would be recorded, while the
+      // enabled case keeps the exact shape every earlier caller already reads (`personAsked: true` is the
+      // only addition, and `recursive_ask`'s question fields are unchanged).
+      ...(pending === null ? {} : {
+        ask: {
+          gate: pending,
+          ...buildAskQuestion(pending),
+          artifact: GATE_DEFAULT_ARTIFACT[pending],
+          personAsked: askNote === null,
+          ...(askNote === null ? {} : { disabledDefault: askNote.default, askConfigKey: askNote.key }),
+        },
+      }),
     }
   }
 
@@ -2735,7 +2815,11 @@ export class RecursiveRuntime extends Service {
         // JOB — the board and the caller stop waiting — but a hung `lintRun` call itself
         // runs to completion in this process, because JavaScript cannot pre-empt it.
         if (signal.aborted) throw new Error('lint cancelled before it started')
-        return lintRun(root, runId)
+        // PART B: the config reaches the linter HERE and nowhere else. `lintRun` is a module function with
+        // no service to reach back into, so the resolved switch travels as an argument — which is also what
+        // makes the wiring testable: a runtime whose `_qaHumanReview` stayed false cannot produce the
+        // config refusal, and a lint called without this argument behaves exactly as it did before.
+        return lintRun(root, runId, { humanReview: this._qaHumanReview, gates: this._gates })
       },
     })
     // T39: record the run in the RUN LAYER, where the run id is known — see job-log.ts for why

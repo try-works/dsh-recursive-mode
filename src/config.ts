@@ -66,6 +66,28 @@ export interface RecursiveModeEnforcement {
   budgets?: RecursiveModeBudgets
 }
 
+/**
+ * ⚠ PART B — WHO MAY SIGN THE MANUAL QA PHASE OFF. See the schema comment below for why this is a switch and
+ * why its default is `false`.
+ */
+export interface RecursiveModeQa {
+  humanReview?: boolean
+}
+
+/** One human ask: whether a person is asked, and what to record when they are not. */
+export interface RecursiveModeGateAsk {
+  ask?: boolean
+  default?: string
+}
+
+/** Per-gate human-ask switches. Absence means enabled, except `tddMode` (owner's choice: off, `strict`). */
+export interface RecursiveModeGates {
+  runStart?: RecursiveModeGateAsk
+  tddMode?: RecursiveModeGateAsk
+  qaSignoff?: RecursiveModeGateAsk
+  gateBlock?: RecursiveModeGateAsk
+}
+
 export interface RecursiveModeConfig {
   /**
    * DEFAULT-INERT opt-in for the server surface: `true` registers the `RecursiveRuntime` service,
@@ -78,9 +100,16 @@ export interface RecursiveModeConfig {
   shellOnly?: boolean
   /** Roles that keep the primitive dispatch surface so their own provider/model/effort apply. */
   teammate?: { primitiveRoles?: string[] }
+  /** Per-gate human-ask switches; absence means enabled (except `tddMode`, which defaults to not asking). */
+  gates?: RecursiveModeGates
   repoRoot?: string
   /** T7/T28: the enforcement modes and the budgets, editable live. */
   enforcement?: RecursiveModeEnforcement
+  /**
+   * ⚠ PART B: the phase-5 QA gate. Absent means today's standard — `humanReview` defaults to `false`, so
+   * every existing run keeps locking exactly as it does now.
+   */
+  qa?: RecursiveModeQa
   /** T7: overrides for the workspace router file — see the schema comment on defaults. */
   router?: RecursiveModeRouter
 }
@@ -190,6 +219,83 @@ export const Config = z.object({
       ),
     }).description('T28 budgets.'),
   }).description('The enforcement modes plus the T28 budgets.'),
+  /**
+   * ⚠ PART B — `qa.humanReview`: CONFIGURABLE HUMAN QA, AND THE LIVE RUN THAT ASKED FOR IT.
+   *
+   * THE DEFECT THIS ANSWERS, IN THE OWNER'S WORDS: *"the agent asks me for qa approval without sending a
+   * proper question ui component for sign off, so i dont see any notification its just in the chat text and
+   * i miss it"*. Part A fixes the delivery: every gate is now put to the mounted user-questions channel, so
+   * the person gets a card. But a card can be ignored, and a run can carry on — in the live run that
+   * exposed this, the agent asked the `qa-signoff` gate three times (13:26:57, 13:38:00, 13:39:02), no card
+   * was ever rendered, nobody answered, and the agent then wrote `QA Execution Mode: agent-operated` into
+   * `05-manual-qa.md` and proceeded to lock the phase.
+   *
+   * This switch is the second half: with `humanReview: true` the PHASE cannot lock on an agent's own say-so,
+   * because the lint FAILS an `agent-operated` mode and requires the human-review evidence (see
+   * `lintPhaseSpecificRules` in `ts-lint.ts`). It is `false` by DEFAULT on purpose — the workflow's existing
+   * standard allows an agent-operated QA phase, and turning the switch on is a decision a workspace makes
+   * about who signs its QA, not something a plugin upgrade should impose on runs already in flight.
+   *
+   * ⚠ WHAT IT HONESTLY GUARANTEES. It cannot stop an agent from typing anything it likes into an artifact;
+   * the linter reads a document. What it makes impossible is the SILENT downgrade: the refusal comes from
+   * CONFIG, so an agent cannot select `agent-operated` to escape the gate — that mode fails the phase no
+   * matter who wrote it, and the run cannot lock until a person's answer is what the artifact records.
+   */
+  qa: z.object({
+    humanReview: z.boolean().default(false).description(
+      'Set true to require a HUMAN sign-off of phase-5 manual QA: an agent-operated QA mode then fails the lint, ' +
+      'the artifact must carry the sign-off line recursive_ask writes, and it must contain a ## Human Review ' +
+      'Instructions section naming where the product runs, what the person must check, and how they sign off. ' +
+      'Leave false — the default — and the phase keeps its existing standard.',
+    ),
+  }).description('Phase-5 QA: whether a person must sign the manual QA phase off, or an agent may.'),
+  /**
+   * ⚠ PER-GATE ASK SWITCHES — "every phase that has a human ask should also have the ask gate be
+   * configurable true/false so users can customize when they are asked or not" (owner, 2026-10-17).
+   *
+   * The plugin has four human gates (`ASK_GATES` in `recursive_ask.tool.ts` plus `run-start`). Whether a
+   * person is ASKED is now a per-gate choice instead of a fact of the workflow:
+   *
+   *   • `ask: true`  — the gate puts the question to the mounted user-questions channel, so the harness
+   *     renders a card and notifies. Unchanged behaviour.
+   *   • `ask: false` — nobody is asked. `recursive_ask` records the gate's configured `default` at once and
+   *     reports `source: 'config'` + `ask: 'disabled'`, so the artifact still carries a truthful value and the
+   *     run's own record says the person was NOT asked. A gate with no meaningful default (`gate-block`) must
+   *     refuse by name instead: fix/reopen/abandon are the person's call, and inventing one would have the
+   *     plugin abandon a phase on their behalf.
+   *
+   * ⚠ ONLY AN EXPLICIT `false` DISABLES AN ASK. This follows the same lesson as the `shellOnly` leak: a guard
+   * that fires on the PRESENCE of a key is lost the moment the key is lost, so absence must mean the safe
+   * thing. `tddMode` is the one exception, at the owner's explicit instruction: it defaults to NOT asking and
+   * recording `strict`.
+   *
+   * ⚠ AND `qa.humanReview: true` WITH `qaSignoff.ask: false` IS A CONTRADICTION, refused at mount: humanReview
+   * exists precisely to guarantee that a person signs phase 5 off, so a configuration that also disables that
+   * ask must not silently let either side win.
+   */
+  gates: z.object({
+    runStart: z.object({
+      ask: z.boolean().default(true).description('Ask a person before a run starts (arms the run goal).'),
+    }).description('The run-start gate (phase 0).'),
+    tddMode: z.object({
+      ask: z.boolean().default(false).description('Ask a person which TDD mode phase 3 uses.'),
+      default: z.string().default('strict').description(
+        'The TDD Mode recorded when the ask is disabled. Must be one of strict | pragmatic.',
+      ),
+    }).description('The TDD-mode gate (phase 3). Defaults to NOT asking, and to recording strict.'),
+    qaSignoff: z.object({
+      ask: z.boolean().default(true).description('Ask a person who signs the phase-5 manual QA off.'),
+      default: z.string().default('agent-operated').description(
+        'The QA Execution Mode recorded when the ask is disabled. Must be one of human | agent-operated | hybrid.',
+      ),
+    }).description('The QA-sign-off gate (phase 5).'),
+    gateBlock: z.object({
+      ask: z.boolean().default(true).description(
+        'Ask a person how a blocking gate is resolved (fix | reopen | abandon). Disabling this leaves a blocked '
+        + 'transition blocked on purpose: the ask is refused by name rather than invented.',
+      ),
+    }).description('The block-recovery gate (any phase).'),
+  }).description('Per-gate human-ask switches: which gates put a question to a person, and what to record when not.'),
   /**
    * T7 — the ROUTER overrides. Deliberately NO defaults on these fields: `.default()`
    * would make every field present, and a present field overrides the workspace's

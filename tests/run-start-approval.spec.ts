@@ -900,14 +900,23 @@ describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the ro
     }
   })
 
-  it('relay is refused for the three workflow gates, which never ask the channel at all', async () => {
+  it('relay is refused for the three workflow gates, which ASK the channel but have no relay', async () => {
     const root = tempRepo('rm-runstart-')
     const ctx = new Context()
     const goals = fakeGoals()
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
-      await ctx.plugin(plugin as never, { serverSurface: true, repoRoot: root } as never)
+      // ⚠ `gates.tddMode.ask: true` IS PART OF THIS TEST'S SETUP, NOT A WORKAROUND. The owner's default is
+      // `tddMode: { ask: false, default: strict }`, so a `tdd-mode` call in a default workspace records
+      // `strict` and consults nobody — which says nothing about whether a workflow gate PUTS ITS QUESTION to
+      // the channel. This spec is about that second thing, so it turns the ask on; the default is pinned in
+      // `tests/gate-ask-switch.spec.ts`.
+      await ctx.plugin(plugin as never, {
+        serverSurface: true,
+        repoRoot: root,
+        gates: { tddMode: { ask: true } },
+      } as never)
       ctx.recursive.attachGoals(goals.service)
       await ctx.tools.execute({
         signal: new AbortController().signal,
@@ -917,7 +926,7 @@ describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the ro
         agent: agentFor(root),
       } as never)
 
-      // A channel that would be a problem if anyone consulted it: it throws, and it counts.
+      // A channel that is a problem if anyone consults it: it throws, and it counts.
       let asked = 0
       ctx.recursive.attachUserQuestions({
         ask: () => { asked += 1; return Promise.reject(channelError('NO_PROVIDER', 'no user-questions answerer accepted the request')) },
@@ -930,17 +939,35 @@ describe('PHASE 0 — a channel that fails is diagnosed, and the relay is the ro
         agent: agentFor(root),
       } as never)
 
-      // `relay` is a run-start concept; claiming it here would report a fallback that never happened.
+      // `relay` is a run-start concept: the other gates have no relayed-approval fallback, so claiming it
+      // would report a fallback that never happened.
       const misused = payload(await call({ gate: 'tdd-mode', runId: 'r1', answer: 'strict', relay: true }, 'rs-relay-misuse'))
       expect(String(misused.error)).toContain('RM1150')
 
-      // The three gates are RELAY gates: asking surfaces the question, answering records it — and the
-      // channel is never involved, so a broken one cannot affect them.
+      /**
+       * ⚠ THE THREE GATES DO CONSULT THE CHANNEL NOW, and this assertion used to say the opposite.
+       *
+       * The old expectation — `asked === 0`, "the channel is never involved" — pinned the DEFECT: a
+       * workflow gate returned its question as JSON for the model to retype in the transcript, so no card
+       * was rendered and nobody was notified (the owner: *"i dont see any notification its just in the chat
+       * text and i miss it"*). With the fix, an ask without `answer` PUTS THE QUESTION TO THE PERSON. This
+       * channel rejects, so the honest outcome is a refusal that names the cause and records nothing —
+       * asserted here, because "asked but silently recorded" would be worse than not asking.
+       */
       const askedQuestion = payload(await call({ gate: 'tdd-mode', runId: 'r1' }, 'rs-tdd-ask'))
+      expect(asked, 'a workflow gate did not put its question to the person').toBe(1)
+      expect(String(askedQuestion.error)).toContain('RM5506')
+      expect(String(askedQuestion.error)).toContain('NO_PROVIDER')
+      expect(askedQuestion.channel).toMatchObject({ outcome: 'unavailable', cause: 'NO_PROVIDER' })
+      // The question travels with the refusal, so a composition whose channel cannot render a card can
+      // still put the exact decision in the transcript.
       expect((askedQuestion.question as { options: Array<{ label: string }> }).options.map((o) => o.label)).toEqual(['strict', 'pragmatic'])
+
+      // ⚠ AND AN EXPLICIT `answer` IS STILL THE RELAY PATH: it records without asking, exactly as before.
+      // Only the ASK branch changed; a caller that already has the person's label keeps its behaviour.
       const answered = payload(await call({ gate: 'gate-block', runId: 'r1', artifact: '04-test-summary.md', answer: 'fix' }, 'rs-block-answer'))
       expect(answered.marker).toBe('- Gate Resolution: fix')
-      expect(asked, 'a workflow gate consulted the human-question channel').toBe(0)
+      expect(asked, 'an answer argument consulted the channel').toBe(1)
     } finally {
       await ctx.fiber.dispose()
       rmSync(root, { recursive: true, force: true })

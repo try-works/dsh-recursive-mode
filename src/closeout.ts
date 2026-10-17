@@ -7,6 +7,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getLockStatus, getPrerequisiteBlockers } from './lock.ts'
 import { getRunTreeAddenda } from './ts-lint.ts'
+// PART B — the human-review section and field names, shared with the linter that REQUIRES them and with
+// `recursive_ask`, which writes the sign-off line. One vocabulary, three consumers; see `phase-rules.ts`.
+import { QA_HUMAN_REVIEW_FIELDS, QA_HUMAN_REVIEW_SECTION } from './phase-rules.ts'
 
 export interface CloseoutPhaseConfig {
   file: string
@@ -71,7 +74,11 @@ export const PHASE_CONFIG: Record<string, CloseoutPhaseConfig> = {
 const REQUIRED_SECTIONS: Record<string, string[]> = {
   // `recursive_lint` both know; these are the stub's minimum, not a replacement for them.
   '04': ['TODO', 'Pre-Test Implementation Audit', 'Environment', 'Execution Mode', 'Commands Executed (Exact)', 'Results Summary', 'Evidence and Artifacts', 'Failures and Diagnostics (if any)', 'Flake/Rerun Notes', 'Requirement Completion Status', 'Traceability', 'Coverage Gate', 'Approval Gate'],
-  '05': ['TODO', 'Execution Mode', 'QA Execution Record', 'QA Scenarios and Results', 'User Sign-Off', 'Requirement Completion Status', 'Traceability', 'Coverage Gate', 'Approval Gate'],
+  // PART B — `## Human Review Instructions` is SCAFFOLDED, not required: `qa.humanReview: false` (the
+  // default) never asks for it, so today's runs keep locking with the sections they already carry. Under
+  // `qa.humanReview: true` the linter requires its three fields to be AUTHORED, which is why the stub must
+  // exist here — a run that has to write a section should not also have to invent its shape.
+  '05': ['TODO', 'Execution Mode', 'QA Execution Record', 'QA Scenarios and Results', 'User Sign-Off', QA_HUMAN_REVIEW_SECTION, 'Requirement Completion Status', 'Traceability', 'Coverage Gate', 'Approval Gate'],
   '06': ['TODO', 'Decisions Changes Applied', 'Rationale', 'Resulting Decision Entry', 'Traceability', 'Coverage Gate', 'Approval Gate'],
   '07': ['TODO', 'State Changes Applied', 'Rationale', 'Resulting State Summary', 'Traceability', 'Coverage Gate', 'Approval Gate'],
   '08': ['TODO', 'Diff Basis', 'Changed Paths Review', 'Affected Memory Docs', 'Uncovered Paths', 'Router and Parent Refresh', 'Run-Local Skill Usage Capture', 'Skill Memory Promotion Review', 'Final Status Summary', 'Traceability', 'Coverage Gate', 'Approval Gate'],
@@ -89,6 +96,16 @@ const SECTION_BODIES: Record<string, string> = {
   'QA Execution Record': '- QA Execution Mode: agent-operated\n- Agent Executor: populate the actual executor before locking\n- Tools Used: populate the actual tools used before locking\n- Evidence Path: populate the concrete QA evidence path before locking',
   'QA Scenarios and Results': '- Record each manual QA scenario and observed result here before locking.',
   'User Sign-Off': '- Approved by: N/A (set a real approver when QA mode requires human sign-off)\n- Date: N/A (set a real approval date when required)',
+  // PART B — the shape the phase-5 human-review section takes. Each line is a PLACEHOLDER the linter
+  // refuses (`isAuthoredFieldValue` treats `<...>` as unauthored), so scaffolding the section cannot be
+  // mistaken for having filled it in. The three fields are the three facts a person needs in order to do the
+  // review at all: where the product they are checking is, what they are checking, and how their decision
+  // gets recorded.
+  [QA_HUMAN_REVIEW_SECTION]: [
+    '- ' + QA_HUMAN_REVIEW_FIELDS[0] + ': <the URL the product is running at, or the exact command a person runs>',
+    '- ' + QA_HUMAN_REVIEW_FIELDS[1] + ': <the observable behaviour the person must confirm, step by step>',
+    '- ' + QA_HUMAN_REVIEW_FIELDS[2] + ': <how the person signs off: recursive_ask with gate qa-signoff, then User Sign-Off -> Approved by and Date>',
+  ].join('\n'),
   'Decisions Changes Applied': '- Record the exact `.recursive/DECISIONS.md` delta applied during closeout.',
   'Resulting Decision Entry': '- Point to the final ledger entry heading or path after updating `.recursive/DECISIONS.md`.',
   'State Changes Applied': '- Record the exact `.recursive/STATE.md` delta applied during closeout.',

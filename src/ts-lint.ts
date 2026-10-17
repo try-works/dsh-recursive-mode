@@ -36,7 +36,17 @@ import {
   REVIEW_NARRATIVE_SECTIONS,
   getArtifactRequiredSections,
   sectionFormatRulesFor,
+  // PART B — the phase-5 human-review vocabulary (field names, section name) shared with the writer and the
+  // closeout scaffold. Imported rather than re-spelled here for the reason the block above gives.
+  QA_SIGN_OFF_FIELD,
+  QA_HUMAN_REVIEW_SECTION,
+  QA_HUMAN_REVIEW_FIELDS,
 } from './phase-rules.ts'
+// PER-GATE ASK SWITCHES — TYPE ONLY, and deliberately so: the linter is a set of module functions that tests
+// and `lockArtifact` call without a mounted plugin, so it must never acquire a runtime dependency on the
+// plugin's service graph. The policy travels down as DATA (`runtime.lintArtifact` → `lintRun` → here), which
+// is the same contract `humanReview` already has.
+import type { ResolvedGateAsks } from './gates.ts'
 
 // ---- remaining constants not in phase-rules.ts ----
 export const PRODUCT_DIFF_PHASE_FILES = new Set(['03-implementation-summary.md', '03.5-code-review.md', '04-test-summary.md'])
@@ -1854,6 +1864,91 @@ export function lintPhase8SkillUsageCapture(content: string): string[] {
   return issues
 }
 
+/**
+ * PART B — THE ONE INPUT THE PHASE-5 LINT TAKES FROM THE PLUGIN'S CONFIG.
+ *
+ * ⚠ AN OPTIONS OBJECT RATHER THAN A SERVICE HANDLE. This module is a set of module functions: `lintRun` is
+ * called by `lockArtifact`, by the `recursive_lint` tool through the runtime, and directly by tests that
+ * build a run by hand — none of which is guaranteed to have a mounted plugin. So the resolved switch travels
+ * down the call chain as DATA (`runtime.lintArtifact` resolves `qa.humanReview` and passes it here), and
+ * every existing call site keeps its EXACT behaviour because a field that is absent cannot switch a rule on.
+ */
+export interface LintOptions {
+  /** True when the workspace configured `qa.humanReview`: a person must sign the phase-5 QA phase off. */
+  humanReview?: boolean
+  /**
+   * PER-GATE ASK SWITCHES — the resolved `gates` policy, so a lint failure can tell the agent that a person
+   * will NOT be asked and name the one call that records the configured default.
+   *
+   * ⚠ THIS IS THE LINT'S HALF OF "THE CONFIG REACHES THE TOOL AND THE LINT". The lint is the surface that
+   * fires when a phase artifact is missing its gate marker, and under `gates.tddMode.ask: false` an agent
+   * that waits for a person never gets one — so the failure it already produces is the exactly right place
+   * to say "nobody will ask you; call recursive_ask and this records `strict`". Absent, every message is
+   * byte-identical to what it was before, which is what keeps the existing specs and the workflow-map
+   * generator's sentence anchors intact.
+   */
+  gates?: ResolvedGateAsks
+}
+
+/**
+ * PART B — is a configured human-review requirement met by this field value?
+ *
+ * A placeholder is not an answer. `hasMeaningfulValue` already refuses the empty value and the "not
+ * required" family; this adds the `<angle-bracket>` form the closeout scaffold writes, because a run that
+ * scaffolds `- Where it runs: <...>` and never replaces it must not read as having recorded where the
+ * product runs. The scaffold and this rule therefore agree by construction (see `closeout.ts`).
+ */
+function isAuthoredFieldValue(value: string | null): boolean {
+  if (!hasMeaningfulValue(value, new Set(['n/a', 'none', 'not required', 'todo', 'tbd']))) return false
+  return !/^<.*>$/.test((value ?? '').trim())
+}
+
+/**
+ * PART B — THE SIGN-OFF LINE `recursive_ask` WRITES, parsed as the two facts it carries.
+ *
+ * The line is `- QA Sign-Off: <one of the gate's labels> (gate answer recorded <ISO>)`. It is DISTINCT from
+ * `QA Execution Mode` on purpose: an agent can type the mode line, but the gate's own writer emits this one
+ * in the same call that records the answer, so a mode with no sign-off line is a mode nobody answered.
+ *
+ * ⚠ THE HONEST LIMIT, stated where the rule lives: a document can say anything, so an agent that types this
+ * line too can still forge it. What the config switch makes impossible is the SILENT downgrade — under
+ * `qa.humanReview` the agent-operated mode FAILS regardless of who wrote it, so escaping the gate requires
+ * a person to have answered the card.
+ */
+export function parseQaSignOff(content: string): { answer: string; recordedAt: string } | null {
+  const value = getMdFieldValue(content, QA_SIGN_OFF_FIELD)
+  if (value === null) return null
+  const match = /^(human|agent-operated|hybrid)[ \t]+\(gate answer recorded[ \t]+(\d{4}-\d{2}-\d{2}T[^)]*)\)$/.exec(value)
+  if (!match) return null
+  return { answer: match[1], recordedAt: match[2] }
+}
+
+/**
+ * PER-GATE ASK SWITCHES — THE REMEDY A LINT FAILURE ADDS WHEN ITS GATE WILL NOT ASK A PERSON.
+ *
+ * ⚠ THE POINT IS THE STALL, NOT THE MISSING LINE. `TDD Mode` and `QA Execution Mode` are the two markers
+ * `recursive_ask` writes for a phase, and with `gates.<gate>.ask: false` the call that writes them asks
+ * nobody — it records the configured default immediately. An agent that reads the plain "missing TDD Mode"
+ * failure can reasonably conclude it must obtain a person's decision and wait; nobody is coming. So the
+ * failure names the config that silenced the gate and the exact call that records the answer.
+ *
+ * Absent `gates` — every caller that is not the mounted runtime — this returns the empty string and every
+ * message is byte-identical to what it was. The two anchors `scripts/gen-workflow-map.mjs` cites are the
+ * PREFIXES of these sentences and stay untouched; only a suffix is ever added.
+ */
+function askDisabledRemedy(
+  gates: ResolvedGateAsks | undefined,
+  gateId: 'tdd-mode' | 'qa-signoff',
+): string {
+  if (gates === undefined) return ''
+  const setting = gateId === 'tdd-mode' ? gates.tddMode : gates.qaSignoff
+  if (setting.ask !== false || setting.default === undefined) return ''
+  const key = gateId === 'tdd-mode' ? 'tddMode' : 'qaSignoff'
+  return ' — the ' + gateId + ' ask is DISABLED by config (`gates.' + key + '.ask: false`), so no person will be '
+    + 'asked and waiting for one cannot help: call recursive_ask gate=' + gateId + ' and it records the '
+    + 'configured default `' + setting.default + '`'
+}
+
 /** lint_phase_specific_rules: per-phase rules dispatched from the artifact file. */
 export function lintPhaseSpecificRules(
   filePath: string,
@@ -1863,6 +1958,7 @@ export function lintPhaseSpecificRules(
   repoRoot: string,
   requirementIds: string[],
   actualChangedFiles: string[] | null,
+  options: LintOptions = {},
 ): string[] {
   const issues: string[] = []
   const fileName = basename(filePath)
@@ -1886,7 +1982,9 @@ export function lintPhaseSpecificRules(
     const tddMode = (getMdFieldValue(tddBody, 'TDD Mode') ?? getMdFieldValue(content, 'TDD Mode') ?? '').toLowerCase()
     if (!hasGateLine(content, 'TDD Compliance')) issues.push('Missing required gate line: TDD Compliance: PASS|FAIL')
     if (!TDD_MODES.has(tddMode)) {
-      issues.push('TDD Compliance Log is missing TDD Mode: strict|pragmatic')
+      // The prefix is the sentence `scripts/gen-workflow-map.mjs` cites; the suffix appears only when the
+      // mounted runtime supplied a policy AND that policy silences this gate (see `askDisabledRemedy`).
+      issues.push('TDD Compliance Log is missing TDD Mode: strict|pragmatic' + askDisabledRemedy(options.gates, 'tdd-mode'))
     } else if (tddMode === 'strict') {
       if (!tddBody.includes('RED Evidence:')) issues.push('Strict TDD is missing RED Evidence in ## TDD Compliance Log')
       if (!tddBody.includes('GREEN Evidence:')) issues.push('Strict TDD is missing GREEN Evidence in ## TDD Compliance Log')
@@ -1930,7 +2028,7 @@ export function lintPhaseSpecificRules(
     const qaMode = (getMdFieldValue(qaRecord, 'QA Execution Mode') ?? getMdFieldValue(content, 'QA Execution Mode') ?? '').toLowerCase()
     if (!qaRecord) issues.push('Missing or empty section: ## QA Execution Record')
     if (!QA_EXECUTION_MODES.has(qaMode)) {
-      issues.push('QA Execution Record is missing QA Execution Mode: human|agent-operated|hybrid')
+      issues.push('QA Execution Record is missing QA Execution Mode: human|agent-operated|hybrid' + askDisabledRemedy(options.gates, 'qa-signoff'))
     } else {
       if (['human', 'hybrid'].includes(qaMode)) {
         if (!hasMeaningfulValue(getMdFieldValue(signoffBody, 'Approved by'), new Set(['n/a', 'not required', 'none']))) issues.push(`QA Execution Mode ${qaMode} requires User Sign-Off -> Approved by`)
@@ -1945,6 +2043,56 @@ export function lintPhaseSpecificRules(
         } else {
           const missingQa = findMissingRepoPaths(repoRoot, qaPaths)
           if (missingQa.length > 0) issues.push(`QA evidence path(s) do not exist: ${missingQa.slice(0, 5).join(', ')}`)
+        }
+      }
+    }
+
+    /**
+     * PART B — CONFIGURED HUMAN REVIEW (`qa.humanReview: true`).
+     *
+     * ⚠ THE CONDITION IS THE CONFIG, AND ONLY THE CONFIG. The four rules below are inert unless the workspace
+     * configured human review — `qa.humanReview: false` (the default) leaves this artifact's standard exactly
+     * as it was, which is what keeps every existing run locking the way it always has. A `human`/`hybrid`
+     * artifact reaches the same evidence requirements through the pre-existing branch above; what the switch
+     * adds is (a) the outright refusal of the agent-operated downgrade and (b) the human-review evidence an
+     * agent-operated artifact never had to carry.
+     *
+     * ⚠ WHAT THE REFUSAL OF `agent-operated` IS FOR. This is the exact text the live run's agent escaped: it
+     * wrote `QA Execution Mode: agent-operated` after nobody answered three `qa-signoff` cards and proceeded.
+     * Under this switch the mode itself is the failure — named as a CONFIG refusal, not an artifact nit — so
+     * there is no mode an agent can select to get past the phase without a person.
+     */
+    if (options.humanReview === true) {
+      if (qaMode === 'agent-operated') {
+        issues.push('QA Execution Mode agent-operated is refused by configuration: `qa.humanReview: true` requires a person to sign phase-5 QA off, so the agent must not downgrade the mode to escape the gate')
+      }
+      if (!hasMeaningfulValue(getMdFieldValue(signoffBody, 'Approved by'), new Set(['n/a', 'not required', 'none']))) {
+        // ⚠ WORDED DIFFERENTLY FROM THE PRE-EXISTING HUMAN/HYBRID RULE DELIBERATELY: that rule's exact
+        // sentence is the citation anchor `scripts/gen-workflow-map.mjs` uses, and a second occurrence of it
+        // makes the generator refuse to cite (`ANCHOR AMBIGUOUS`). The words differ because the RULE differs —
+        // this one comes from configuration, not from the declared mode — and the two must stay distinguishable
+        // in a log a reader is scanning.
+        issues.push('`qa.humanReview: true` requires the User Sign-Off `Approved by` field to name the person who approved the QA phase')
+      }
+      if (!hasMeaningfulValue(getMdFieldValue(signoffBody, 'Date'), new Set(['n/a', 'not required', 'none']))) {
+        issues.push('`qa.humanReview: true` requires the User Sign-Off `Date` field to record when the person approved the QA phase')
+      }
+      const signOff = parseQaSignOff(content)
+      if (signOff === null) {
+        issues.push('`qa.humanReview: true` requires the sign-off line recursive_ask writes for the qa-signoff gate: - ' + QA_SIGN_OFF_FIELD + ': <answer> (gate answer recorded <ISO>) — a hand-typed QA Execution Mode is not a sign-off')
+      } else if (QA_EXECUTION_MODES.has(qaMode) && signOff.answer !== qaMode) {
+        // Two lines recording two decisions is the failure this check exists for: the mode a phase locks
+        // against and the answer a person gave must be the same decision.
+        issues.push('`qa.humanReview: true` requires the ' + QA_SIGN_OFF_FIELD + ' line to record the same decision as QA Execution Mode (line says ' + JSON.stringify(signOff.answer) + ', the mode is ' + JSON.stringify(qaMode) + ')')
+      }
+      const instructions = getHeadingBody(content, QA_HUMAN_REVIEW_SECTION)
+      if (!instructions) {
+        issues.push('`qa.humanReview: true` requires a ## ' + QA_HUMAN_REVIEW_SECTION + ' section naming where the product runs, what the person must check, and how they sign off')
+      } else {
+        for (const field of QA_HUMAN_REVIEW_FIELDS) {
+          if (!isAuthoredFieldValue(getMdFieldValue(instructions, field))) {
+            issues.push('`qa.humanReview: true` requires ## ' + QA_HUMAN_REVIEW_SECTION + ' -> ' + field + (field === QA_HUMAN_REVIEW_FIELDS[0] ? ' (the URL or the exact command a person runs)' : ''))
+          }
         }
       }
     }
@@ -2051,6 +2199,7 @@ export function lintArtifactFile(
   requirementIds: string[],
   actualChangedFiles: string[] | null,
   diffBasisError: string | null,
+  options: LintOptions = {},
 ): [number, number] {
   const content = readFileSync(filePath, 'utf8')
   const fileName = basename(filePath)
@@ -2101,7 +2250,7 @@ export function lintArtifactFile(
     failCount += 1
     writeIssue('FAIL', filePath, issue)
   }
-  for (const issue of lintPhaseSpecificRules(filePath, content, workflowProfile, runDir, repoRoot, requirementIds, actualChangedFiles)) {
+  for (const issue of lintPhaseSpecificRules(filePath, content, workflowProfile, runDir, repoRoot, requirementIds, actualChangedFiles, options)) {
     failCount += 1
     writeIssue('FAIL', filePath, issue)
   }
@@ -2249,8 +2398,12 @@ import { getPrerequisiteBlockers as getPrereqBlockers, getLockStatus } from './l
  *   - phase-sequence prerequisite checks + late-phase requirement checks
  *   - lint the memory plane
  *   - print Summary + return verdict
+ *
+ * ⚠ `options` IS PART B'S ONE SEAM, and it is optional so the canonical-parity signature is unchanged for
+ * every caller that does not care: absent means `humanReview` is off, which is byte-for-byte the lint this
+ * function performed before the switch existed.
  */
-export function lintRun(repoRoot: string, runId: string): LintResult {
+export function lintRun(repoRoot: string, runId: string, options: LintOptions = {}): LintResult {
   issues.length = 0
   const root = repoRoot
   const runRoot = join(root, '.recursive', 'run')
@@ -2323,7 +2476,7 @@ export function lintRun(repoRoot: string, runId: string): LintResult {
         writeIssue('FAIL', artifactPath, `Artifact exists but cannot be read: ${artifact}`)
         continue
       }
-      const [failCount, warnCount] = lintArtifactFile(artifactPath, runDir, root, workflowProfile, requirementIds, actualChangedFiles, diffBasisError)
+      const [failCount, warnCount] = lintArtifactFile(artifactPath, runDir, root, workflowProfile, requirementIds, actualChangedFiles, diffBasisError, options)
       totalFail += failCount
       totalWarn += warnCount
     }
@@ -2331,7 +2484,7 @@ export function lintRun(repoRoot: string, runId: string): LintResult {
     if (existsSync(addendaDir)) {
       const addenda = readdirSync(addendaDir).filter(n => n.endsWith('.md')).sort()
       for (const addendum of addenda) {
-        const [failCount, warnCount] = lintArtifactFile(join(addendaDir, addendum), runDir, root, workflowProfile, requirementIds, actualChangedFiles, diffBasisError)
+        const [failCount, warnCount] = lintArtifactFile(join(addendaDir, addendum), runDir, root, workflowProfile, requirementIds, actualChangedFiles, diffBasisError, options)
         totalFail += failCount
         totalWarn += warnCount
       }

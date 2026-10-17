@@ -22,6 +22,11 @@ import { createRecursiveAuditTeamTool } from './recursive_audit_team.tool.ts'
 import { createRecursiveReviewTool } from './recursive_review.tool.ts'
 import { createRecursiveDelegateTool } from './recursive_delegate.tool.ts'
 import { createRecursiveAskTool } from './recursive_ask.tool.ts'
+// ⚠ A SEPARATE IMPORT LINE, DELIBERATELY. `tests/docs-contract.spec.ts` proves every registered tool factory
+// has an `import { <factory> }` in this file by matching `import\s*\{\s*<name>\s*\}` — adding a second name to
+// that line makes the pattern stop matching and the whole docs contract fails to COLLECT. The file already
+// imports `renderGateBlockAsk` on its own line for the same reason.
+import { phaseAskNote } from './recursive_ask.tool.ts'
 import { renderGateBlockAsk } from './recursive_ask.tool.ts'
 import { createRecursivePreviewTool } from './recursive_preview.tool.ts'
 import type { SubagentsRuntimeLike } from './delegation.ts'
@@ -39,6 +44,7 @@ import { mountRecursiveRoutesOnce, makeRecursiveRoutes, type RecursiveRouteHost 
 import { registerRecursiveSkill } from './skills.ts'
 import { enumerateRuns, stageBWorkflowInit } from './bootstrap.ts'
 import { getNextLegalPhase, getLockStatus, PHASE_SEQUENCE } from './lock.ts'
+import { toolError } from './errors.ts'
 import { adoptSettlement } from './settlement.ts'
 import type { LlmInventoryLike } from './model-inventory.ts'
 import { resolveRunDir } from './run.ts'
@@ -390,6 +396,43 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     // Validation stays in `resolveEnforcementConfig` (strict, fail-loud), so a bad value
     // from any source is refused rather than coerced.
     if (config?.enforcement !== undefined) recursive.setEnforcementConfig(config.enforcement)
+
+    // PART B — `qa.humanReview`, resolved from the same settings namespace and on the same terms: the
+    // schema fills the default (`false`), so a caller that said nothing resolves to today's standard, and
+    // an explicit `true` is the workspace deciding that a person signs phase-5 QA. The runtime carries it to
+    // the phase-5 lint (`setQaConfig` → `lintArtifact` → `lintRun`), which is the ONLY consumer.
+    recursive.setQaConfig(config?.qa)
+
+    // ⚠ PER-GATE ASK SWITCHES, AND THE CONTRADICTION IS REFUSED HERE RATHER THAN SILENTLY RESOLVED.
+    // `qa.humanReview: true` asks for a person's sign-off; `gates.qaSignoff.ask: false` removes the question
+    // that obtains it. Honouring either silently would be the plugin choosing which of the owner's
+    // instructions to ignore, so the mount fails closed with a message that names both fields.
+    //
+    // ⚠ AND IT IS A REGISTRY-NAMED REFUSAL (RM2203), not a bare `Error`. The brief for this switch says the
+    // contradiction must fail closed "with a NAMED error", and in this plugin a name is a `RM####` code: it is
+    // what a log grep finds, what a board badge branches on, and what `tests/errors.spec.ts` keeps unique and
+    // class-consistent. The sentence still leads with both fields, so a person reading the mount failure in a
+    // profile log gets the same diagnosis as before.
+    if (config?.qa?.humanReview === true && config?.gates?.qaSignoff?.ask === false) {
+      throw new Error(toolError(
+        'QA_HUMAN_REVIEW_CONTRADICTION',
+        'qa.humanReview is true (a person must sign phase-5 QA off) while gates.qaSignoff.ask is false (the '
+        + 'qa-signoff question is never put to a person)',
+      ))
+    }
+    // ⚠ AND THE ONE IMPOSSIBLE SWITCH IS REFUSED AT MOUNT RATHER THAN AT ASK TIME. `gates.runStart.ask: false`
+    // is type-valid but can never succeed: run-start is the approval that ARMS the run, so the tool refuses it
+    // unconditionally and no `default` is permitted for it. Leaving that discoverable only at ask time would
+    // mean a settings form happily saving a configuration whose first use fails — the impossibility belongs at
+    // the point where the configuration is accepted, with the field named.
+    if (config?.gates?.runStart?.ask === false) {
+      throw new Error(toolError(
+        'RUN_START_ASK_REQUIRED',
+        'gates.runStart.ask is false, but the run-start gate is the approval that arms the run and cannot be '
+        + 'disabled — a run would begin without anyone approving it. Remove the field, or set it true',
+      ))
+    }
+    recursive.setGatesConfig(config?.gates)
 
     // T12 — publish each phase's rules to the native SKILL catalogue, so the agent and its
     // children can ASK what a phase requires instead of grepping this checkout. The catalogue is
@@ -834,7 +877,12 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
                 // LIVE BUG 6 (0.2.1): inject the lint-rules reminder AT MOST ONCE PER PHASE.
                 // The scaffold repair above is deduped via repairedRoots; the reminder itself was
                 // not, so every pre-step while DRAFT re-injected it.
-                const reminder = phaseLintRulesMessage(phase, undefined, recursive.delegatedReviewerCapability(root, phasePath))
+                // ⚠ AND THE PER-GATE ASK POLICY RIDES WITH IT. This reminder is injected automatically at phase
+                // entry, so it is the ONE surface that reaches an agent which never thinks to check the config:
+                // with `gates.tddMode.ask: false` nobody will be asked at phase 3, and without this line the
+                // agent waits for a card that is never raised. `phaseAskNote` returns null when the gate does
+                // ask, so an ordinary workspace sees the reminder it always saw.
+                const reminder = phaseLintRulesMessage(phase, undefined, recursive.delegatedReviewerCapability(root, phasePath), phaseAskNote(phase, recursive.gates))
         return {
           kind: 'enter',
           messages: [...messages, createUserMessage({ content: [{ type: 'text', text: reminder }], source: { ...REMINDER_SOURCE, form: 'notice', summary: 'phase ' + phase + ' lint rules' } })],

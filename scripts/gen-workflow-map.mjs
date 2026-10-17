@@ -90,6 +90,12 @@ const ANCHORS = {
   'lint.tddMode': ['src/ts-lint.ts', 'TDD Compliance Log is missing TDD Mode'],
   'lint.qaMode': ['src/ts-lint.ts', 'QA Execution Record is missing QA Execution Mode'],
   'lint.qaSignoff': ['src/ts-lint.ts', 'requires User Sign-Off -> Approved by'],
+  // PART B — the configured human-review refusal, and the only place it is worded. Anchored on the sentence
+  // rather than the field so the citation follows the rule if its supporting checks change.
+  'lint.qaHumanReview': ['src/ts-lint.ts', 'refused by configuration'],
+  // PART B — the switch itself, anchored on its declaration so the citation is a real file:line (the map's
+  // citation checker refuses a bare path).
+  'config.qaHumanReview': ['src/config.ts', 'humanReview: z.boolean().default(false)'],
   'lint.auditContext': ['src/ts-lint.ts', 'Audit Context section is empty'],
   'lint.staleBundle': ['src/ts-lint.ts', 'Review bundle is stale'],
 
@@ -417,6 +423,9 @@ const SRC = {
   lintTdd: citeOf('lint.tddMode'),
   lintQa: citeOf('lint.qaMode'),
   lintQaSignoff: citeOf('lint.qaSignoff'),
+  // PART B — the configured human-review switch and the refusal it produces.
+  lintQaHumanReview: citeOf('lint.qaHumanReview'),
+  configQaHumanReview: citeOf('config.qaHumanReview'),
   lintAuditContext: citeOf('lint.auditContext'),
   lintStale: citeOf('lint.staleBundle'),
 
@@ -966,6 +975,7 @@ const PHASES = [
     gates: [
       { t: 'HUMAN GATE — `qa-signoff`. `recursive_ask` labels `human` / `agent-operated` / `hybrid` are written to the `QA Execution Mode` marker.', c: SRC.askQa, human: true, shape: 'decision' },
       { t: '`human` and `hybrid` REQUIRE user sign-off before the lock; the sign-off needs a meaningful `Approved by` and `Date`.', c: 'src/lifecycle.ts:108-114, ' + SRC.lintQaSignoff, human: true, shape: 'decision' },
+      { t: 'With `qa.humanReview: true` configured, the `agent-operated` mode is REFUSED (the refusal comes from configuration, so it cannot be escaped by choosing a mode) and the artifact must carry the `QA Sign-Off` line `recursive_ask` writes plus an authored `## Human Review Instructions` section.', c: SRC.configQaHumanReview + ', ' + SRC.lintQaHumanReview, human: true, shape: 'gate' },
       { t: '`agent-operated` requires a named Agent Executor and Tools Used.', c: SRC.lintQa, human: false, shape: 'gate' },
       { t: 'The QA mode must be declared at all — an undeclared mode was a lock failure. (Note the two spellings: `05-manual-qa.md` is NOT in AUDITED_PHASE_FILES, but it IS in the linter\'s AUDITED_REQUIREMENT_FILES set at ts-lint.ts:60.)', c: 'src/lifecycle.ts:110', human: false, shape: 'gate' },
       { t: 'CLOSEOUT ENTRY: report-only, with a receipt of its own.', c: SRC.toolCloseout, human: false, shape: 'gate' },
@@ -1528,6 +1538,8 @@ const ERRORS = [
   { code: 'RM5502', k: 'runtime', p: 'the run-start gate needs an answer, and this composition mounts no user-questions channel', where: '`recursive_ask gate=run-start`' },
   { code: 'RM5503', k: 'runtime', p: 'the run-start question reached no decision: the mounted channel failed before a person answered it', where: '`recursive_ask gate=run-start` — relayable with `relay=true`, except cancellation/abort/timeout' },
   { code: 'RM5504', k: 'runtime', p: 'a person was asked to start this run and their answer was not one of the labels offered', where: '`recursive_ask gate=run-start` — NOT relayable' },
+  { code: 'RM5505', k: 'runtime', p: 'a person was shown this human gate and their answer was not one of the labels the gate offered', where: '`recursive_ask` for `tdd-mode` / `qa-signoff` / `gate-block` — records nothing' },
+  { code: 'RM5506', k: 'runtime', p: 'the human-gate question reached no decision: the mounted user-questions channel failed or was settled from outside', where: '`recursive_ask` for `tdd-mode` / `qa-signoff` / `gate-block` — no relay; records nothing' },
   { code: 'RM6601', k: 'capability', p: 'the agent-teams service is not available in this composition', where: '`recursive_audit_team`' },
 ]
 
@@ -2406,7 +2418,7 @@ ${PHASES.map(phaseRow).join('\n')}
       <div class="rail-pair">
         <div class="subcard">
           <h3>relay is run-start only</h3>
-          <p class="note" style="margin-top:var(--sp-2)">The other three gates never consult the channel, so accepting <code>relay</code> there would report a fallback that did not happen. Passing it is refused (RM1150). ${cite(SRC.askRelayOnly)}</p>
+          <p class="note" style="margin-top:var(--sp-2)">EVERY gate puts its question to the mounted user-questions channel — a call without an answer raises the card, and the person's own selection is what gets recorded (<code>source: "channel"</code>). What remains run-start only is the RELAY: only starting a run has a relayed-approval fallback, so accepting <code>relay</code> on another gate would report a fallback that did not happen. Passing it is refused (RM1150). ${cite(SRC.askRelayOnly)}</p>
         </div>
         <div class="subcard">
           <h3>the artifact is fixed</h3>

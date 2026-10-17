@@ -65,11 +65,59 @@ export const TOOL_ERRORS = {
     problem: 'this gate has no default artifact, so one must be named',
     next: 'pass artifact: <file> so the answer has somewhere durable to land',
   },
+  /**
+   * THE PER-GATE ASK SWITCHES' PARSE-TIME REFUSAL, AND WHY IT CARRIES A REGISTRY CODE.
+   *
+   * `gates.<gate>.default` is the label `recursive_ask` writes INTO AN ARTIFACT when that gate's ask is
+   * disabled, so a value that is not one of the gate's own labels would record a decision nobody offered —
+   * and a later phase locking against it would read a transcription error as a fact. "Never silently fall
+   * back" is the requirement: falling back to the nearest offered label would be the plugin inventing the
+   * answer, and ignoring the field would leave `ask: false` with nothing to record. So the config is refused
+   * before the plugin mounts.
+   *
+   * The detail names the exact field path, the offending value and the allowed set
+   * (`gates.tddMode.default is "banana", which is not one of strict | pragmatic`), because those are the three
+   * facts a person editing the settings form needs. The code is registered HERE rather than thrown as a bare
+   * `Error` so the refusal carries the same stable, greppable handle as every other refusal this plugin makes.
+   */
+  BAD_GATE_DEFAULT: {
+    code: 'RM1145',
+    klass: 'input',
+    problem: 'a gates entry names a default that is not one of the labels that same gate offers',
+    next: 'fix gates.<gate>.default to one of that gate\'s own labels (tddMode: strict | pragmatic, qaSignoff: human | agent-operated | hybrid), or set gates.<gate>.ask: true and let a person choose',
+  },
+  /**
+   * ⚠ A SWITCH THAT IS TYPE-VALID AND CAN NEVER SUCCEED, REFUSED WHERE THE CONFIG IS ACCEPTED.
+   *
+   * `gates.runStart.ask: false` parses, appears in the settings form, and then fails on first use: run-start is
+   * the approval that ARMS the run, so the tool refuses it unconditionally and no `default` is permitted for it.
+   * Discovered only at ask time, that would be a saved configuration whose first effect is a dead end. It has its
+   * OWN code rather than reusing the contradiction's, because the contradiction's text names
+   * `qa.humanReview`/`qaSignoff` — asserting a cause this refusal did not establish, which is the defect class
+   * this project keeps removing.
+   */
+  RUN_START_ASK_REQUIRED: {
+    code: 'RM1146',
+    klass: 'input',
+    problem: 'gates.runStart.ask is false, but the run-start gate is the approval that arms the run and cannot be disabled',
+    next: 'fix the workspace config — remove gates.runStart.ask (or set it true) — then call recursive_ask with gate run-start so a person approves the run before it begins',
+  },
+  /**
+   * ⚠ THIS SENTENCE USED TO BE FALSE, and the falseness is the point of the entry.
+   *
+   * It said relay "applies only to the run-start gate, which is the only gate that asks the user-questions
+   * channel". The first clause is still true and the second is not: `recursive_ask` now puts EVERY gate's
+   * question to the mounted channel (see `askGateDirectly` in `recursive_ask.tool.ts`) — the owner's report
+   * was exactly that the three workflow gates asked nobody and merely wrote their question into the chat.
+   * What is still run-start only is the RELAY: the fallback that records a person's explicit approval when
+   * the channel cannot deliver the question. A workflow gate has no relay because its answer is a mode, not
+   * consent to start a run, and refusing it keeps the result from claiming a fallback that never happened.
+   */
   RELAY_ONLY_FOR_RUN_START: {
     code: 'RM1150',
     klass: 'input',
-    problem: 'relay applies only to the run-start gate, which is the only gate that asks the user-questions channel',
-    next: 'drop relay for this gate and answer it with one of its own labels, or call recursive_ask with gate: run-start when the decision is whether to start the run',
+    problem: 'relay applies only to the run-start gate, because only starting a run has a relayed-approval fallback (every gate still asks the user-questions channel directly when one is mounted)',
+    next: 'drop relay for this gate and let the mounted user-questions channel put the question to the person, or call recursive_ask with gate: run-start when the decision is whether to start the run',
   },
   MISSING_RUN_ID: {
     code: 'RM1101',
@@ -132,6 +180,26 @@ export const TOOL_ERRORS = {
     klass: 'value',
     problem: 'action must be create | promote | status',
     next: 'pass action=create, action=promote or action=status',
+  },
+
+  /**
+   * ⚠ THE `qa.humanReview` CONTRADICTION, AS A CODE RATHER THAN A THROWN SENTENCE.
+   *
+   * `qa.humanReview: true` exists for exactly one purpose: a PERSON signs phase-5 manual QA off, which the
+   * linter enforces by failing an `agent-operated` mode (see `lintPhaseSpecificRules`). `gates.qaSignoff.ask:
+   * false` removes the only question that can obtain that person's label. A config holding both is not a
+   * preference to be resolved — honouring either one silently would be the plugin choosing which of the
+   * workspace's two instructions to ignore, and the run would then carry a QA phase whose sign-off nobody can
+   * point at. So the mount fails closed, and the refusal names BOTH fields and both ways out.
+   *
+   * This is a `value` class error: the configuration's values are individually valid and jointly
+   * contradictory, which is a different failure from a value outside its set (RM1xxx) or a runtime refusal.
+   */
+  QA_HUMAN_REVIEW_CONTRADICTION: {
+    code: 'RM2203',
+    klass: 'value',
+    problem: 'the config is contradictory: qa.humanReview is true while gates.qaSignoff.ask is false',
+    next: 'set gates.qaSignoff.ask: true so the sign-off question qa.humanReview depends on is actually put to a person, or set qa.humanReview: false and let an agent record the QA mode — mount the plugin with one of the two, never both',
   },
 
   /* 3xxx — the session is not attached to a control plane. */
@@ -204,6 +272,48 @@ export const TOOL_ERRORS = {
     klass: 'runtime',
     problem: 'a person was asked to start this run and their answer was not one of the labels the run-start gate offered',
     next: 'call recursive_ask again and have the person choose exactly "Start run" or "Hold"; a skipped or custom answer is not an approval, and no relayed answer can replace a decision the person made',
+  },
+  /**
+   * THE WORKFLOW GATES' HALF OF RM5504 — and the code that did not exist, which is why the live run's
+   * `qa-signoff` gate could ask three times and record an `agent-operated` mode the person never chose.
+   *
+   * A person WAS reached (the channel resolved) and their answer is not a label the gate offered: a skip, a
+   * custom value, several labels at once. That is a decision this gate cannot record, so the refusal quotes
+   * the detail and NOTHING is written. The marker is not written from the caller's argument either — the
+   * whole point is that the person's non-answer cannot be replaced by the model's preferred one.
+   */
+  GATE_ANSWER_UNUSABLE: {
+    code: 'RM5505',
+    klass: 'runtime',
+    problem: 'a person was shown this human gate and their answer was not one of the labels the gate offered',
+    next: 'call recursive_ask again and have the person choose exactly one of the gate\'s own labels; nothing is recorded until they do, and the question stays unanswered in the artifact',
+  },
+  /**
+   * THE OTHER HALF: the question was PUT to a mounted channel and reached no decision — the channel threw,
+   * the card was dismissed, the turn was cancelled, or a deadline ended. There is no relay for a workflow
+   * gate (see RM1150), so the only honest outcome is a refusal that NAMES the cause; recording the caller's
+   * answer here is how a gate records a decision the person never made.
+   */
+  GATE_QUESTION_UNANSWERED: {
+    code: 'RM5506',
+    klass: 'runtime',
+    problem: 'the human-gate question reached no decision: the mounted user-questions channel failed or was settled from outside before a person answered it',
+    next: 'read the cause named in the detail, fix the channel and call recursive_ask again with the same gate; an unanswered gate records nothing, so nothing has to be undone',
+  },
+  /**
+   * ⚠ A GATE ASK THAT CANNOT HONESTLY PROCEED WITH THE PERSON SILENTED.
+   *
+   * Three configurations reach this: the `run-start` ask disabled (it is the approval that arms the run, so
+   * silencing it would start a run nobody approved), a gate with no configured default (`gate-block`, where
+   * fix/reopen/abandon are the person's call and inventing one would have the plugin abandon a phase on
+   * their behalf), and `qa.humanReview: true` beside `gates.qaSignoff.ask: false` (refused at mount, whose
+   * message is its own).
+   */
+  GATE_ASK_DISABLED: {
+    code: 'RM5507',
+    klass: 'runtime',
+    problem: 'this human gate is configured with its ask disabled and has no decision it can honestly record in the person\'s place',
+    next: 'call recursive_ask with an explicit answer for gate-block, or set gates.<gate>.ask: true so the question is put to the person; the run-start ask cannot be disabled at all; nothing has been written',
   },
   RUNTIME_REFUSED: {
     code: 'RM5501',

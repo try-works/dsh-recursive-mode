@@ -22,6 +22,8 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { RecursiveRuntime } from './runtime.ts'
 import { toolError } from './errors.ts'
+import { QA_SIGN_OFF_FIELD, type PhaseAskNote } from './phase-rules.ts'
+import { gateAskFor, GATE_CONFIG_KEY, type ResolvedGateAsks } from './gates.ts'
 import {
   RUN_START_APPROVE,
   RUN_START_ARTIFACT,
@@ -343,7 +345,7 @@ export function pendingGateFor(artifactFile: string, artifactText: string | null
 export function createRecursiveAskTool(recursive: RecursiveRuntime) {
   return defineTool({
     name: 'recursive_ask',
-    description: 'Ask a human gate as a structured decision (tdd-mode, qa-signoff, gate-block), or ASK TO START A RUN (run-start: nothing runs, and no goal exists, until this gate is approved). Call without `answer` to ask; call with it to write the answer into the artifact as a durable marker. For run-start the mounted human channel is asked first and its own selection wins; when that channel cannot deliver the question, the refusal names the cause and `relay=true` with an explicit `answer` records the person\'s relayed approval. The run-start gate is REFUSED while the Phase 0 requirements document is still the unfilled template — the refusal quotes the placeholder lines, and there is nothing to approve until they are written. One ask per step.',
+    description: 'Ask a human gate as a structured decision (tdd-mode, qa-signoff, gate-block), or ASK TO START A RUN (run-start: nothing runs, and no goal exists, until this gate is approved). Call without `answer` to ask; call with it to write the answer into the artifact as a durable marker. When this composition mounts the user-questions channel, EVERY gate is put to the person as a blocking card and the person\'s own selection is what gets recorded (`source: "channel"`); a person who answers with something the gate did not offer, or a channel that reaches nobody, is REFUSED with the cause named (RM5505 / RM5506) and records NOTHING. With no channel mounted the question is returned so it can be relayed in the transcript and answered in a later call. For run-start the channel is asked first and its own selection wins; when that channel cannot deliver the question, the refusal names the cause and `relay=true` with an explicit `answer` records the person\'s relayed approval. The run-start gate is REFUSED while the Phase 0 requirements document is still the unfilled template — the refusal quotes the placeholder lines, and there is nothing to approve until they are written. One ask per step.',
     parameters: {
       gate: { type: 'string', description: 'tdd-mode | qa-signoff | gate-block | run-start. Required. `run-start` is phase 0: approving it records the approval and arms the run goal, which is what makes the harness drive rounds.' },
       runId: { type: 'string', description: 'Run id. Required; must resolve inside the current workspace.' },
@@ -412,15 +414,138 @@ export function createRecursiveAskTool(recursive: RecursiveRuntime) {
 
       // ASK.
       //
-      // ⚠ PHASE 0 EXCEPTION, AND IT IS THE WHOLE POINT OF THE CHANNEL. For the three workflow gates a
-      // question is answered by relaying a label, so "no answer means ask". Starting a run is the decision
-      // that creates the armed goal, so when this composition mounts the blocking human channel the
-      // question is PUT TO THE PERSON whether or not an answer argument arrived — a caller cannot skip the
-      // person by supplying one. Only a composition with no channel falls back to the relayed answer, and
-      // a channel that FAILED is a third case: it is reported with its cause, and the relayed answer is
-      // taken only when the caller asks for the relay in so many words (see `recordRunStartAnswer`).
+      // ⚠ EVERY GATE IS PUT TO THE PERSON WHEN THE COMPOSITION MOUNTS THE CHANNEL, and this is the fix for
+      // the owner's report: *"the agent asks me for qa approval without sending a proper question ui
+      // component for sign off, so i dont see any notification its just in the chat text and i miss it"*.
+      // Before this change only `run-start` called `channel.ask`, so the three workflow gates handed the
+      // question back as JSON for the model to retype in the transcript — a card the host never rendered,
+      // which a live run demonstrated by asking `qa-signoff` three times with no person ever seeing it.
+      //
+      // The branches, in the order they run:
+      //   1. `run-start` asks inside `recordRunStartAnswer`, whether or not an answer argument arrived — a
+      //      caller cannot skip the person by supplying one, and the relay is refused unless the caller asks
+      //      for it in so many words (see `recordRunStartAnswer`).
+      //   2. The three workflow gates ask HERE, and only when no `answer` argument arrived. Their answer is
+      //      recorded from the person's own selection, reported as `source: "channel"`.
+      //   3. A composition with NO channel keeps the relayed behaviour exactly: the question is returned so
+      //      the caller can put it in the transcript and answer it in a later call.
+      // ⚠ PER-GATE ASK SWITCHES — evaluated BEFORE anything can raise a card. When a gate's ask is disabled
+      // the person is NOT asked: the configured default is recorded at once, and the result SAYS so
+      // (`source: 'config'` + `ask: 'disabled'`), so a reader never has to infer that nobody was involved.
+      // Three refusals belong here, all of them naming what to change:
+      //   • `run-start` cannot be silenced: it is the approval that ARMS the run, so a run started with that
+      //     ask disabled would be a run nobody approved.
+      //   • a gate with no configured default (`gate-block`) must not invent one — fix/reopen/abandon are the
+      //     person's call, and picking one would have the plugin abandon a phase on their behalf.
+      //   • a configured default that is not one of the gate's own labels is refused through the SAME
+      //     validator a caller's answer goes through, rather than being written and read as a decision.
+      const askPolicy = recursive.gateAsk(gateId)
+      // `run-start` can never be silenced: it is the approval that ARMS the run, so this is refused whether or
+      // not an answer was supplied — and the message must not offer a remedy that cannot work.
+      if (!askPolicy.ask && isRunStartGate(gateId)) {
+        return {
+          error: toolError('GATE_ASK_DISABLED', 'the run-start ask cannot be disabled: it is the approval that arms the run (gates.runStart.ask)'),
+          gate: gateId,
+          runId,
+          artifact,
+        } as unknown as JsonValue
+      }
+      if (!askPolicy.ask) {
+        // ⚠ AN EXPLICIT ANSWER IS READ *BEFORE* ANY REFUSAL. RM5507's remedy tells the caller to supply an
+        // answer, so refusing before looking at one would prescribe the very call that had just failed — the
+        // defect class this project keeps removing (a message asserting a state the code never established).
+        // An answer also WINS over the configured default: the switch decides whether a person is ASKED, not
+        // whether an explicit decision may be recorded, and overwriting a real decision with a default would
+        // make the tool less truthful than the run.
+        const explicit = args.answer
+        if (explicit === undefined && askPolicy.default === undefined) {
+          return {
+            error: toolError('GATE_ASK_DISABLED', 'gate ' + gateId + ' has no configured default, so it cannot record a decision while its ask is disabled (gates.' + gateId + ')'),
+            gate: gateId,
+            runId,
+            artifact,
+          } as unknown as JsonValue
+        }
+        if (artifact === '') {
+          return { error: toolError('MISSING_ASK_ARTIFACT', 'this gate needs an explicit artifact to record into') } as const
+        }
+        const requested = explicit ?? (askPolicy.default as string)
+        let configured: string
+        try {
+          configured = validateAskAnswerFor(gateId as AskGateId, requested)
+        } catch (err) {
+          return {
+            error: toolError('BAD_ASK_ANSWER', 'gate ' + gateId + ': ' + (err instanceof Error ? err.message : String(err))),
+          } as const
+        }
+        const configuredMarker = answerMarker(gateId as AskGateId, configured)
+        const configuredWritten = recursive.recordAskAnswer(root, runId, artifact, configuredMarker)
+        return {
+          gate: gateId,
+          answer: configured,
+          marker: configuredMarker,
+          artifact,
+          path: configuredWritten.path,
+          replaced: configuredWritten.replaced,
+          // WHERE THE RECORDED DECISION CAME FROM, stated: the caller's own answer, or the configuration.
+          source: explicit === undefined ? 'config' : 'caller',
+          ask: 'disabled',
+        } as unknown as JsonValue
+      }
+
       const channelMounted = recursive.userQuestionsChannel !== null
       if (args.answer === undefined && !(isRunStartGate(gateId) && channelMounted)) {
+        const channel = recursive.userQuestionsChannel
+        if (channel !== null && !isRunStartGate(gateId)) {
+          // A gate with nowhere to record an answer must not raise a card first: putting a question to a
+          // person and then discovering the answer cannot land is the same dead end as the run-start gate's
+          // spec guard, so the artifact check runs BEFORE the ask.
+          if (artifact === '') {
+            return { error: toolError('MISSING_ASK_ARTIFACT', 'this gate needs an explicit artifact to record into') } as const
+          }
+          const outcome = await askGateDirectly(channel, {
+            id: question.id,
+            header: question.header,
+            question: question.question,
+            options: question.options,
+          }, exec)
+          if (outcome.kind === 'unusable') {
+            // A person WAS reached and their answer is not one of this gate's labels. That decision is
+            // final: neither the model nor a later call may replace it, and NOTHING is written.
+            return {
+              error: toolError('GATE_ANSWER_UNUSABLE', outcome.detail + ' (gate ' + gateId + ')'),
+              gate: gateId,
+              runId,
+              artifact,
+              question,
+              channel: { outcome: 'unusable' },
+            } as unknown as JsonValue
+          }
+          if (outcome.kind === 'unavailable') {
+            // The question reached nobody, or the person cancelled it. There is no relay for a workflow
+            // gate (see RM1150), so the refusal NAMES the cause and records nothing at all.
+            return {
+              error: toolError('GATE_QUESTION_UNANSWERED', outcome.detail + ' (gate ' + gateId + ')'),
+              gate: gateId,
+              runId,
+              artifact,
+              question,
+              // The diagnosis as data: a model can quote the cause, and a test can assert on it rather
+              // than on the prose above.
+              channel: { outcome: 'unavailable', cause: outcome.cause, relayable: outcome.relayable },
+            } as unknown as JsonValue
+          }
+          // Validate what is about to become durable. The ask already filtered the selection to this gate's
+          // own labels; the check is kept because "the channel filtered it" must not be the only thing
+          // standing between a stray label and a marker a later phase locks against.
+          let decided: string
+          try {
+            decided = validateAskAnswerFor(gateId, outcome.answer)
+          } catch (err) {
+            return { error: toolError('BAD_ASK_ANSWER', err instanceof Error ? err.message : String(err)) } as const
+          }
+          return recordGateAnswer(recursive, root, runId, gateId as AskGateId, decided, artifact, 'channel') as unknown as JsonValue
+        }
         return { gate: gateId, marker: isRunStartGate(gateId) ? RUN_START_GATE.marker : ASK_GATES[gateId as AskGateId].marker, artifact, question } as unknown as JsonValue
       }
 
@@ -441,11 +566,70 @@ export function createRecursiveAskTool(recursive: RecursiveRuntime) {
       if (isRunStartGate(gateId)) {
         return recordRunStartAnswer(recursive, root, runId, answer, exec, args.relay === true) as unknown as JsonValue
       }
-      const marker = answerMarker(gateId as AskGateId, answer as string)
-      const written = recursive.recordAskAnswer(root, runId, artifact, marker)
-      return { gate: gateId, answer, marker, artifact, path: written.path, replaced: written.replaced } as unknown as JsonValue
+      return recordGateAnswer(recursive, root, runId, gateId as AskGateId, answer as string, artifact) as unknown as JsonValue
     },
   })
+}
+
+/**
+ * PART B — the field the distinct QA sign-off line carries.
+ *
+ * ⚠ WHY A SECOND LINE EXISTS AT ALL, AND WHAT IT HONESTLY PROVES. The owner asked for the QA phase to be
+ * gated on a person, and config (`qa.humanReview`) is what makes an `agent-operated` downgrade REFUSE. This
+ * line is the artifact-side evidence that the mode came through `recursive_ask` rather than being typed by
+ * hand: `recursive_ask` writes it in the same call that writes the mode marker.
+ *
+ * The limit is stated rather than papered over: an agent that TYPES this line can still forge it — the
+ * linter reads a document, and a document can say anything. What becomes impossible under `humanReview` is
+ * the SILENT downgrade: the lint refusal comes from the CONFIG, so declaring `agent-operated` (typed or
+ * recorded) fails the phase, and the only way past the gate is a person's label on the card.
+ *
+ * (The field NAME lives in `phase-rules.ts`, beside the section and field names the linter and the closeout
+ * scaffold use, so the writer and the reader cannot spell it differently.)
+ */
+
+/** The exact shape `recursive_ask` writes for a QA gate answer, and the linter requires under human review. */
+export function qaSignOffLine(answer: string, recordedAt: string): string {
+  return '- ' + QA_SIGN_OFF_FIELD + ': ' + answer + ' (gate answer recorded ' + recordedAt + ')'
+}
+
+/**
+ * Write one workflow gate's answer into its artifact and report what landed.
+ *
+ * ⚠ ONE WRITER FOR BOTH SOURCES. A label that came back from the mounted channel and one supplied as
+ * `answer` take exactly the same path from here, so the marker a later phase locks against cannot differ
+ * by where the decision came from — only the reported `source` says that.
+ *
+ * ⚠ THE QA GATE ALSO WRITES A DISTINCT SIGN-OFF LINE (see `qaSignOffLine`). It is a SECOND marker under its
+ * own field rather than a longer first one because `recordAskAnswer` replaces by field name: one line with
+ * two facts would be found by neither field's rule, and a hand-typed `QA Execution Mode` would then be the
+ * only thing standing between an agent and the phase gate.
+ */
+function recordGateAnswer(
+  recursive: RecursiveRuntime,
+  root: string,
+  runId: string,
+  gateId: AskGateId,
+  answer: string,
+  artifact: string,
+  source?: 'channel',
+): Record<string, unknown> {
+  const marker = answerMarker(gateId, answer)
+  const written = recursive.recordAskAnswer(root, runId, artifact, marker)
+  const signOff = gateId === 'qa-signoff' ? qaSignOffLine(answer, new Date().toISOString()) : null
+  const signOffWritten = signOff === null ? null : recursive.recordAskAnswer(root, runId, artifact, signOff)
+  return {
+    gate: gateId,
+    answer,
+    marker,
+    artifact,
+    path: written.path,
+    replaced: written.replaced,
+    // `source` is present ONLY for a channel selection: the relayed-answer path has reported no source
+    // since T23, and adding one there would change a result existing callers (and tests) already read.
+    ...(source === undefined ? {} : { source }),
+    ...(signOff === null || signOffWritten === null ? {} : { signOff, signOffReplaced: signOffWritten.replaced }),
+  }
 }
 
 /**
@@ -590,7 +774,7 @@ export async function recordRunStartAnswer(
 }
 
 /**
- * PHASE 0 — WHAT THE BLOCKING CHANNEL ACTUALLY DID.
+ * WHAT THE BLOCKING CHANNEL ACTUALLY DID — for ANY gate (run-start and the three workflow gates alike).
  *
  * ⚠ THIS TYPE EXISTS BECAUSE ITS ABSENCE WAS THE DEFECT. The first version returned a bare `null` from a
  * `catch {}` for every failure and for every unrecognisable selection, so "the channel threw NO_PROVIDER",
@@ -634,11 +818,11 @@ export function classifyChannelFailure(err: unknown): { cause: string; detail: s
 }
 
 /** Describe an answer that arrived but is not a decision this gate can record. */
-function describeUnusableAnswer(item: { selected: string[]; custom?: string } | undefined): string {
-  const offered: readonly string[] = RUN_START_GATE.options.map((option) => option.label)
+function describeUnusableAnswer(item: { selected: string[]; custom?: string } | undefined, gate: AskGateQuestion): string {
+  const offered: readonly string[] = gate.options.map((option) => option.label)
   const list = (values: readonly string[]): string => JSON.stringify(values.join(' | '))
   if (item === undefined) {
-    return 'the channel resolved with no answer for question ' + JSON.stringify(RUN_START_GATE.id) + ' at all'
+    return 'the channel resolved with no answer for question ' + JSON.stringify(gate.id) + ' at all'
   }
   const raw = item.selected ?? []
   const custom = item.custom?.trim() ?? ''
@@ -661,41 +845,97 @@ function describeUnusableAnswer(item: { selected: string[]; custom?: string } | 
 }
 
 /**
- * Ask the run-start question through the blocking channel and report WHAT HAPPENED.
+ * THE QUESTION A GATE PUTS TO THE CHANNEL — the minimum both gate families can supply.
  *
- * ⚠ THE CATCH IS THE POINT. It used to be `catch { return null }` — a blocking human question whose
- * failure cause was erased at the exact moment the cause was the only thing worth knowing. Every path out
- * of this function now says which path it was.
- *
- * The selection is filtered to the gate's OWN labels: a question a UI answered with a free-text custom
- * value must not become an approval just because it arrived on the right channel.
+ * `ASK_GATES`' values and `RUN_START_GATE` both satisfy it structurally, so the ask helper below can be the
+ * ONE place that talks to the channel without widening either gate's own contract.
  */
-export async function askRunStartDirectly(
+export interface AskGateQuestion {
+  id: string
+  header: string
+  question: string
+  options: readonly AskOption[]
+}
+
+/**
+ * Ask ANY gate's question through the blocking channel and report WHAT HAPPENED.
+ *
+ * ⚠ THE CATCH IS THE POINT. It used to be `catch { return null }` — a blocking human question whose failure
+ * cause was erased at the exact moment the cause was the only thing worth knowing. Every path out of this
+ * function now says which path it was.
+ *
+ * The selection is filtered to the GATE'S OWN labels: a question a UI answered with a free-text custom value,
+ * or with a label from another gate, must not become a decision just because it arrived on the right channel.
+ */
+export async function askGateDirectly(
   channel: NonNullable<RecursiveRuntime['userQuestionsChannel']>,
+  gate: AskGateQuestion,
   exec: { agent?: unknown; signal?: unknown; callId?: unknown },
 ): Promise<RunStartChannelOutcome> {
-  const known = RUN_START_GATE.options.map((option) => option.label) as readonly string[]
+  const known = gate.options.map((option) => option.label) as readonly string[]
   try {
     // The agent is passed as the LIVE handle the host gave this tool call. The real service validates it
     // against its own registry and rejects when it is not the live root, so a fabricated handle can never
     // produce an answer here.
     const settled = await channel.ask({
       questions: [{
-        id: RUN_START_GATE.id,
-        header: RUN_START_GATE.header,
-        question: RUN_START_GATE.question,
-        options: RUN_START_GATE.options.map((option) => ({ ...option })),
+        id: gate.id,
+        header: gate.header,
+        question: gate.question,
+        options: gate.options.map((option) => ({ ...option })),
       }],
       agent: exec.agent,
       signal: exec.signal,
       // Links the card to this tool call, the way plan-mode's exit does.
       wait: { callId: exec.callId },
     } as never)
-    const item = settled.answers.find((entry) => entry.id === RUN_START_GATE.id)
+    const item = settled.answers.find((entry) => entry.id === gate.id)
     const selected = item?.selected?.filter((label) => known.includes(label)) ?? []
-    if (selected.length !== 1) return { kind: 'unusable', detail: describeUnusableAnswer(item) }
+    if (selected.length !== 1) return { kind: 'unusable', detail: describeUnusableAnswer(item, gate) }
     return { kind: 'answered', answer: selected[0] as string }
   } catch (err) {
     return { kind: 'unavailable', ...classifyChannelFailure(err) }
   }
+}
+
+/**
+ * Ask the run-start question through the blocking channel.
+ *
+ * ⚠ A THIN WRAPPER SINCE THE WORKFLOW GATES LEARNED TO ASK. The body is `askGateDirectly`'s — same ask, same
+ * filtering, same outcome vocabulary — and this name survives because the exported contract (and the tests
+ * that call it directly) is about the run-start gate specifically.
+ */
+export async function askRunStartDirectly(
+  channel: NonNullable<RecursiveRuntime['userQuestionsChannel']>,
+  exec: { agent?: unknown; signal?: unknown; callId?: unknown },
+): Promise<RunStartChannelOutcome> {
+  return askGateDirectly(channel, RUN_START_GATE, exec)
+}
+
+/**
+ * PER-GATE ASK SWITCHES — THE GUIDANCE NOTE FOR A PHASE WHOSE GATE WILL NOT ASK.
+ *
+ * ⚠ WHY THIS LIVES HERE. The artifact→gate mapping is `GATE_DEFAULT_ARTIFACT`, and the gate vocabulary is
+ * `ASK_GATES`/`ASK_GATE_IDS` — both owned by this module. A guidance builder that re-derived "phase 03 owes
+ * `tdd-mode`" from the file name with its own table would be a second mapping, and the day a gate's artifact
+ * moves, the reminder would keep telling an agent to call a gate the phase does not owe.
+ *
+ * ⚠ AND IT RETURNS `null` WHENEVER THE PERSON WILL BE ASKED. The note exists to stop an agent waiting for a
+ * card that is not coming; saying anything at all when the gate DOES ask would be noise in a message that is
+ * already dense, and it would make the line's presence meaningless.
+ *
+ * The result is passed to `phaseLintRulesMessage`, which is the ONE text that reaches both the automatic
+ * pre-step reminder and the closeout report's `guidance` (see `closeout-report.ts`).
+ */
+export function phaseAskNote(artifactFile: string, gates: ResolvedGateAsks): PhaseAskNote | null {
+  const gate = (Object.keys(GATE_DEFAULT_ARTIFACT) as AskGateId[])
+    .find((id) => GATE_DEFAULT_ARTIFACT[id] === artifactFile)
+  if (gate === undefined) return null
+  const setting = gateAskFor(gates, gate)
+  // A gate with no configured default cannot record anything while its ask is off; the ask path REFUSES that
+  // combination by name (GATE_ASK_DISABLED), so there is nothing helpful to say here beyond silence.
+  if (setting.ask || setting.default === undefined) return null
+  const key = GATE_CONFIG_KEY[gate]
+  if (key === undefined) return null
+  return { gate, key, default: setting.default }
 }

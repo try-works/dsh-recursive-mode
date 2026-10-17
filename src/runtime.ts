@@ -226,7 +226,7 @@ const ARTIFACT_STUB = {
 export class RecursiveRuntime extends Service {
   /** Recursive-mode runtime service. Owns run-state reads + lock/init/lint operations. */
 
-  constructor(ctx: Context, config: { repoRoot?: string; workspaceRegistry?: WorkspaceRegistryLike; goals?: GoalServiceLike | null; jobs?: JobsRegistryLike | null; subagents?: SubagentsRuntimeLike | null; teams?: TeammateRosterLike | null; workflow?: WorkflowEngineLike | null } = {}) {
+  constructor(ctx: Context, config: { repoRoot?: string; workspaceRegistry?: WorkspaceRegistryLike; goals?: GoalServiceLike | null; jobs?: JobsRegistryLike | null; subagents?: SubagentsRuntimeLike | null; teams?: TeammateRosterLike | null; workflow?: WorkflowEngineLike | null; teammatePrimitiveRoles?: readonly string[] } = {}) {
     super(ctx, 'recursive')
     this.repoRoot = config.repoRoot ?? process.cwd()
     this.workspaceRegistry = config.workspaceRegistry ?? null
@@ -239,8 +239,31 @@ export class RecursiveRuntime extends Service {
     // ⚠ THE ROSTER SEAM (G2). Optional like every other seam: absent it, delegation keeps using
     // `ctx.subagents.startContinuable` exactly as it does today. See `src/teammate.ts`.
     this.teamsSeam = config.teams ?? null
+    // ⚠ PER-ROLE DISPATCH SURFACE. A roster child cannot carry provider/model/effort: `SpawnTeammateRequest`
+    // has no `agentOptions`, and `provider.agentRouteDefaults` is read ONLY by the model-facing `tool-subagent`
+    // tool (`tool-subagent/src/index.ts:369`), never by `startContinuable`, so a registered provider cannot inject
+    // a model into a teammate either. A role that MUST run on its own model therefore keeps the PRIMITIVE path,
+    // where this plugin passes `agentOptions` itself. Empty by default: team everywhere.
+    this.teammatePrimitiveRoles = [...(config.teammatePrimitiveRoles ?? [])]
     // T2: the workflow engine, likewise.
     this.workflow = config.workflow ?? null
+  }
+
+  /** Roles that must keep the primitive dispatch surface so their own provider/model/effort apply. */
+  private readonly teammatePrimitiveRoles: string[]
+
+  /**
+   * Should this role be dispatched on the PRIMITIVE path even when the roster is available?
+   *
+   * ⚠ WHY THIS EXISTS, stated once. The roster gives a child a name, a durable mailbox and task ownership, but
+   * `SpawnTeammateRequest` carries no `agentOptions` — so a teammate ALWAYS inherits the Lead's provider/model/
+   * effort, and no amount of provider registration can change that (`agentRouteDefaults` is consumed only by
+   * `tool-subagent`, not by `startContinuable`). A role pinned to a distinct model would silently run on the
+   * wrong one. Listing it here trades the roster surface for its own route, which is the truthful way to get both
+   * behaviours — and the routing notes say which surface a child actually got.
+   */
+  private isTeammatePrimitiveRole(role: string): boolean {
+    return this.teammatePrimitiveRoles.some((candidate) => candidate === role)
   }
 
   /**
@@ -955,10 +978,13 @@ export class RecursiveRuntime extends Service {
     // The loop's own prerequisites. If any is missing `delegateContinuable` will REFUSE, so a roster child must not
     // be spawned first — a teammate created for a round that cannot observe it would be a child nobody can use.
     const continuablePrereqs = subagents !== undefined && input.parent !== undefined && input.awaitRoundResult !== undefined
-    // ⚠ THE GATE, AND THE ONE-SHOT EXCEPTION. The roster has no one-shot mode (`spawnTeammate` always creates a
+    // ⚠ THE GATE, AND TWO EXCEPTIONS. The roster has no one-shot mode (`spawnTeammate` always creates a
     // continuable child), and T35 makes one-shot an EXPLICIT ask — so an explicit `mode: 'one-shot'` keeps the
-    // primitive path rather than being silently upgraded to a teammate. Every OTHER delegated child is rostered.
-    const rosterEligible = input.mode !== 'one-shot' && continuablePrereqs && canRosterDispatch(teams, input.parent)
+    // primitive path rather than being silently upgraded to a teammate. A role listed in
+    // `teammate.primitiveRoles` ALSO keeps it, because a teammate cannot carry provider/model/effort (see
+    // `isTeammatePrimitiveRole`). Everything else is rostered.
+    const primitiveSurfaceRole = this.isTeammatePrimitiveRole(input.role)
+    const rosterEligible = input.mode !== 'one-shot' && !primitiveSurfaceRole && continuablePrereqs && canRosterDispatch(teams, input.parent)
     const teammateName = rosterEligible ? teammateNameFor(input.runId, input.delegationId, input.role) : ''
     const runDir = input.root === '' ? '' : join(input.root, '.recursive', 'run', input.runId)
     let briefPath = ''
@@ -997,6 +1023,14 @@ export class RecursiveRuntime extends Service {
     // T9: notes about routing decisions that could NOT be applied, so a caller is told rather
     // than left to infer it from a model that silently did not take effect.
     const routingNotes: string[] = []
+    // ⚠ AND SAY WHICH SURFACE, so no reader has to infer it. A role held back from the roster is a deliberate
+    // choice with a visible reason; the model it then runs on is reported by the model-routing note below.
+    if (primitiveSurfaceRole && input.mode !== 'one-shot') {
+      routingNotes.push(
+        'dispatched on the primitive continuable path (surface: primitive): role "' + input.role
+        + '" is listed in teammate.primitiveRoles, so its own provider/model/effort apply instead of the Lead\'s',
+      )
+    }
     const request: SubagentStartRequestLike = {
       prompt: [{ type: 'text', text: prompt }],
       label: input.delegationId + '/' + input.childId,
@@ -1240,20 +1274,12 @@ export class RecursiveRuntime extends Service {
           // ⚠ WHAT DOES NOT TRAVEL THROUGH THE ROSTER, SAID RATHER THAN LEFT TO BE DISCOVERED. A teammate IS a real
           // continuable child, but `SpawnTeammateRequest` carries only name, description, prompt, context, provider
           // and signal (`agent-team/src/types.ts`) — no toolFilter, no maxDepth, no agentOptions. So a roster child
-          // runs with the composition's default toolset and model: the reviewer's read-only filter and the routed
-          // model are NOT applied to it. Both are reported, so no reader infers either from the record.
-          if (input.toolFilter !== undefined || decision.tier === 'native') {
-            routingNotes.push(
-              'this child is the rostered teammate "' + rosterChild.name + '": the delegation toolFilter was NOT '
-              + 'applied, because SpawnTeammateRequest has no such field — the composition\'s default tools apply',
-            )
-          }
-          if (request.agentOptions !== undefined) {
-            routingNotes.push(
-              'model ' + String(request.agentOptions.model) + ' was NOT applied to teammate "' + rosterChild.name
-              + '": SpawnTeammateRequest carries no agentOptions, so the composition\'s model applies',
-            )
-          }
+          // runs with the composition's default toolset and the LEAD's model/effort: the reviewer's read-only filter
+          // and the routed model are NOT applied to it. Both are reported, so no reader infers either from the record.
+          routingNotes.push(
+            'dispatched as rostered teammate "' + rosterChild.name + '" (surface: team): provider/model/effort '
+            + 'inherit from the Lead, because SpawnTeammateRequest carries no agentOptions',
+          )
         }
       } else {
         rosterFailure = prepared.message

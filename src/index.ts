@@ -338,7 +338,10 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
     // `subagents` path unchanged. Resolved twice (here and in the `ctx.inject` row below) for the measured reason
     // FIX 1 records: the agent-team row can be mounted by a LATER loader layer than this plugin.
     const teamsSeamForRuntime = ctx.get('agentTeams') as TeammateRosterLike | undefined
-    const recursive = new RecursiveRuntime(ctx, { repoRoot: config?.repoRoot ?? process.cwd(), workspaceRegistry, goals, jobs, subagents: subagentsSeamForRuntime ?? null, teams: teamsSeamForRuntime ?? null, workflow: ctx.get('workflow') as WorkflowEngineLike | undefined ?? null })
+    // ⚠ `teammate.primitiveRoles` rides into the runtime because the dispatch DECISION is made per delegation
+    // (`runtime.ts` `isTeammatePrimitiveRole`), and a roster child cannot carry its own agentOptions — see the
+    // config field's comment for the measurement behind that.
+    const recursive = new RecursiveRuntime(ctx, { repoRoot: config?.repoRoot ?? process.cwd(), workspaceRegistry, goals, jobs, subagents: subagentsSeamForRuntime ?? null, teams: teamsSeamForRuntime ?? null, workflow: ctx.get('workflow') as WorkflowEngineLike | undefined ?? null, teammatePrimitiveRoles: config?.teammate?.primitiveRoles ?? [] })
     // ⚠ FU-9 — AND RESOLVE IT AGAIN WHENEVER THE SERVICE APPEARS, because the one-shot get above is only a
     // fast path. A live run proved the cost of relying on it: the review fell back to self-audit and reported
     // `Status: failed` while a child DIRECTORY sat there — written by this plugin's own brief writer, before

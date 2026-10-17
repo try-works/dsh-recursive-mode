@@ -76,6 +76,8 @@ export interface RecursiveModeConfig {
   serverSurface?: boolean
   /** R4 shell split: expose ONLY the client bundle, registering nothing server-side. */
   shellOnly?: boolean
+  /** Roles that keep the primitive dispatch surface so their own provider/model/effort apply. */
+  teammate?: { primitiveRoles?: string[] }
   repoRoot?: string
   /** T7/T28: the enforcement modes and the budgets, editable live. */
   enforcement?: RecursiveModeEnforcement
@@ -130,6 +132,26 @@ export const Config = z.object({
   shellOnly: z.boolean().default(false).description(
     'Client-shell only: registers nothing on the server (no tools, no command, no projection).',
   ),
+  /**
+   * ⚠ PER-ROLE DISPATCH SURFACE — the answer to "a teammate cannot carry its own model".
+   *
+   * A rostered child gets a name, a durable mailbox and task ownership, but `SpawnTeammateRequest` has no
+   * `agentOptions` field, so it ALWAYS inherits the Lead's provider/model/effort. Registering a provider with
+   * `agentRouteDefaults` does not help either: that value is read only by the model-facing `tool-subagent`
+   * tool (`tool-subagent/src/index.ts:369`), never by `startContinuable`, and a provider's only participation
+   * in a continuable child is `prepareContinuable`. So a role that must run on its own model keeps the
+   * PRIMITIVE path, where this plugin passes `agentOptions` itself.
+   *
+   * Empty by default — team everywhere; list a role here only when its own route matters more than the roster.
+   * Whichever surface a child gets, the routing notes state it, so the run's record never implies a model it
+   * did not use.
+   */
+  teammate: z.object({
+    primitiveRoles: z.array(z.string()).default([]).description(
+      'Roles that keep the primitive dispatch path so their own provider/model/effort apply (a rostered '
+      + 'teammate cannot carry agentOptions and therefore inherits the Lead\'s route). Empty means team everywhere.',
+    ),
+  }).description('Teammate dispatch surface: which roles stay off the agent-team roster, and why.'),
   repoRoot: z.string().description(
     'Control-plane root. Defaults to the process working directory when unset.',
   ),

@@ -152,7 +152,7 @@ interface Mounted {
   dispose: () => Promise<void>
 }
 
-async function mount(): Promise<Mounted> {
+async function mount(options: { teammatePrimitiveRoles?: string[] } = {}): Promise<Mounted> {
   const root = mkdtempSync(join(tmpdir(), 'rm-team-'))
   const cfg = join(root, '.recursive', 'config')
   mkdirSync(cfg, { recursive: true })
@@ -161,7 +161,10 @@ async function mount(): Promise<Mounted> {
   mkdirSync(runDir, { recursive: true })
   writeFileSync(join(runDir, ARTIFACT), '# AS-IS\n\nStatus: `DRAFT`\n\n## TODO\n\n- [x] done\n', 'utf8')
   const ctx = new Context()
-  await ctx.plugin(RecursiveRuntime, { repoRoot: root })
+  await ctx.plugin(RecursiveRuntime, {
+    repoRoot: root,
+    ...(options.teammatePrimitiveRoles === undefined ? {} : { teammatePrimitiveRoles: options.teammatePrimitiveRoles }),
+  })
   const runtime = ctx.recursive
   return {
     root,
@@ -624,5 +627,64 @@ describe('the deterministic teammate name', () => {
     expect(name.length).toBeLessThanOrEqual(64)
     expect(name).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
     expect(name).toBe(teammateNameFor('r'.repeat(200), 'D'.repeat(120) + ' / weird id', 'Reviewer With Spaces'))
+  })
+})
+
+/**
+ * ⚠ PER-ROLE DISPATCH SURFACE (owner decision, option 2).
+ *
+ * A rostered teammate cannot carry `agentOptions`, so it ALWAYS inherits the Lead's provider/model/effort — and no
+ * provider registration can change that (`agentRouteDefaults` is consumed only by the `tool-subagent` TOOL, never by
+ * `startContinuable`; a provider's only participation in a continuable child is `prepareContinuable`). A role that
+ * must run on its own model therefore keeps the PRIMITIVE path. These two tests pin both halves: the pinned role does
+ * NOT spawn a teammate, and whichever surface is used, the routing notes SAY which one it was.
+ */
+describe('teammate.primitiveRoles — the per-role dispatch surface', () => {
+  let m: Mounted
+  beforeEach(async () => { m = await mount() })
+  afterEach(async () => { await m.dispose() })
+
+  it('a role listed in primitiveRoles keeps the PRIMITIVE path, applies its own route, and spawns NO teammate', async () => {
+    const pinned = await mount({ teammatePrimitiveRoles: [ROLE] })
+    try {
+      const team = fakeRoster()
+      const primitive = fakePrimitive()
+      pinned.runtime.attachTeams(team.service)
+      settle(pinned.runDir, RESERVED, 'APPROVE')
+
+      const result = await pinned.runtime.delegateReview(reviewInput(pinned, {
+        subagents: primitive.seam,
+        parent: team.lead as unknown as SubagentParentHandle,
+      }))
+
+      // (a) the roster was NOT used to create the child — this is the whole point of the config.
+      expect(team.calls.filter((call) => call.op === 'spawn'), 'no teammate is spawned for a pinned role').toHaveLength(0)
+      // (b) the primitive path created it, so `agentOptions` (provider/model/effort) apply as before.
+      expect(primitive.calls.filter((call) => call.startsWith('startContinuable'))).toHaveLength(1)
+      // (c) and the record SAYS which surface it used and why, so no reader infers a model that did not apply.
+      const payload = JSON.stringify(result)
+      expect(payload).toContain('surface: primitive')
+      expect(payload).toContain('teammate.primitiveRoles')
+    } finally {
+      await pinned.dispose()
+    }
+  })
+
+  it('a role NOT listed takes the roster, and its note says the route is INHERITED from the Lead', async () => {
+    const team = fakeRoster()
+    m.runtime.attachTeams(team.service)
+    const primitive = fakePrimitive()
+    settle(m.runDir, MEMBER, 'APPROVE')
+
+    const result = await m.runtime.delegateReview(reviewInput(m, {
+      subagents: primitive.seam,
+      parent: team.lead as unknown as SubagentParentHandle,
+    }))
+
+    expect(team.calls.filter((call) => call.op === 'spawn')).toHaveLength(1)
+    const payload = JSON.stringify(result)
+    expect(payload, 'the surface is stated, not implied').toContain('surface: team')
+    expect(payload, 'and so is what it inherits').toContain('inherit from the Lead')
+    expect(payload).not.toContain('surface: primitive')
   })
 })

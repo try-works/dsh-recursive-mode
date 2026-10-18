@@ -1180,6 +1180,34 @@ dl.rec-settings-rows {
   gap: 14px;
 }
 
+/* The conversation-view tab: the gates section sits ABOVE the board, and display:contents keeps this
+   wrapper out of the seat's layout so the board still fills the view exactly as it did before. */
+.rec-view {
+  display: contents;
+}
+
+.rec-view-gates {
+  margin: 8px 10px 0;
+  padding: 10px 12px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+}
+
+.rec-view-gates-summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dsw-alias-label-tertiary);
+  user-select: none;
+}
+
+.rec-view-gates[open] > .rec-view-gates-summary {
+  margin-bottom: 10px;
+}
+
 .rec-gates-section {
   display: flex;
   flex-direction: column;

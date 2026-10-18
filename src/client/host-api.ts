@@ -89,7 +89,12 @@ export async function fetchLiveState(scope: LiveScope, signal?: AbortSignal): Pr
  */
 export async function fetchGates(scope: LiveScope, signal?: AbortSignal): Promise<GatesPayload> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  // ⚠ AN ABORT IS OURS TO EXPLAIN. The timeout below is this client's own decision, and the browser
+  // reports it as the DOMException "signal is aborted without reason" — a sentence that tells a person
+  // nothing and reads like a bug in the settings file they just edited. Tracked separately so the panel
+  // can state what happened and why the route may legitimately be absent.
+  let timedOut = false
+  const timer = setTimeout(() => { timedOut = true; controller.abort() }, FETCH_TIMEOUT_MS)
   const onAbort = (): void => { controller.abort() }
   signal?.addEventListener('abort', onAbort)
   try {
@@ -98,6 +103,20 @@ export async function fetchGates(scope: LiveScope, signal?: AbortSignal): Promis
     // A 4xx/5xx here is still a payload the panel reports; only a non-JSON/network failure throws.
     if (!res.ok && body.problem === undefined) throw new Error('recursive gates: HTTP ' + String(res.status))
     return body
+  } catch (error) {
+    const aborted = timedOut || controller.signal.aborted
+      || (error instanceof Error && error.name === 'AbortError')
+    if (!aborted) throw error
+    return {
+      root: null,
+      effective: null,
+      sources: {},
+      fromConfig: {},
+      fromFile: {},
+      problem: timedOut
+        ? 'the host did not answer within ' + String(Math.round(FETCH_TIMEOUT_MS / 1000)) + 's — this route is served only inside a recursive-mode session'
+        : 'the request was cancelled before the host answered',
+    }
   } finally {
     clearTimeout(timer)
     signal?.removeEventListener('abort', onAbort)
@@ -132,6 +151,11 @@ export async function saveGates(scope: LiveScope, value: unknown, signal?: Abort
     if (isPlainRecord(body) && typeof body.problem === 'string') return { ok: false, problem: body.problem }
     return { ok: false, problem: 'recursive gates: HTTP ' + String(res.status) }
   } catch (error) {
+    // Same rule as the read path: an abort is this client's own timeout, so the panel must say that
+    // rather than echo a DOMException the person cannot act on.
+    if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+      return { ok: false, problem: 'the host did not answer within ' + String(Math.round(FETCH_TIMEOUT_MS / 1000)) + 's, so nothing was written' }
+    }
     return { ok: false, problem: 'recursive gates: ' + (error instanceof Error ? error.message : String(error)) }
   } finally {
     clearTimeout(timer)

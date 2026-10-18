@@ -104,7 +104,19 @@ export function RecursiveView({ useSessions, useWorkspaces }: { useSessions: Sna
       onClose: () => boardState.close(),
     })
   }
-  return createElement(Board, { snapshot, workspacePath: wsPath, variant: 'view', onOpenInspector: (sel) => boardState.openInspector(sel) })
+  // ⚠ THE GATE SETTINGS LIVE HERE, IN THE CONVERSATION VIEW TAB, NOT ONLY IN THE RIGHT SIDEBAR.
+  // The owner asked for the entry point "in the conversation view, next to Trajectory", and this tab is
+  // already that seat. It is a <details> rather than a second tab so the board stays the tab's subject:
+  // the settings are a section you open, not a mode you switch into, and no new state or store is added
+  // (the form owns its own useState).
+  const gatesSection = createElement('details', { className: 'rec-view-gates' },
+    createElement('summary', { className: 'rec-view-gates-summary' }, 'Gate settings'),
+    createElement(RecursiveGatesTab, wsPath === undefined || wsPath === '' ? {} : { cwd: wsPath }),
+  )
+  return createElement('div', { className: 'rec-view' },
+    gatesSection,
+    createElement(Board, { snapshot, workspacePath: wsPath, variant: 'view', onOpenInspector: (sel) => boardState.openInspector(sel) }),
+  )
 }
 
 /**

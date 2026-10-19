@@ -162,3 +162,29 @@ export function renderPhaseTail(
   return '- Current phase: ' + phase.label + ' (' + phase.status + ')\n'
     + '- Next required artifact: ' + next
 }
+
+/**
+ * ⚠ THE INACTIVE CONTRACT — WHAT THE MODEL READS WHEN NO RUN EXISTS.
+ *
+ * MEASURED DEFECT: this section returned `''` whenever the workspace had no run, so a recursive-mode
+ * session carried the preset's tools and NOTHING that said when they may be used. The observed result was
+ * a session titled "Web app stack research and plan" that began scaffolding a run from the first request:
+ * with no rule in the prompt, "the workflow tools are here" reads as "the workflow is the task".
+ *
+ * The owner's requirement, stated exactly: "the user should start the run by asking to create a
+ * spec/requirement or to start or resume a run etc. before then the run is not active". That is a rule the
+ * model must be TOLD, because nothing in the tool schemas expresses it — `recursive_init` accepts a run id
+ * and happily scaffolds one at any moment.
+ *
+ * This text claims only what is true: no run exists, an ordinary request is answered without one, and the
+ * run begins when the person asks for it (or approves the run-start gate).
+ */
+export function renderInactivePolicy(): string {
+  return [
+    'You are in a recursive-mode session. NO RUN IS ACTIVE in this workspace.',
+    '- Do not create a run for an ordinary request. Answer it with the normal tools and leave the run inactive.',
+    '- Start a run only when the person asks for a spec or requirements document, or explicitly asks to start or resume a run.',
+    '- When they do ask, call recursive_init with the run id, then recursive_phase to enter the first phase. The run-start gate asks them to approve arming the run; never answer that gate on their behalf.',
+    '- Asking a clarifying question first is fine. Scaffolding a run before they ask is not.',
+  ].join('\n')
+}

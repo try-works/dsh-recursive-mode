@@ -79,7 +79,19 @@ describe('R5 — recursive:policy renders from filesystem (zero-emission)', () =
     } finally { rmSync(repo, { recursive: true, force: true }) }
   })
 
-  it('policy section renders empty when no run exists in cwd', async () => {
+  /**
+   * ⚠ THIS TEST USED TO ASSERT THE EMPTY STRING, AND THAT EMPTINESS WAS THE DEFECT.
+   *
+   * With no run active the section rendered `''`, so a recursive-mode session carried the workflow tools and
+   * NOTHING that said when they may be used. The observed result was a session titled "Web app stack research
+   * and plan" that began scaffolding a run from the first ordinary request: with no rule in the prompt, "the
+   * workflow tools are here" reads as "the workflow is the task".
+   *
+   * The owner's requirement — the person starts the run by asking for a spec/requirement or to start/resume,
+   * and until then the run is NOT active — is a rule the model must be TOLD. So the inactive session now
+   * carries an explicit contract, and this test requires its load-bearing sentences rather than an absence.
+   */
+  it('an INACTIVE session states that no run is active and that it must not be started unasked', async () => {
     const repo = mkdtempSync(join(tmpdir(), 'r5-pol-norun-'))
     try {
       mkdirSync(join(repo, '.recursive', 'run'), { recursive: true })
@@ -90,7 +102,16 @@ describe('R5 — recursive:policy renders from filesystem (zero-emission)', () =
       const assembly = await ctx.systemPrompt.assemble({ agent: agentLike(repo), scope: {} } as never)
       const section = assembly.sections.find(s => s.name === 'recursive:policy')
       expect(section).toBeDefined()
-      expect(section!.text).toBe('')
+      const text = section!.text
+      // The state, the prohibition, and the ONE thing that licenses a start.
+      expect(text).toContain('NO RUN IS ACTIVE')
+      expect(text).toContain('Do not create a run for an ordinary request')
+      expect(text).toContain('asks for a spec or requirements document')
+      expect(text).toContain('explicitly asks to start or resume a run')
+      // It must not license a unilateral start, and it must not answer the run-start gate for the person.
+      expect(text).toContain('never answer that gate on their behalf')
+      // And an inactive session has no phase contract to claim.
+      expect(text).not.toContain('Current phase')
       await ctx.fiber.dispose()
     } finally { rmSync(repo, { recursive: true, force: true }) }
   })

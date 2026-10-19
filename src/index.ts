@@ -37,7 +37,7 @@ import type { GoalServiceLike } from './goals-projection.ts'
 import type { TeamRuntimeLike } from './teams-loop.ts'
 // ⚠ G2 — the roster seam's structural type, exported so a caller can mount/assert the delegation surface.
 import type { TeammateRosterLike } from './teammate.ts'
-import { renderRecursivePolicy } from './policy.ts'
+import { renderInactivePolicy, renderRecursivePolicy } from './policy.ts'
 import { fsPolicyIntent } from './fs-intent.ts'
 import { snapshotWorkspace } from './snapshot.ts'
 import { mountRecursiveRoutesOnce, makeRecursiveRoutes, type RecursiveRouteHost } from './live-route.ts'
@@ -548,7 +548,11 @@ export function apply(ctx: Context, config?: RecursiveModeConfig) {
           // folding; no recursive/*
           // events are appended.
           const intent = fsPolicyIntent(agent, workspaceRegistry as never)
-          if (!intent) return ''
+          // ⚠ AN INACTIVE SESSION STILL GETS A CONTRACT. Returning '' here left the model with the workflow
+          // tools and no rule about when to use them, and the observed result was a run scaffolded from an
+          // ordinary request. The owner's requirement — the run begins only when the person asks for a
+          // spec/requirements or to start or resume — is a RULE, so it is stated rather than implied.
+          if (!intent) return renderInactivePolicy()
           return renderRecursivePolicy({ worktreeRoot: intent.worktreeRoot, runId: intent.runId, config: recursive.enforcementConfig })
         },
       }))

@@ -23,9 +23,29 @@ describe('preset/recursive — R2 absolute-file-URL server surface (addendum-r4-
     expect(line).toMatch(/^description: '.*'$/)
   })
 
-  it('has an agent.cordis.yml composition with tool-presentation mode both', () => {
+  /**
+   * ⚠ THIS TEST USED TO ASSERT `mode: both` — the exact value that made the preset UNMOUNTABLE.
+   *
+   * DSH 0.2.1-rc.2 narrowed `ToolPresentationMode` to `'native' | 'ptc'`. The preset kept `mode: both`,
+   * `dsh-agent-presets` rejected the whole composition at mount, and the only symptom a person saw was
+   * that "recursive" was missing from the new-session preset picker — while this suite stayed GREEN because
+   * it pinned the retired literal. A test that repeats a constant from the source it guards proves nothing
+   * about that constant's validity.
+   *
+   * So it now asserts the MODE IS ONE THE HOST ACCEPTS, and that it is set explicitly rather than omitted:
+   * an unparseable or absent mode fails, and the next narrowing of the union fails here instead of silently
+   * unlisting the preset.
+   */
+  it('sets tool-presentation to a mode the host accepts (native | ptc)', () => {
     const yml = readFileSync(join(pkgRoot, 'preset', 'recursive', 'agent.cordis.yml'), 'utf8')
-    expect(yml).toContain('mode: both')
+    // The row's config block, ignoring comments: the `mode:` line that follows the tool-presentation row.
+    const rows = yml.split(/\r?\n(?=- id: )/)
+    const row = rows.find(r => r.includes("'@deepseek-ai/dsh-agent-tool-presentation'")) ?? ''
+    expect(row, 'the tool-presentation row must exist').not.toBe('')
+    const modeLine = row.split(/\r?\n/).find(l => /^\s+mode:/.test(l)) ?? ''
+    expect(modeLine, 'the row must set mode explicitly').not.toBe('')
+    const mode = modeLine.split(':')[1]?.trim()
+    expect(['native', 'ptc'], `mode "${String(mode)}" is not one the host accepts`).toContain(mode)
   })
 
   it('isolates the recursive realm (no root-realm leak)', () => {

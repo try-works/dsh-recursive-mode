@@ -1,8 +1,23 @@
-# The `recursive` agent preset: the full coding agent (standard surface), presented
-# with BOTH tool modes (`mode: both`), plus the recursive-mode workflow surface.
-# Everything in `standard` is here unchanged; see the recursive-mode surface rows
-# added before the identity section (tool-presentation both, the isolated
-# recursive-realm, and the recursive:policy prompt section).
+# The `recursive` agent preset: the full coding agent (standard surface) plus the
+# recursive-mode workflow surface. Everything in `standard` is here unchanged; see
+# the recursive-mode surface rows added before the identity section (the
+# tool-presentation row, the isolated recursive-realm, and the recursive:policy
+# prompt section).
+#
+# ⚠ THIS PRESET WAS BROKEN BY DSH 0.2.1-rc.2 AND SILENTLY VANISHED FROM THE PICKER.
+# The `tool-presentation` row below used `mode: both`, and 0.2.1 narrowed
+# `ToolPresentationMode` to 'native' | 'ptc' — 'both' no longer exists. The config
+# failed validation at mount, `dsh-agent-presets` rejected the WHOLE preset, and the
+# only symptom a person saw was that "recursive" was missing from the new-session
+# preset list. The host log held the reason:
+#   ValidationError: invalid config:
+#     - $.mode expected "native" | "ptc" but got "both" (at mode)
+# The mode is now `native`, which is what 'both' effectively meant for tool CALLS:
+# every visible schema is sent to the model, so the recursive_* tools are callable
+# by name. The run_code SDK that 'both' also exposed is a separate presentation mode
+# ('ptc': ONLY run_code plus a generated SDK) and the two are mutually exclusive in
+# this harness — a preset must pick one, so this picks the one whose tools the
+# workflow names.
 #
 # This file is an AGENT-PLANE composition. The roster mounts it ONCE under a
 # standing scope; every session naming it joins by scope parentage, so the
@@ -23,12 +38,13 @@
 
 # ── recursive-mode surface ─────────────────────────────────────────────────
 
-# tool-presentation mode both (decision #12, PROPOSAL §7.4): the model sees
-# native tools AND the run_code SDK.
+# tool-presentation mode native: every visible tool schema reaches the model, so the
+# recursive_* tools are callable by name. `mode: both` was removed in DSH 0.2.1-rc.2
+# and its presence here made this entire preset unmountable (see the header).
 - id: tool-presentation
   name: '@deepseek-ai/dsh-agent-tool-presentation'
   config:
-    mode: both
+    mode: native
 
 # The recursive workflow realm: per-session isolated RecursiveRuntime service +
 # the recursive_* tools + the /recursive command + the policy prompt section.

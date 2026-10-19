@@ -75,12 +75,18 @@
 # ── identity ────────────────────────────────────────────────────────────────
 
 # The preset's own persona, shadowing the deployment default for this agent.
-# `{{model}}` and `{{cwd}}` resolve from the agent's own route and workspace.
+#
+# ⚠ `{{cwd}}` MUST NOT APPEAR HERE. DSH 0.2.1-rc.2 registers only `provider` and `model` as prompt
+# variables unless a plugin explicitly mounts `ctx.systemPrompt.variable('cwd', ...)`; the harness's own
+# spec proves the failure mode (`unknown prompt variable "{{cwd}}" in section "deployment:persona-suffix"`).
+# This row used to end with "Your working directory is {{cwd}}." — which made EVERY TURN of a recursive
+# session fail at prompt assembly, before the model was ever called. The agent is told its workspace by the
+# runtime-context section the same plugin composes, so dropping the sentence loses no information and removes
+# a template variable the host does not provide.
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
     prefix: You are a coding agent powered by the {{model}} model.
-    suffix: Your working directory is {{cwd}}.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'

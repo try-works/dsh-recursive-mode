@@ -48,6 +48,29 @@ describe('preset/recursive — R2 absolute-file-URL server surface (addendum-r4-
     expect(['native', 'ptc'], `mode "${String(mode)}" is not one the host accepts`).toContain(mode)
   })
 
+  /**
+   * ⚠ THE PRESET USED `{{cwd}}` IN ITS PERSONA SUFFIX, AND EVERY TURN OF A RECURSIVE SESSION FAILED:
+   *   unknown prompt variable "{{cwd}}" in section "deployment:persona-suffix"; registered variables: provider, model
+   *
+   * DSH 0.2.1-rc.2 registers only `provider` and `model` unless a plugin explicitly mounts
+   * `ctx.systemPrompt.variable('cwd', ...)` — the harness's own system-prompt spec pins the same error. A
+   * template variable is a DEPENDENCY on a registry this file does not own, so it is checked here rather than
+   * trusted: anything the preset interpolates must be in the host's default set.
+   *
+   * Comments are excluded: prose may quote a variable (this file explains the `{{cwd}}` failure), and only the
+   * rows reach the loader.
+   */
+  it('only interpolates prompt variables the host registers by default', () => {
+    const yml = readFileSync(join(pkgRoot, 'preset', 'recursive', 'agent.cordis.yml'), 'utf8')
+    const nonComment = yml.split(/\r?\n/).filter(line => !line.trimStart().startsWith('#')).join('\n')
+    const used = [...nonComment.matchAll(/\{\{(\w+)\}\}/g)].map(match => match[1])
+    // The host's default set, per packages/core/system-prompt. Adding a name here is a CLAIM that the host
+    // provides it; if it stops, that is a decision to make deliberately, never a test to relax silently.
+    const registered = new Set(['model', 'provider'])
+    const unknown = used.filter(name => !registered.has(name))
+    expect(unknown, 'prompt variables the preset uses but the host does not register').toEqual([])
+  })
+
   it('isolates the recursive realm (no root-realm leak)', () => {
     const yml = readFileSync(join(pkgRoot, 'preset', 'recursive', 'agent.cordis.yml'), 'utf8')
     expect(yml).toContain('isolate:')

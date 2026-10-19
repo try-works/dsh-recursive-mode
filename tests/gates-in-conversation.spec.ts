@@ -68,7 +68,14 @@ function healthyFetch(): void {
           fromFile: {},
         }
       : { root: null, projection: { runs: [], activeRunId: null }, revision: 0 }
-    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) })
+    // The transport reads the body as TEXT and parses it itself (so a non-JSON answer can become a
+    // sentence), so the double must serve text — a `json()`-only double would test a path that no longer runs.
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify(body)),
+      json: () => Promise.resolve(body),
+    })
   })
 }
 
@@ -99,6 +106,58 @@ describe('an aborted gates fetch explains itself', () => {
     const result = await saveGates({}, { gates: {} })
     expect(result.ok).toBe(false)
     expect(JSON.stringify(result)).not.toContain('aborted without reason')
+    expect(result.ok === false ? result.problem : '').toContain('nothing was written')
+  })
+})
+
+/**
+ * ⚠ THE LIVE GUI SHOWED "Unexpected end of JSON input" IN THIS PANEL.
+ *
+ * That is `JSON.parse('')`'s complaint. The route is served only inside a recursive-mode session, so
+ * opening the tab anywhere else got an EMPTY 404 body, and the panel reported a JSON SYNTAX error — sending
+ * a person to look for a malformed settings file that does not exist. A parser's phrase is not an answer:
+ * these tests require the status and the reason, and forbid the parser text outright.
+ */
+describe('a body that is not a gates payload becomes a sentence, never a parser error', () => {
+  function emptyStatusFetch(status: number): void {
+    vi.stubGlobal('fetch', (): Promise<unknown> => Promise.resolve({
+      ok: status >= 200 && status < 300,
+      status,
+      text: () => Promise.resolve(''),
+      json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
+    }))
+  }
+  function htmlFetch(): void {
+    vi.stubGlobal('fetch', (): Promise<unknown> => Promise.resolve({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('<!doctype html><html><body>app shell</body></html>'),
+      json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON at position 0')),
+    }))
+  }
+
+  it('an empty 404 names the status and where the route lives', async () => {
+    emptyStatusFetch(404)
+    const payload = await fetchGates({})
+    expect(JSON.stringify(payload)).not.toContain('Unexpected end of JSON input')
+    expect(payload.problem).toContain('HTTP 404')
+    expect(payload.problem).toContain('recursive-mode session')
+    expect(payload.effective).toBeNull()
+  })
+
+  it('a non-JSON 200 does not claim a JSON syntax problem', async () => {
+    htmlFetch()
+    const payload = await fetchGates({})
+    expect(JSON.stringify(payload)).not.toContain('Unexpected token')
+    expect(payload.problem).toContain('without a gates payload')
+  })
+
+  it('an empty 404 on save says nothing was written, and does not echo the parser', async () => {
+    emptyStatusFetch(404)
+    const result = await saveGates({}, { gates: {} })
+    expect(result.ok).toBe(false)
+    expect(JSON.stringify(result)).not.toContain('Unexpected end of JSON input')
+    expect(result.ok === false ? result.problem : '').toContain('HTTP 404')
     expect(result.ok === false ? result.problem : '').toContain('nothing was written')
   })
 })

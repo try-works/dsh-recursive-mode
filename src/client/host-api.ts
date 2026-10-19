@@ -99,9 +99,29 @@ export async function fetchGates(scope: LiveScope, signal?: AbortSignal): Promis
   signal?.addEventListener('abort', onAbort)
   try {
     const res = await fetch(RECURSIVE_API_PREFIX + '/gates' + scopeQuery(scope), { signal: controller.signal, cache: 'no-store' })
-    const body = (await res.json()) as GatesPayload
-    // A 4xx/5xx here is still a payload the panel reports; only a non-JSON/network failure throws.
-    if (!res.ok && body.problem === undefined) throw new Error('recursive gates: HTTP ' + String(res.status))
+    // ⚠ THE BODY IS READ AS TEXT AND PARSED BY US. `res.json()` on an empty body throws
+    // "Unexpected end of JSON input", and that is a PARSER's phrase, not an answer: a 404 from a host
+    // that does not serve this route has no body at all, so the person editing settings saw a message
+    // about JSON syntax when the truth was "this route does not exist here". Reading text first lets a
+    // non-JSON answer become a sentence naming the status and the reason.
+    const text = await res.text()
+    const body = parseGatesPayload(text)
+    if (body === undefined) {
+      return {
+        root: null,
+        effective: null,
+        sources: {},
+        fromConfig: {},
+        fromFile: {},
+        problem: res.ok
+          ? 'the host answered without a gates payload — this route is served only inside a recursive-mode session'
+          : 'the host answered HTTP ' + String(res.status) + ' — this route is served only inside a recursive-mode session',
+      }
+    }
+    // A 4xx/5xx WITH a JSON problem is still a payload the panel reports verbatim.
+    if (!res.ok && body.problem === undefined) {
+      return { ...body, problem: 'recursive gates: HTTP ' + String(res.status) }
+    }
     return body
   } catch (error) {
     const aborted = timedOut || controller.signal.aborted
@@ -145,7 +165,14 @@ export async function saveGates(scope: LiveScope, value: unknown, signal?: Abort
     try {
       body = await res.json()
     } catch {
-      // Fall through to the plain HTTP message below.
+      // A 404 from a host that does not serve this route has NO body, and a JSON parser's complaint
+      // ("Unexpected end of JSON input") is not an answer about the save. Name the status instead.
+      return {
+        ok: false,
+        problem: res.ok
+          ? 'the host answered without a body, so nothing was written'
+          : 'the host answered HTTP ' + String(res.status) + ' — this route is served only inside a recursive-mode session, so nothing was written',
+      }
     }
     if (res.ok) return { ok: true, ...(isPlainRecord(body) && typeof body.path === 'string' ? { path: body.path } : {}) }
     if (isPlainRecord(body) && typeof body.problem === 'string') return { ok: false, problem: body.problem }
@@ -165,6 +192,23 @@ export async function saveGates(scope: LiveScope, value: unknown, signal?: Abort
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object'
+}
+
+/**
+ * Decode a `GET /gates` body, or `undefined` when the body is not a JSON object at all.
+ *
+ * An absent route answers with an EMPTY body, and `JSON.parse('')` throws "Unexpected end of JSON
+ * input" — a parser's phrase that says nothing about the route. Callers turn `undefined` into a sentence
+ * naming the HTTP status and where the route actually lives.
+ */
+function parseGatesPayload(text: string): GatesPayload | undefined {
+  if (text.trim() === '') return undefined
+  try {
+    const parsed: unknown = JSON.parse(text)
+    return isPlainRecord(parsed) ? (parsed as unknown as GatesPayload) : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** One doc fetch request: the host-known workspace root + run id + phase doc file. */
